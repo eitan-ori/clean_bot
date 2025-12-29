@@ -1,0 +1,48 @@
+# ROS 2 Build Artifacts
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ROS bags
+*.bag
+*.db3
+
+# Colcon
+.colcon_lock
+
+# Generated files
+*.log
+*.pyc
+
+# Gazebo
+*.world.bak
+
+# Maps (uncomment if you want to track maps)
+# *.pgm
+# *.yaml
+
+# Ignore external packages (add your own)
+# sllidar_ros2/
+# jsk_visualization/
