@@ -29,8 +29,8 @@ def generate_launch_description():
                 )]), launch_arguments={'use_sim_time': 'true'}.items()
     )
 
-    # World file
-    world_file = os.path.join(get_package_share_directory('clean_bot_gazebo'), 'worlds', 'room.world')
+    # World file - apartment with multiple rooms
+    world_file = os.path.join(get_package_share_directory('clean_bot_gazebo'), 'worlds', 'apartment.world')
 
     # Include the Gazebo launch file, provided by the gazebo_ros package
     gazebo = IncludeLaunchDescription(
@@ -40,9 +40,13 @@ def generate_launch_description():
              )
 
     # Run the spawner node from the gazebo_ros package. The entity name doesn't really matter if you only have one robot.
+    # Spawn robot in the living room area of the apartment (center of open space)
     spawn_entity = Node(package='gazebo_ros', executable='spawn_entity.py',
                         arguments=['-topic', 'robot_description',
-                                   '-entity', 'my_bot'],
+                                   '-entity', 'my_bot',
+                                   '-x', '3.0',
+                                   '-y', '5.5',
+                                   '-z', '0.05'],
                         output='screen')
 
 
