@@ -1,0 +1,22 @@
+# RPLidar A1M8 V6 Configuration
+
+rplidar_node:
+  ros__parameters:
+    # Serial port - check with: ls /dev/ttyUSB*
+    serial_port: "/dev/ttyUSB0"
+    
+    # Baud rate for A1M8
+    serial_baudrate: 115200
+    
+    # Frame ID for TF
+    frame_id: "laser_frame"
+    
+    # Invert scan direction
+    inverted: false
+    
+    # Angle compensation for better accuracy
+    angle_compensate: true
+    
+    # Scan mode: "Standard" for A1
+    # Other modes: "Express", "Boost", "Sensitivity", "Stability"
+    scan_mode: "Standard"

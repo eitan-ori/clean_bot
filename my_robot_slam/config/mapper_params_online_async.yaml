@@ -1,0 +1,32 @@
+slam_toolbox:
+  ros__parameters:
+
+    # Plugin params
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # ROS Parameters
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_link  # וודא שזה השם של גוף הרובוט שלך
+    scan_topic: /scan      # הטופיק של הלידר (RPLidar בד"כ מפרסם פה)
+    mode: mapping          # מצב מיפוי (ולא לוקליזציה בלבד)
+
+    # האם אנחנו בסימולציה? (חשוב מאוד לשים false ברובוט אמיתי!)
+    use_sim_time: false
+
+    # דיוק ורזולוציה
+    map_resolution: 0.05   # רזולוציה של 5 ס"מ לפיקסל
+    map_publish_period: 5.0 # כל כמה זמן לעדכן את המפה ל-Rviz
+
+    # הגדרות לייזר (מותאם ל-RPLidar A1)
+    max_laser_range: 12.0 # הטווח המקסימלי של הליידר שלך
+    minimum_time_interval: 0.5
+    transform_timeout: 0.2
+    tf_buffer_duration: 30.
+    stack_size_to_use: 40000000
+    enable_interactive_mode: true
