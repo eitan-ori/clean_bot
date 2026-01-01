@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """
-Combined launch file for all Clean Bot sensors:
+Combined launch file for all Clean Bot sensors AND Robot State Publisher:
 - SLAMTEC Lidar (sllidar_ros2)
 - Grove IMU 9DOF (ICM20600 + AK09918)
 - IMU Madgwick Filter (optional)
+- Robot State Publisher (URDF)
 """
 
+import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
-from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration, Command
 from launch_ros.actions import Node
-from launch_ros.substitutions import FindPackageShare
+from ament_index_python.packages import get_package_share_directory
 
 
 def generate_launch_description():
@@ -32,6 +33,11 @@ def generate_launch_description():
     use_madgwick = LaunchConfiguration('use_madgwick', default='true')
     use_mag = LaunchConfiguration('use_mag', default='true')
     
+    # ==================== Robot Description ====================
+    pkg_description = get_package_share_directory('clean_bot_description')
+    xacro_file = os.path.join(pkg_description, 'urdf', 'robot.urdf.xacro')
+    robot_description_config = Command(['xacro ', xacro_file])
+
     return LaunchDescription([
         # ==================== Declare Arguments ====================
         
@@ -73,6 +79,23 @@ def generate_launch_description():
             default_value='true',
             description='Whether to use magnetometer for yaw correction'),
         
+        # ==================== Robot State Publisher ====================
+        Node(
+            package='robot_state_publisher',
+            executable='robot_state_publisher',
+            name='robot_state_publisher',
+            output='screen',
+            parameters=[{'robot_description': robot_description_config}]
+        ),
+
+        # ==================== Joint State Publisher ====================
+        Node(
+            package='joint_state_publisher',
+            executable='joint_state_publisher',
+            name='joint_state_publisher',
+            output='screen'
+        ),
+
         # ==================== Lidar Node ====================
         Node(
             package='sllidar_ros2',
