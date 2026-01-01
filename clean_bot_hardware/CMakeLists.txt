@@ -20,6 +20,12 @@ install(PROGRAMS
   RENAME rplidar_test
 )
 
+install(PROGRAMS
+  clean_bot_hardware/imu_publisher_node.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME imu_publisher
+)
+
 # Install launch files
 install(DIRECTORY launch/
   DESTINATION share/${PROJECT_NAME}/launch
