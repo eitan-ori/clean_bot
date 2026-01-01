@@ -26,6 +26,12 @@ install(PROGRAMS
   RENAME imu_publisher
 )
 
+install(PROGRAMS
+  clean_bot_hardware/imu_odom_broadcaster.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME imu_odom_broadcaster
+)
+
 # Install launch files
 install(DIRECTORY launch/
   DESTINATION share/${PROJECT_NAME}/launch

@@ -111,14 +111,28 @@ def generate_launch_description():
             condition=IfCondition(use_madgwick),
             parameters=[{
                 'use_mag': use_mag,
-                'publish_tf': True,  # Enable TF publishing
-                'world_frame': 'odom', # Publish odom -> base_link
-                'fixed_frame': 'base_link', # The frame being tracked
+                'publish_tf': False,  # Disable TF, we use our own broadcaster
+                'world_frame': 'enu',
+                'fixed_frame': imu_frame_id,
             }],
             remappings=[
                 ('/imu/data_raw', '/imu/data_raw'),
                 ('/imu/mag', '/imu/mag'),
             ],
+            output='screen'
+        ),
+        
+        # ==================== IMU Odom Broadcaster ====================
+        Node(
+            package='clean_bot_hardware',
+            executable='imu_odom_broadcaster',
+            name='imu_odom_broadcaster',
+            condition=IfCondition(use_madgwick),
+            parameters=[{
+                'imu_topic': '/imu/data',
+                'parent_frame': 'odom',
+                'child_frame': 'base_link',
+            }],
             output='screen'
         ),
     ])
