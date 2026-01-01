@@ -7,21 +7,14 @@ MY_DOMAIN_ID=42
 # שימוש ב-CycloneDDS לפתרון בעיות רשת
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 export ROS_DOMAIN_ID=$MY_DOMAIN_ID
+# --- הוספה: נתיב לקובץ ההגדרות במחשב המקומי ---
+export CYCLONEDDS_URI=file:///root/cyclonedds.xml
 
 # הפקודה המלאה לפיי: מגדירים את ה-RMW וה-ID לפני הרצת ה-Node
-PI_LIDAR_CMD="export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp && export ROS_DOMAIN_ID=$MY_DOMAIN_ID && source /opt/ros/humble/setup.bash && source ~/robot_ws/install/setup.bash && ros2 run rplidar_ros rplidar_node --ros-args -p serial_port:=/dev/ttyUSB0 -p serial_baudrate:=115200 -p frame_id:=laser_frame"
+# --- שינוי: הוספת CYCLONEDDS_URI גם בפאי ---
+PI_LIDAR_CMD="export CYCLONEDDS_URI=file:///home/pi_moobot/cyclonedds.xml && export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp && export ROS_DOMAIN_ID=$MY_DOMAIN_ID && source /opt/ros/humble/setup.bash && source ~/robot_ws/install/setup.bash && ros2 run rplidar_ros rplidar_node --ros-args -p serial_port:=/dev/ttyUSB0 -p serial_baudrate:=115200 -p frame_id:=laser_frame"
 
 echo "🚀 Starting RPLidar system..."
-echo "ℹ️  Config: DomainID=$ROS_DOMAIN_ID, RMW=$RMW_IMPLEMENTATION"
-
-# בדיקת קישוריות בסיסית
-if ! ping -c 1 -W 2 $PI_HOST > /dev/null 2>&1; then
-    echo "❌ Cannot reach Raspberry Pi at $PI_HOST"
-    exit 1
-fi
-
-# הרצת הלידאר ב-SSH
-echo "🔴 Starting LiDAR driver on Pi..."
 # אנחנו משתמשים ב-bash -c כדי להבטיח שכל משתני הסביבה נתפסים
 ssh $PI_USER@$PI_HOST "bash -c '$PI_LIDAR_CMD'" &
 SSH_PID=$!
