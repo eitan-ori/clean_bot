@@ -111,9 +111,9 @@ def generate_launch_description():
             condition=IfCondition(use_madgwick),
             parameters=[{
                 'use_mag': use_mag,
-                'publish_tf': False,
-                'world_frame': 'enu',
-                'fixed_frame': imu_frame_id,
+                'publish_tf': True,  # Enable TF publishing
+                'world_frame': 'odom', # Publish odom -> base_link
+                'fixed_frame': 'base_link', # The frame being tracked
             }],
             remappings=[
                 ('/imu/data_raw', '/imu/data_raw'),
