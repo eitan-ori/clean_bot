@@ -25,13 +25,15 @@ def generate_launch_description():
         launch_arguments={'publish_odom': 'false'}.items()
     )
 
-    # 2. Launch Robot State Publisher (Already included in sensors.launch.py)
-    # rsp_launch = IncludeLaunchDescription(
-    #     PythonLaunchDescriptionSource(
-    #         os.path.join(description_pkg, 'launch', 'rsp.launch.py')
-    #     ),
-    #     launch_arguments={'use_sim_time': use_sim_time}.items()
-    # )
+    # 2. Launch Robot State Publisher
+    # rsp_launch is defined above...
+
+    # 2.1 Joint State Publisher (Fixes RViz wheel errors)
+    joint_state_publisher_node = Node(
+        package='joint_state_publisher',
+        executable='joint_state_publisher',
+        name='joint_state_publisher',
+    )
 
     # 3. Launch SLAM Toolbox
     slam_params_file = os.path.join(hardware_pkg, 'config', 'mapper_params_online_async.yaml')
@@ -82,6 +84,7 @@ def generate_launch_description():
         
         sensors_launch,
         # rsp_launch,
+        joint_state_publisher_node,
         rf2o_node,
         start_async_slam_toolbox_node,
         # rviz_node
