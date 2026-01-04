@@ -5,17 +5,24 @@ import time
 
 def check_port(port, baudrate):
     try:
-        ser = serial.Serial(port, baudrate, timeout=1)
+        ser = serial.Serial(port, baudrate, timeout=1, write_timeout=1)
         print(f"Checking {port} at {baudrate}...", end='', flush=True)
         
         # Reset buffer
         ser.reset_input_buffer()
         
+        # Try to send GET_HEALTH command (0xA5 0x50) to wake it up
+        try:
+            ser.write(b'\xA5\x50')
+            ser.flush()
+        except:
+            pass
+            
         # Try to read some bytes
         data = ser.read(100)
         ser.close()
         
-        if len(data) > 10:
+        if len(data) > 0:
             print(f" SUCCESS! Received {len(data)} bytes.")
             print(f"Hex dump: {data[:20].hex()}")
             return True
