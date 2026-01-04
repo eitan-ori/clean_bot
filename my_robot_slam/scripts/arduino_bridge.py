@@ -1,192 +1,137 @@
-#!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist, TransformStamped, Quaternion
-from nav_msgs.msg import Odometry
+from geometry_msgs.msg import Twist
+from std_msgs.msg import Int32
 from sensor_msgs.msg import Range
-from tf2_ros import TransformBroadcaster
 import serial
-import math
-
+import time
 
 class ArduinoBridge(Node):
     def __init__(self):
         super().__init__('arduino_bridge')
 
-        # Parameters
-        self.declare_parameter('serial_port', '/dev/ttyUSB0')
-        self.declare_parameter('baud_rate', 57600)
-        self.declare_parameter('wheel_radius', 0.05)  # meters (10cm diameter)
-        self.declare_parameter('wheel_base', 0.21)    # meters (21cm track width)
-        self.declare_parameter('ticks_per_rev', 3000)  # encoder ticks per revolution
-
-        self.port = self.get_parameter('serial_port').value
-        self.baud = self.get_parameter('baud_rate').value
-        self.wheel_radius = self.get_parameter('wheel_radius').value
-        self.wheel_base = self.get_parameter('wheel_base').value
-        self.ticks_per_rev = self.get_parameter('ticks_per_rev').value
-
-        # Serial Connection
+        # --- הגדרות חיבור ---
+        # שים לב: בדוק בטרמינל איזה פורט הארדואינו קיבל (לרוב /dev/ttyUSB0 או /dev/ttyACM0)
+        self.serial_port = '/dev/ttyUSB0' 
+        self.baud_rate = 57600
+        
+        # אתחול חיבור Serial
         try:
-            self.ser = serial.Serial(self.port, self.baud, timeout=1)
-            self.get_logger().info(f'Connected to Arduino on {self.port}')
+            self.ser = serial.Serial(self.serial_port, self.baud_rate, timeout=0.1)
+            self.get_logger().info(f'Connected to Arduino on {self.serial_port}')
         except serial.SerialException as e:
             self.get_logger().error(f'Failed to connect to Arduino: {e}')
-            self.ser = None
+            exit(1)
 
-        # Publishers & Subscribers
-        self.odom_pub = self.create_publisher(Odometry, 'odom', 10)
-        self.range_pub = self.create_publisher(Range, 'ultrasonic', 10)
-        self.tf_broadcaster = TransformBroadcaster(self)
-        self.create_subscription(Twist, 'cmd_vel', self.cmd_vel_callback, 10)
+        # --- Publishers (שולחים מידע מהארדואינו ל-ROS) ---
+        # מפרסמים את הטיקים של האנקודרים
+        self.left_tick_pub = self.create_publisher(Int32, 'left_ticks', 10)
+        self.right_tick_pub = self.create_publisher(Int32, 'right_ticks', 10)
+        
+        # מפרסמים את המרחק מהאולטרסוניק כהודעת Range תקנית
+        self.range_pub = self.create_publisher(Range, 'ultrasonic_range', 10)
 
-        # Odometry State
-        self.x = 0.0
-        self.y = 0.0
-        self.th = 0.0
-        self.last_time = self.get_clock().now()
+        # --- Subscribers (מקבלים פקודות מ-ROS לארדואינו) ---
+        # מאזינים לפקודות תנועה (למשל מ-Teleop או Nav2)
+        self.subscription = self.create_subscription(
+            Twist,
+            'cmd_vel',
+            self.cmd_vel_callback,
+            10)
 
-        self.left_ticks_prev = 0
-        self.right_ticks_prev = 0
-        self.first_run = True
-
-        # Timer for reading serial
-        self.create_timer(0.05, self.update_odometry)  # 20Hz
+        # --- Timer (לולאת קריאה) ---
+        # נבדוק אם הגיע מידע מהארדואינו כל 50 מילי-שניות
+        self.timer = self.create_timer(0.05, self.read_from_arduino)
+        
+        # פרמטרים פיזיים של הרובוט (לחישוב PWM בסיסי)
+        self.wheel_separation = 0.20  # המרחק בין הגלגלים במטרים (נא למדוד!)
+        self.wheel_radius = 0.03      # רדיוס הגלגל במטרים
 
     def cmd_vel_callback(self, msg):
-        if not self.ser:
-            return
-
-        # Differential Drive Kinematics
+        """
+        פונקציה זו נקראת בכל פעם שמגיעה פקודת תנועה (Twist).
+        היא ממירה מהירות ליניארית וזוויתית למהירות גלגלים (PWM).
+        """
         linear = msg.linear.x
         angular = msg.angular.z
+        
+        # חישוב קינמטיקה דיפרנציאלית (Unicycle Model)
+        # מהירות מבוקשת לכל גלגל במטר לשנייה
+        left_speed_m_s = linear - (angular * self.wheel_separation / 2.0)
+        right_speed_m_s = linear + (angular * self.wheel_separation / 2.0)
+        
+        # המרה ל-PWM (בין -255 ל 255)
+        # הערה: זהו מיפוי פשוט (Open Loop). בהמשך עדיף לממש PID בארדואינו ולשלוח לו m/s ישירות.
+        pwm_left = self.map_speed_to_pwm(left_speed_m_s)
+        pwm_right = self.map_speed_to_pwm(right_speed_m_s)
+        
+        # שליחת הפקודה לארדואינו: "L,R\n"
+        command = f"{pwm_left},{pwm_right}\n"
+        self.ser.write(command.encode('utf-8'))
+        # self.get_logger().info(f'Sent to Arduino: {command.strip()}')
 
-        # Calculate wheel velocities (m/s)
-        v_left = linear - (angular * self.wheel_base / 2.0)
-        v_right = linear + (angular * self.wheel_base / 2.0)
+    def map_speed_to_pwm(self, speed_m_s):
+        """
+        פונקציית עזר להמרת מטר/שנייה לערך PWM.
+        דורש כיול! כרגע זה ניחוש לינארי.
+        """
+        if speed_m_s == 0:
+            return 0
+            
+        # נניח שהרובוט מגיע למהירות מקסימלית של 0.5 מטר/שנייה ב-PWM 255
+        max_speed = 0.5 
+        pwm = int((speed_m_s / max_speed) * 255)
+        
+        # הגבלת הערכים לטווח המותר
+        return max(min(pwm, 255), -255)
 
-        # Convert to PWM or internal units (Simple protocol: "L,R\n")
-        # Here we send raw velocity, Arduino should handle PID
-        cmd_str = f"{v_left:.3f},{v_right:.3f}\n"
-        self.ser.write(cmd_str.encode('utf-8'))
-
-    def update_odometry(self):
-        if not self.ser or not self.ser.in_waiting:
-            return
-
-        try:
-            line = self.ser.readline().decode('utf-8').strip()
-            # Protocol: "left_ticks,right_ticks,distance_cm"
-            parts = line.split(',')
-            if len(parts) != 3:
-                return
-
-            left_ticks = int(parts[0])
-            right_ticks = int(parts[1])
-            distance_cm = float(parts[2])
-
-            if self.first_run:
-                self.left_ticks_prev = left_ticks
-                self.right_ticks_prev = right_ticks
-                self.first_run = False
-                return
-
-            # Calculate delta ticks
-            d_left_ticks = left_ticks - self.left_ticks_prev
-            d_right_ticks = right_ticks - self.right_ticks_prev
-
-            self.left_ticks_prev = left_ticks
-            self.right_ticks_prev = right_ticks
-
-            # Calculate distance per wheel
-            d_left = (d_left_ticks / self.ticks_per_rev) * (2 * math.pi * self.wheel_radius)
-            d_right = (d_right_ticks / self.ticks_per_rev) * (2 * math.pi * self.wheel_radius)
-
-            # Calculate robot movement
-            d_center = (d_left + d_right) / 2.0
-            d_theta = (d_right - d_left) / self.wheel_base
-
-            # Update pose
-            self.x += d_center * math.cos(self.th)
-            self.y += d_center * math.sin(self.th)
-            self.th += d_theta
-
-            # Publish Odom & TF
-            self.publish_odom()
-
-            # Publish Ultrasonic
-            self.publish_ultrasonic(distance_cm)
-
-        except ValueError:
-            pass
-        except Exception as e:
-            self.get_logger().warn(f'Serial read error: {e}')
-
-    def publish_odom(self):
-        current_time = self.get_clock().now()
-
-        # Quaternion from Yaw
-        q = quaternion_from_euler(0, 0, self.th)
-
-        # Publish TF: odom -> base_link
-        t = TransformStamped()
-        t.header.stamp = current_time.to_msg()
-        t.header.frame_id = 'odom'
-        t.child_frame_id = 'base_link'
-        t.transform.translation.x = self.x
-        t.transform.translation.y = self.y
-        t.transform.translation.z = 0.0
-        t.transform.rotation = q
-        self.tf_broadcaster.sendTransform(t)
-
-        # Publish Odometry message
-        odom = Odometry()
-        odom.header.stamp = current_time.to_msg()
-        odom.header.frame_id = 'odom'
-        odom.child_frame_id = 'base_link'
-
-        odom.pose.pose.position.x = self.x
-        odom.pose.pose.position.y = self.y
-        odom.pose.pose.position.z = 0.0
-        odom.pose.pose.orientation = q
-
-        # Velocity (optional, calculated from d_center/dt)
-        # odom.twist.twist.linear.x = ...
-        # odom.twist.twist.angular.z = ...
-
-        self.odom_pub.publish(odom)
-
-    def publish_ultrasonic(self, distance_cm):
-        msg = Range()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = 'ultrasonic_link'
-        msg.radiation_type = Range.ULTRASOUND
-        msg.field_of_view = 0.26  # ~15 degrees
-        msg.min_range = 0.02
-        msg.max_range = 4.0
-        msg.range = distance_cm / 100.0
-        self.range_pub.publish(msg)
-
-
-def quaternion_from_euler(roll, pitch, yaw):
-    qx = math.sin(roll / 2) * math.cos(pitch / 2) * math.cos(yaw / 2) - \
-        math.cos(roll / 2) * math.sin(pitch / 2) * math.sin(yaw / 2)
-    qy = math.cos(roll / 2) * math.sin(pitch / 2) * math.cos(yaw / 2) + \
-        math.sin(roll / 2) * math.cos(pitch / 2) * math.sin(yaw / 2)
-    qz = math.cos(roll / 2) * math.cos(pitch / 2) * math.sin(yaw / 2) - \
-        math.sin(roll / 2) * math.sin(pitch / 2) * math.cos(yaw / 2)
-    qw = math.cos(roll / 2) * math.cos(pitch / 2) * math.cos(yaw / 2) + \
-        math.sin(roll / 2) * math.sin(pitch / 2) * math.sin(yaw / 2)
-    return Quaternion(x=qx, y=qy, z=qz, w=qw)
-
+    def read_from_arduino(self):
+        """
+        פונקציה זו רצה בלולאה ומחפשת מידע שמגיע מה-Serial
+        """
+        if self.ser.in_waiting > 0:
+            try:
+                line = self.ser.readline().decode('utf-8').strip()
+                # הפורמט הצפוי מהארדואינו: LeftTicks,RightTicks,Distance
+                parts = line.split(',')
+                
+                if len(parts) == 3:
+                    l_ticks = int(parts[0])
+                    r_ticks = int(parts[1])
+                    dist_cm = float(parts[2])
+                    
+                    # פרסום הטיקים
+                    self.left_tick_pub.publish(Int32(data=l_ticks))
+                    self.right_tick_pub.publish(Int32(data=r_ticks))
+                    
+                    # פרסום נתוני החיישן (Range)
+                    range_msg = Range()
+                    range_msg.header.stamp = self.get_clock().now().to_msg()
+                    range_msg.header.frame_id = "ultrasonic_link"
+                    range_msg.radiation_type = Range.ULTRASOUND
+                    range_msg.field_of_view = 0.26 # כ-15 מעלות ברדיאנים
+                    range_msg.min_range = 0.02
+                    range_msg.max_range = 4.0
+                    range_msg.range = dist_cm / 100.0 # המרה למטרים
+                    
+                    self.range_pub.publish(range_msg)
+                    
+            except ValueError:
+                pass # סינון הודעות זבל שעלולות להגיע בהתחלה
+            except Exception as e:
+                self.get_logger().warning(f'Serial read error: {e}')
 
 def main(args=None):
     rclpy.init(args=args)
     node = ArduinoBridge()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
-
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.ser.close()
+        node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
