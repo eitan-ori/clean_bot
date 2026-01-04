@@ -32,6 +32,7 @@ def generate_launch_description():
     # Madgwick filter arguments
     use_madgwick = LaunchConfiguration('use_madgwick', default='true')
     use_mag = LaunchConfiguration('use_mag', default='true')
+    publish_odom = LaunchConfiguration('publish_odom', default='true')
     
     # ==================== Robot Description ====================
     pkg_description = get_package_share_directory('clean_bot_description')
@@ -78,6 +79,10 @@ def generate_launch_description():
             'use_mag',
             default_value='true',
             description='Whether to use magnetometer for yaw correction'),
+        DeclareLaunchArgument(
+            'publish_odom',
+            default_value='true',
+            description='Whether to publish odom TF from IMU'),
         
         # ==================== Robot State Publisher ====================
         Node(
@@ -142,7 +147,7 @@ def generate_launch_description():
             package='clean_bot_hardware',
             executable='imu_odom_broadcaster',
             name='imu_odom_broadcaster',
-            condition=IfCondition(use_madgwick),
+            condition=IfCondition(publish_odom),
             parameters=[{
                 'imu_topic': '/imu/data',
                 'parent_frame': 'odom',
