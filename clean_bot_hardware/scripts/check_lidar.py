@@ -3,10 +3,20 @@ import serial
 import glob
 import time
 
+import subprocess
+
 def check_port(port, baudrate):
     try:
-        ser = serial.Serial(port, baudrate, timeout=1, write_timeout=1)
+        ser = serial.Serial(port, baudrate, timeout=2, write_timeout=2)
         print(f"Checking {port} at {baudrate}...", end='', flush=True)
+        
+        # Toggle DTR/RTS to try and reset the unit
+        ser.dtr = False
+        ser.rts = False
+        time.sleep(0.1)
+        ser.dtr = True
+        ser.rts = True
+        time.sleep(0.1)
         
         # Reset buffer
         ser.reset_input_buffer()
@@ -39,6 +49,15 @@ def check_port(port, baudrate):
 
 def main():
     print("Scanning for Serial Ports...")
+    
+    # Check dmesg for USB issues
+    try:
+        print("\n--- Kernel Log (Last 5 lines for ttyUSB) ---")
+        subprocess.run("dmesg | grep ttyUSB | tail -n 5", shell=True)
+        print("--------------------------------------------\n")
+    except:
+        pass
+
     ports = glob.glob('/dev/ttyUSB*') + glob.glob('/dev/ttyACM*')
     
     if not ports:
