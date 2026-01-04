@@ -23,13 +23,13 @@ def generate_launch_description():
         )
     )
 
-    # 2. Launch Robot State Publisher (Required for TF: base_link -> laser/imu)
-    rsp_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(description_pkg, 'launch', 'rsp.launch.py')
-        ),
-        launch_arguments={'use_sim_time': use_sim_time}.items()
-    )
+    # 2. Launch Robot State Publisher (Already included in sensors.launch.py)
+    # rsp_launch = IncludeLaunchDescription(
+    #     PythonLaunchDescriptionSource(
+    #         os.path.join(description_pkg, 'launch', 'rsp.launch.py')
+    #     ),
+    #     launch_arguments={'use_sim_time': use_sim_time}.items()
+    # )
 
     # 3. Launch SLAM Toolbox
     slam_params_file = os.path.join(hardware_pkg, 'config', 'mapper_params_online_async.yaml')
@@ -62,7 +62,7 @@ def generate_launch_description():
             description='Use simulation/Gazebo clock'),
         
         sensors_launch,
-        rsp_launch,
+        # rsp_launch,
         start_async_slam_toolbox_node,
         # rviz_node
     ])
