@@ -38,14 +38,15 @@ def generate_launch_description():
     # 3. Launch SLAM Toolbox
     slam_params_file = os.path.join(hardware_pkg, 'config', 'mapper_params_online_async.yaml')
     
-    start_slam_toolbox_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(slam_pkg, 'launch', 'lifelong_launch.py')
-        ),
-        launch_arguments={
-            'params_file': slam_params_file,
-            'use_sim_time': use_sim_time
-        }.items()
+    start_async_slam_toolbox_node = Node(
+        parameters=[
+          slam_params_file,
+          {'use_sim_time': use_sim_time}
+        ],
+        package='slam_toolbox',
+        executable='async_slam_toolbox_node',
+        name='slam_toolbox',
+        output='screen'
     )
 
     # 4. RF2O Laser Odometry
@@ -85,6 +86,6 @@ def generate_launch_description():
         # rsp_launch,
         joint_state_publisher_node,
         rf2o_node,
-        start_slam_toolbox_launch,
+        start_async_slam_toolbox_node,
         # rviz_node
     ])
