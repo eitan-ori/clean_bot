@@ -21,28 +21,12 @@ slam_toolbox:
 
     # דיוק ורזולוציה
     map_resolution: 0.05   # רזולוציה של 5 ס"מ לפיקסל
-    map_publish_period: 2.0 # Updated from 5.0 for faster feedback
+    map_publish_period: 5.0 # כל כמה זמן לעדכן את המפה ל-Rviz
 
     # הגדרות לייזר (מותאם ל-RPLidar A1)
     max_laser_range: 12.0 # הטווח המקסימלי של הליידר שלך
-    minimum_time_interval: 0.1 # Updated from 0.5
+    minimum_time_interval: 0.5
     transform_timeout: 0.2
     tf_buffer_duration: 30.
     stack_size_to_use: 40000000
     enable_interactive_mode: true
-
-    # --- General Parameters for better clearing ---
-    use_scan_matching: true
-    use_scan_barycenter: true
-    minimum_travel_distance: 0.1
-    minimum_travel_heading: 0.1
-    scan_buffer_size: 10
-    scan_buffer_maximum_scan_distance: 10.0
-    
-    # --- Loop Closure ---
-    do_loop_closing: true
-    loop_search_maximum_distance: 3.0
-    loop_match_minimum_chain_size: 10
-    loop_match_maximum_variance_coarse: 3.0
-    loop_match_minimum_response_coarse: 0.35
-    loop_match_minimum_response_fine: 0.45
