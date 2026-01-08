@@ -52,10 +52,11 @@ ekf_filter_node:
     
     # =====================================================
     # Odometry from wheel encoders (Arduino)
+    # PRIMARY SOURCE for position and rotation
     # =====================================================
     odom0: wheel_odom
     odom0_config: [true, true, false,    # x, y, z
-                   false, false, false,   # roll, pitch, yaw
+                   false, false, true,    # roll, pitch, yaw - USE YAW FROM WHEELS
                    true, true, false,     # vx, vy, vz
                    false, false, true,    # vroll, vpitch, vyaw
                    false, false, false]   # ax, ay, az
@@ -66,12 +67,14 @@ ekf_filter_node:
     
     # =====================================================
     # IMU (after Madgwick filter)
+    # ONLY use for angular velocity, NOT absolute orientation
+    # The IMU yaw drifts too much without magnetometer calibration
     # =====================================================
     imu0: imu/data
     imu0_config: [false, false, false,    # x, y, z
-                  true, true, true,        # roll, pitch, yaw
+                  false, false, false,     # roll, pitch, yaw - DISABLED (drifts!)
                   false, false, false,     # vx, vy, vz
-                  true, true, true,        # vroll, vpitch, vyaw
+                  false, false, true,      # vroll, vpitch, vyaw - only angular vel
                   false, false, false]     # ax, ay, az
     
     imu0_queue_size: 10
