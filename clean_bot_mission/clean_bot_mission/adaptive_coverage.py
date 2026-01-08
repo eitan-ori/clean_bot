@@ -57,9 +57,12 @@ class AdaptiveCoveragePlanner(Node):
         super().__init__('adaptive_coverage_planner')
 
         # ===================== Parameters =====================
-        self.declare_parameter('coverage_width', 0.14)           # 14cm cleaning width
+        self.declare_parameter('coverage_width', 0.14)           # 14cm cleaning width (main suction)
         self.declare_parameter('overlap_ratio', 0.15)            # 15% overlap for safety
-        self.declare_parameter('robot_radius', 0.12)             # Robot radius for inflation
+        self.declare_parameter('robot_radius', 0.18)             # 18cm Main body radius
+        # NOTE: Robot has a side brush (4cm radius) at front-left that extends reach.
+        # This allows cleaning edges even with 18cm radius body.
+        
         self.declare_parameter('timeout_per_waypoint', 90)       # Seconds per goal
         self.declare_parameter('start_on_exploration_complete', True)
         self.declare_parameter('min_region_area', 0.1)           # Min area to cover (m²)
@@ -355,18 +358,25 @@ class AdaptiveCoveragePlanner(Node):
             remaining_ids.remove(best_id)
             curr_pos = cells[best_id]['centroid']
 
-        # --- 4. Generate ZigZag Paths per Cell ---
+        # --- 4. Generate Paths per Cell (Boundary + Zigzag) ---
         final_waypoints = []
         
         for cid in ordered_cell_ids:
             cell_segments = cells[cid]['segments']
-            # Zigzag logic
+            
+            # 4.1. Boundary Pass (Contour Following)
+            # Create a path that follows the outer edge of the cell.
+            # Direction: Clockwise (keeps wall on Left) - for the Left Side Brush
+            boundary_waypoints = self.generate_cell_boundary(cell_segments)
+            final_waypoints.extend(boundary_waypoints)
+            
+            # 4.2. Zigzag Interior
+            # Direction: Alternating Up/Down
             going_up = True
             
-            # Optimize entry point:
-            # If start of first segment is closer to last waypoint, start there.
-            # Else start at end?
-            # Simple alternating is usually fine for within-cell.
+            # If we ended boundary pass near the bottom, maybe start zigzag Up?
+            # Or if near top, start down?
+            # For simplicity, we stick to standard zigzag but verify entry point.
             
             for x, y_start, y_end, col, r1, r2 in cell_segments:
                 if going_up:
@@ -378,6 +388,51 @@ class AdaptiveCoveragePlanner(Node):
                 going_up = not going_up
                 
         return final_waypoints
+
+    def generate_cell_boundary(self, segments) -> list:
+        """
+        Generate a Clockwise path around the given cell segments.
+        This puts the left side of the robot (side brush) against the wall/boundary.
+        """
+        waypoints = []
+        if not segments:
+            return []
+            
+        # Segments are sorted by column (x)
+        # Structure: (x, y_start, y_end, col, r1, r2)
+        
+        # 1. Left Edge (first column) - Go Up
+        first_seg = segments[0]
+        waypoints.append((first_seg[0], first_seg[1], math.pi/2)) # Start of col
+        waypoints.append((first_seg[0], first_seg[2], math.pi/2)) # End of col
+        
+        # 2. Top Edge (scan left to right)
+        # Connect y_end of col i to y_end of col i+1
+        for i in range(len(segments) - 1):
+            curr_s = segments[i]
+            next_s = segments[i+1]
+            # Waypoint at current top -> next top
+            # Orientation: Pointing Right (0) or towards next point
+            yaw = math.atan2(next_s[2] - curr_s[2], next_s[0] - curr_s[0])
+            waypoints.append((curr_s[0], curr_s[2], yaw))
+            waypoints.append((next_s[0], next_s[2], yaw))
+            
+        # 3. Right Edge (last column) - Go Down
+        last_seg = segments[-1]
+        waypoints.append((last_seg[0], last_seg[2], -math.pi/2)) # Top of last col
+        waypoints.append((last_seg[0], last_seg[1], -math.pi/2)) # Bottom of last col
+        
+        # 4. Bottom Edge (scan right to left)
+        # Connect y_start of col i to y_start of col i-1
+        for i in range(len(segments) - 1, 0, -1):
+            curr_s = segments[i]
+            prev_s = segments[i-1]
+            # Waypoint at current bottom -> prev bottom
+            yaw = math.atan2(prev_s[1] - curr_s[1], prev_s[0] - curr_s[0])
+            waypoints.append((curr_s[0], curr_s[1], yaw))
+            waypoints.append((prev_s[0], prev_s[1], yaw))
+            
+        return waypoints
 
 
     def find_free_segments_in_column(self, col: int) -> list:
