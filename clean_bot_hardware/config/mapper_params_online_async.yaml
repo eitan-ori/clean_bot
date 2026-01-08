@@ -76,7 +76,7 @@ slam_toolbox:
     # Helps when odometry is unreliable
     correlation_search_space_dimension: 0.8    # Search 80cm area (was 0.5)
     correlation_search_space_resolution: 0.01
-    correlation_search_space_smear_deviation: 0.15  # More smear tolerance
+    correlation_search_space_smear_deviation: 0.1  # Max allowed value
 
     # Correlation Parameters - Loop Closure Parameters
     loop_search_space_dimension: 10.0   # Larger loop search
