@@ -157,18 +157,18 @@ controller_server:
       debug_trajectory_details: True
       min_vel_x: 0.0
       min_vel_y: 0.0
-      max_vel_x: 0.20        # Max forward speed (m/s)
+      max_vel_x: 0.15        # Max forward speed (m/s) - reduced for stability
       max_vel_y: 0.0         # No lateral movement (diff drive)
-      max_vel_theta: 1.0     # Max rotation speed (rad/s)
+      max_vel_theta: 0.4     # Max rotation speed (rad/s) - REDUCED to prevent SLAM drift
       min_speed_xy: 0.0
-      max_speed_xy: 0.20
+      max_speed_xy: 0.15
       min_speed_theta: 0.0
-      acc_lim_x: 1.0
+      acc_lim_x: 0.5         # Slower acceleration
       acc_lim_y: 0.0
-      acc_lim_theta: 2.0
-      decel_lim_x: -1.0
+      acc_lim_theta: 0.8     # Slower angular acceleration
+      decel_lim_x: -0.5
       decel_lim_y: 0.0
-      decel_lim_theta: -2.0
+      decel_lim_theta: -0.8
       vx_samples: 20
       vy_samples: 0
       vtheta_samples: 20
@@ -337,9 +337,9 @@ behavior_server:
     transform_tolerance: 0.1
     use_sim_time: False
     simulate_ahead_time: 2.0
-    max_rotational_vel: 1.0
-    min_rotational_vel: 0.4
-    rotational_acc_lim: 2.0
+    max_rotational_vel: 0.4    # REDUCED - prevent SLAM drift
+    min_rotational_vel: 0.2    # REDUCED
+    rotational_acc_lim: 0.8    # REDUCED
 
 waypoint_follower:
   ros__parameters:
@@ -358,10 +358,10 @@ velocity_smoother:
     smoothing_frequency: 20.0
     scale_velocities: False
     feedback: "OPEN_LOOP"
-    max_velocity: [0.20, 0.0, 1.0]
-    min_velocity: [-0.20, 0.0, -1.0]
-    max_accel: [1.0, 0.0, 2.0]
-    max_decel: [-1.0, 0.0, -2.0]
+    max_velocity: [0.15, 0.0, 0.4]   # REDUCED angular to 0.4 rad/s
+    min_velocity: [-0.15, 0.0, -0.4]
+    max_accel: [0.5, 0.0, 0.8]       # Slower acceleration
+    max_decel: [-0.5, 0.0, -0.8]
     odom_topic: "odom"
     odom_duration: 0.1
     deadband_velocity: [0.0, 0.0, 0.0]

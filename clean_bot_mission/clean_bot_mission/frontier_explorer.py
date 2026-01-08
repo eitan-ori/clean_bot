@@ -57,12 +57,14 @@ class FrontierExplorer(Node):
         self.declare_parameter('exploration_timeout', 600.0) # 10 minutes max
         self.declare_parameter('goal_tolerance', 0.3)        # How close to get to frontier
         self.declare_parameter('min_goal_distance', 0.5)     # Don't go to very close frontiers
+        self.declare_parameter('navigation_timeout', 60.0)   # Single goal timeout
         
         self.min_frontier_size = self.get_parameter('min_frontier_size').value
         self.robot_radius = self.get_parameter('robot_radius').value
         self.exploration_timeout = self.get_parameter('exploration_timeout').value
         self.goal_tolerance = self.get_parameter('goal_tolerance').value
         self.min_goal_distance = self.get_parameter('min_goal_distance').value
+        self.navigation_timeout = self.get_parameter('navigation_timeout').value
 
         # ===================== Action Client =====================
         self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
@@ -97,6 +99,8 @@ class FrontierExplorer(Node):
         self.failed_goals = set()
         
         self.start_time = None
+        self.navigation_start_time = None  # Track when current nav started
+        self.current_goal_handle = None    # To cancel goals
         self.goals_attempted = 0
         self.goals_reached = 0
 
@@ -136,8 +140,13 @@ class FrontierExplorer(Node):
                 self.finish_exploration()
                 return
 
-        # If currently navigating, wait
+        # If currently navigating, check for navigation timeout
         if self.is_navigating:
+            if self.navigation_start_time:
+                nav_elapsed = (self.get_clock().now() - self.navigation_start_time).nanoseconds / 1e9
+                if nav_elapsed > self.navigation_timeout:
+                    self.get_logger().warn(f'⏱️ Navigation timeout ({self.navigation_timeout}s) - canceling goal')
+                    self.cancel_current_goal()
             return
 
         # Find frontiers
@@ -291,6 +300,7 @@ class FrontierExplorer(Node):
 
         self.current_goal = {'x': goal_x, 'y': goal_y}
         self.is_navigating = True
+        self.navigation_start_time = self.get_clock().now()  # Track nav start
         self.goals_attempted += 1
 
         self.get_logger().info(
@@ -299,6 +309,30 @@ class FrontierExplorer(Node):
 
         send_goal_future = self.nav_client.send_goal_async(goal_msg)
         send_goal_future.add_done_callback(self.goal_response_callback)
+
+    def cancel_current_goal(self):
+        """Cancel the current navigation goal."""
+        if self.current_goal_handle is not None:
+            self.get_logger().info('   🛑 Canceling current goal...')
+            cancel_future = self.current_goal_handle.cancel_goal_async()
+            cancel_future.add_done_callback(self.cancel_done_callback)
+        else:
+            # No handle, just reset state
+            self.is_navigating = False
+            self.navigation_start_time = None
+            if self.current_goal:
+                key = (round(self.current_goal['x'], 1), round(self.current_goal['y'], 1))
+                self.failed_goals.add(key)
+
+    def cancel_done_callback(self, future):
+        """Called when goal cancellation completes."""
+        self.get_logger().info('   🛑 Goal canceled')
+        self.is_navigating = False
+        self.navigation_start_time = None
+        self.current_goal_handle = None
+        if self.current_goal:
+            key = (round(self.current_goal['x'], 1), round(self.current_goal['y'], 1))
+            self.failed_goals.add(key)
 
     def find_safe_goal_near_frontier(self, frontier: dict) -> tuple:
         """
@@ -337,11 +371,13 @@ class FrontierExplorer(Node):
         if not goal_handle.accepted:
             self.get_logger().warn('   ⚠️ Goal rejected by Nav2')
             self.is_navigating = False
+            self.navigation_start_time = None
             if self.current_goal:
                 key = (round(self.current_goal['x'], 1), round(self.current_goal['y'], 1))
                 self.failed_goals.add(key)
             return
 
+        self.current_goal_handle = goal_handle  # Save for potential cancellation
         self.get_logger().info('   📍 Goal accepted, navigating...')
         get_result_future = goal_handle.get_result_async()
         get_result_future.add_done_callback(self.get_result_callback)
@@ -352,6 +388,8 @@ class FrontierExplorer(Node):
         status = result.status
         
         self.is_navigating = False
+        self.navigation_start_time = None
+        self.current_goal_handle = None
         
         if status == 4:  # SUCCEEDED
             self.get_logger().info('   ✅ Reached exploration point!')
@@ -361,6 +399,8 @@ class FrontierExplorer(Node):
             if self.current_goal:
                 key = (round(self.current_goal['x'], 1), round(self.current_goal['y'], 1))
                 self.failed_goals.add(key)
+        elif status == 5:  # CANCELED
+            self.get_logger().info('   🛑 Navigation was canceled')
         else:
             self.get_logger().warn(f'   ❓ Navigation ended with status: {status}')
 
