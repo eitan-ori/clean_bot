@@ -82,6 +82,8 @@ class ArduinoDriver(Node):
         self.publish_tf = self.get_parameter('publish_tf').value
         publish_rate = self.get_parameter('publish_rate').value
         
+        self.get_logger().info('Arduino Driver v2.0 initialized (MIN_PWM=90)')
+        
         # ===================== Serial Connection =====================
         try:
             self.serial = serial.Serial(
@@ -212,8 +214,8 @@ class ArduinoDriver(Node):
         # Linear mapping (could be improved with calibration curve)
         pwm = int((velocity / self.max_linear_speed) * self.max_pwm)
         
-        # Minimum PWM threshold - motors won't move below ~50 PWM
-        MIN_PWM = 60
+        # Minimum PWM threshold - motors won't move below ~90 PWM
+        MIN_PWM = 90
         if 0 < pwm < MIN_PWM:
             pwm = MIN_PWM
         elif -MIN_PWM < pwm < 0:
