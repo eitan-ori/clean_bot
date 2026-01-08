@@ -74,6 +74,12 @@ class EmergencyStopController(Node):
 
     def range_callback(self, msg: Range):
         """Update current obstacle distance."""
+        # Ignore 0 readings - HC-SR04 returns 0 when no echo received
+        # Also ignore readings below min_range (typically 2cm for HC-SR04)
+        if msg.range <= 0.02:  # 2cm minimum valid reading
+            # Invalid reading - don't update distance (keep previous valid value)
+            return
+        
         self.current_distance = msg.range
         self.last_range_time = self.get_clock().now()
 
