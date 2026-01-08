@@ -1,89 +1,74 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
-
-    <!-- 
-    This file describes an ultrasonic distance sensor (HC-SR04 model) for
-    detecting obstacles that may be too low for the primary LiDAR.
-
-    Physical Properties:
-    - Joint: ultrasonic_joint (fixed at the front exhaust, low height).
-    - Link: ultrasonic_link (approximate dimensions of HC-SR04 sensor).
-
-    Gazebo Sensor Parameters:
-    - Type: ray sensor configured as 'ultrasound'.
-    - Update Rate: 20 Hz.
-    - Samples: 5 rays across a narrow cone.
-    - FoV: ~15 degrees (-0.13 to 0.13 rad).
-    - Range: 2cm to 4.0m.
-    - Output Topic: /ultrasonic_range.
-    - Message Type: sensor_msgs/Range.
-
-    Assumptions:
-    - The sensor is mounted 3cm above the ground to detect low-profile obstacles.
-    - The simulation uses a narrow ray cone to approximate the ultrasound wave.
-    -->
-
-    <!-- Ultrasonic Sensor (HC-SR04) -->
-    <!-- Mounted at front, pointing forward -->
-    <!-- Height: 3cm from ground -->
-    
-    <joint name="ultrasonic_joint" type="fixed">
-        <parent link="chassis"/>
-        <child link="ultrasonic_link"/>
-        <!-- Position: front of robot, low to ground -->
-        <!-- x=0.3 (front), y=0 (center), z=0.03 (3cm from ground) -->
-        <origin xyz="0.30 0 0.03" rpy="0 0 0"/>
-    </joint>
-
-    <link name="ultrasonic_link">
-        <visual>
-            <geometry>
-                <box size="0.045 0.02 0.015"/>
-            </geometry>
-            <material name="blue"/>
-        </visual>
-        <collision>
-            <geometry>
-                <box size="0.045 0.02 0.015"/>
-            </geometry>
-        </collision>
-        <inertial>
-            <mass value="0.01"/>
-            <inertia ixx="0.000001" ixy="0.0" ixz="0.0" iyy="0.000001" iyz="0.0" izz="0.000001"/>
-        </inertial>
-    </link>
-
-    <gazebo reference="ultrasonic_link">
-        <material>Gazebo/Blue</material>
+    <!-- Ultrasonic Sensor Macro -->
+    <xacro:macro name="ultrasonic_sensor" params="parent_link xyz rpy">
         
-        <!-- Gazebo sensor simulation (optional) -->
-        <sensor name="ultrasonic_sensor" type="ray">
-            <always_on>true</always_on>
-            <update_rate>20</update_rate>
-            <ray>
-                <scan>
-                    <horizontal>
-                        <samples>5</samples>
-                        <resolution>1</resolution>
-                        <min_angle>-0.13</min_angle>
-                        <max_angle>0.13</max_angle>
-                    </horizontal>
-                </scan>
-                <range>
-                    <min>0.02</min>
-                    <max>4.0</max>
-                    <resolution>0.01</resolution>
-                </range>
-            </ray>
-            <plugin name="ultrasonic_controller" filename="libgazebo_ros_ray_sensor.so">
-                <ros>
-                    <remapping>~/out:=ultrasonic_range</remapping>
-                </ros>
-                <output_type>sensor_msgs/Range</output_type>
-                <radiation_type>ultrasound</radiation_type>
-                <frame_name>ultrasonic_link</frame_name>
-            </plugin>
-        </sensor>
-    </gazebo>
+        <link name="ultrasonic_link">
+            <visual>
+                <origin xyz="0 0 0" rpy="0 0 0"/>
+                <geometry>
+                    <box size="0.04 0.02 0.02"/>
+                </geometry>
+                <material name="blue">
+                    <color rgba="0 0 1 1"/>
+                </material>
+            </visual>
+            <collision>
+                <origin xyz="0 0 0" rpy="0 0 0"/>
+                <geometry>
+                    <box size="0.04 0.02 0.02"/>
+                </geometry>
+            </collision>
+            <inertial>
+                <mass value="0.01"/>
+                <origin xyz="0 0 0" rpy="0 0 0"/>
+                <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6"/>
+            </inertial>
+        </link>
 
+        <joint name="ultrasonic_joint" type="fixed">
+            <parent link="${parent_link}"/>
+            <child link="ultrasonic_link"/>
+            <origin xyz="${xyz}" rpy="${rpy}"/>
+        </joint>
+        
+        <!-- Gazebo simulation plugin -->
+        <gazebo reference="ultrasonic_link">
+            <sensor type="ray" name="ultrasonic_sensor">
+                <pose>0 0 0 0 0 0</pose>
+                <visualize>true</visualize>
+                <update_rate>20</update_rate>
+                <ray>
+                    <scan>
+                        <horizontal>
+                            <samples>5</samples>
+                            <resolution>1</resolution>
+                            <min_angle>-0.13</min_angle>
+                            <max_angle>0.13</max_angle>
+                        </horizontal>
+                        <vertical>
+                            <samples>5</samples>
+                            <resolution>1</resolution>
+                            <min_angle>-0.05</min_angle>
+                            <max_angle>0.05</max_angle>
+                        </vertical>
+                    </scan>
+                    <range>
+                        <min>0.03</min>
+                        <max>4.0</max>
+                        <resolution>0.01</resolution>
+                    </range>
+                </ray>
+                <plugin name="ultrasonic_sensor_controller" filename="libgazebo_ros_ray_sensor.so">
+                    <ros>
+                        <remapping>~/out:=ultrasonic_range</remapping>
+                    </ros>
+                    <output_type>sensor_msgs/Range</output_type>
+                    <radiation_type>ultrasound</radiation_type>
+                    <frame_name>ultrasonic_link</frame_name>
+                </plugin>
+            </sensor>
+        </gazebo>
+
+    </xacro:macro>
 </robot>
