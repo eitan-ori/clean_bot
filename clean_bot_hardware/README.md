@@ -1,92 +1,180 @@
-# Clean Bot Hardware Package
+# Clean Bot Hardware
 
-This ROS 2 package contains hardware drivers and launch files for the Clean Bot robot sensors.
+ROS 2 hardware drivers and main bringup for the Clean Bot robot.
 
-## Sensors Supported
+## 🤖 Hardware Components
 
-### 1. SLAMTEC Lidar (RPLidar A1/A2/etc.)
-- Uses the `sllidar_ros2` package
-- Publishes: `/scan` (sensor_msgs/LaserScan)
-- Default port: `/dev/ttyUSB0`
+| Component | Model | Connection | Driver |
+|-----------|-------|------------|--------|
+| **Motors** | GB37-131 DC Motors | Arduino (L298N) | `arduino_driver` |
+| **Encoders** | Hall Effect (11 CPR) | Arduino (GPIO) | `arduino_driver` |
+| **Ultrasonic** | HC-SR04 | Arduino (GPIO) | `arduino_driver` |
+| **Lidar** | RPLIDAR A1M8 Gen6 | USB Serial | `sllidar_ros2` |
+| **IMU** | Grove 9DOF (ICM20600+AK09918) | I2C | `imu_publisher` |
 
-### 2. Grove IMU 9DOF (ICM20600 + AK09918)
-- Custom Python driver using smbus2
-- Publishes:
-  - `/imu/data_raw` (sensor_msgs/Imu) - Raw accelerometer and gyroscope data
-  - `/imu/mag` (sensor_msgs/MagneticField) - Magnetometer data
-  - `/imu/data` (sensor_msgs/Imu) - Filtered orientation (when using Madgwick filter)
+## 📁 Package Structure
 
-## Installation on Raspberry Pi
-
-### Prerequisites
-
-```bash
-# Install smbus2 for I2C communication
-pip3 install smbus2
-
-# Install ROS 2 Madgwick filter
-sudo apt install ros-humble-imu-filter-madgwick
+```
+clean_bot_hardware/
+├── clean_bot_hardware/          # Python modules
+│   ├── arduino_driver.py        # ⭐ Motor/encoder/ultrasonic driver
+│   ├── imu_publisher_node.py    # IMU ROS publisher
+│   ├── simple_imu_driver.py     # Low-level IMU I2C driver
+│   └── imu_odom_broadcaster.py  # TF broadcaster (legacy)
+├── config/
+│   ├── ekf.yaml                 # Robot Localization EKF config
+│   ├── nav2_params.yaml         # Nav2 parameters
+│   └── mapper_params_online_async.yaml  # SLAM Toolbox config
+├── launch/
+│   ├── robot_bringup.launch.py  # ⭐ MAIN LAUNCH FILE
+│   ├── sensors.launch.py        # Sensors only (Lidar+IMU)
+│   └── slam.launch.py           # SLAM + sensors
+└── scripts/
+    └── check_lidar.py           # Diagnostic script
 ```
 
-### Clone and Build
+## 🚀 Quick Start
+
+### 1. Hardware Setup
+
+1. **Arduino**: Flash the code from `my_robot_slam/arduino_code/arduino_ros_node.ino`
+2. **Connections**:
+   - Arduino → USB (e.g., `/dev/ttyUSB0`)
+   - RPLIDAR → USB (e.g., `/dev/ttyUSB1`)
+   - IMU → I2C (bus 1, default)
+
+3. **Find your ports**:
+   ```bash
+   ls /dev/ttyUSB*
+   # or
+   ls /dev/ttyACM*
+   ```
+
+4. **Set permissions** (one-time):
+   ```bash
+   sudo usermod -a -G dialout $USER
+   # Log out and back in
+   ```
+
+### 2. Build the Package
 
 ```bash
-cd ~/robot_ws/src
-git clone <your-repo-url> clean_bot_hardware
-
 cd ~/robot_ws
-colcon build --packages-select clean_bot_hardware sllidar_ros2
+colcon build --packages-select clean_bot_hardware clean_bot_mission
 source install/setup.bash
 ```
 
-## Launch Files
+### 3. Launch the Robot
 
-### Launch All Sensors
+**Full system (mapping + navigation):**
+```bash
+ros2 launch clean_bot_hardware robot_bringup.launch.py
+```
+
+**With custom port assignments:**
+```bash
+ros2 launch clean_bot_hardware robot_bringup.launch.py \
+    arduino_port:=/dev/ttyUSB0 \
+    lidar_port:=/dev/ttyUSB1
+```
+
+**Sensors only (for testing):**
 ```bash
 ros2 launch clean_bot_hardware sensors.launch.py
 ```
 
-### Launch IMU Only
-```bash
-ros2 launch clean_bot_hardware imu.launch.py
-```
+## ⚙️ Robot Calibration
 
-### Launch with Custom Parameters
-```bash
-ros2 launch clean_bot_hardware sensors.launch.py \
-    serial_port:=/dev/ttyUSB0 \
-    serial_baudrate:=115200 \
-    i2c_bus:=1 \
-    use_madgwick:=true \
-    use_mag:=true
-```
+### Physical Parameters (CRITICAL!)
 
-## Parameters
+Edit these in launch or pass as arguments:
 
-### Lidar Parameters
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `serial_port` | `/dev/ttyUSB0` | Serial port for lidar |
-| `serial_baudrate` | `115200` | Baudrate |
-| `lidar_frame_id` | `laser` | TF frame ID |
+| `wheel_radius` | 0.034m | Wheel radius (measure your wheels!) |
+| `wheel_separation` | 0.20m | Distance between wheels |
+| `ticks_per_revolution` | 1320 | Encoder CPR × Gear ratio |
 
-### IMU Parameters
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `i2c_bus` | `1` | I2C bus number |
-| `imu_frame_id` | `imu_link` | TF frame ID |
-| `imu_rate` | `50.0` | Publish rate (Hz) |
-| `use_madgwick` | `true` | Enable Madgwick filter |
-| `use_mag` | `true` | Use magnetometer for yaw |
+**How to measure:**
+- **wheel_radius**: Measure wheel diameter with calipers, divide by 2
+- **wheel_separation**: Measure center-to-center distance between wheels
+- **ticks_per_revolution**: For GB37-131: 11 (CPR) × 120 (gear ratio) = 1320
 
-## Troubleshooting
+## 📡 Topics
+
+### Published
+
+| Topic | Type | Description |
+|-------|------|-------------|
+| `/wheel_odom` | nav_msgs/Odometry | Wheel odometry from encoders |
+| `/ultrasonic_range` | sensor_msgs/Range | Distance from ultrasonic |
+| `/scan` | sensor_msgs/LaserScan | Lidar scan data |
+| `/imu/data_raw` | sensor_msgs/Imu | Raw IMU (accel+gyro) |
+| `/imu/mag` | sensor_msgs/MagneticField | Magnetometer |
+| `/imu/data` | sensor_msgs/Imu | Filtered IMU (with orientation) |
+| `/odom` | nav_msgs/Odometry | Fused odometry (from EKF) |
+| `/map` | nav_msgs/OccupancyGrid | SLAM map |
+
+### Subscribed
+
+| Topic | Type | Description |
+|-------|------|-------------|
+| `/cmd_vel` | geometry_msgs/Twist | Velocity commands |
+
+## 🗺️ Running a Cleaning Mission
+
+After launching the robot:
+
+1. **Manual exploration** (to create initial map):
+   ```bash
+   ros2 run teleop_twist_keyboard teleop_twist_keyboard
+   ```
+   Drive around the room edges to let SLAM build the map.
+
+2. **Start coverage mission** (14cm cleaning width):
+   ```bash
+   ros2 run clean_bot_mission coverage_mission --ros-args -p coverage_width:=0.14
+   ```
+
+3. **Save the map** (optional):
+   ```bash
+   ros2 run nav2_map_server map_saver_cli -f ~/my_map
+   ```
+
+## 🔧 Troubleshooting
+
+### Arduino not connecting
+```bash
+# Check if device exists
+ls -la /dev/ttyUSB*
+
+# Check permissions
+groups  # Should include 'dialout'
+
+# Try with sudo (temporary fix)
+sudo chmod 666 /dev/ttyUSB0
+```
 
 ### IMU not detected
-1. Check I2C is enabled: `sudo raspi-config` → Interface Options → I2C
-2. Verify connection: `i2cdetect -y 1` (should show 0x69 and 0x0C)
-3. Check permissions: `sudo usermod -a -G i2c $USER`
+```bash
+# Check I2C devices
+i2cdetect -y 1
+# Should show devices at 0x69 (IMU) and 0x0C (Magnetometer)
+```
 
-### Lidar not detected
-1. Check USB connection: `ls /dev/ttyUSB*`
-2. Add udev rules for persistent naming
-3. Check permissions: `sudo usermod -a -G dialout $USER`
+### TF errors in RViz
+```bash
+ros2 run tf2_tools view_frames
+evince frames.pdf
+```
+
+## 📦 Dependencies
+
+Install with:
+```bash
+sudo apt install ros-humble-slam-toolbox ros-humble-navigation2 \
+    ros-humble-nav2-bringup ros-humble-robot-localization \
+    ros-humble-imu-filter-madgwick ros-humble-teleop-twist-keyboard
+
+pip3 install pyserial smbus2
+```

@@ -1,5 +1,16 @@
 # My Robot SLAM
 
+> ⚠️ **DEPRECATED**: This package is outdated. Please use the following packages instead:
+> - **clean_bot_hardware**: Hardware drivers (Arduino, IMU, Lidar)
+> - **clean_bot_mission**: Mission nodes (coverage, exploration)
+> - **clean_bot_navigation**: Navigation configuration
+> 
+> The main launch file is now: `ros2 launch clean_bot_hardware robot_bringup.launch.py`
+
+---
+
+## Legacy Documentation
+
 This package implements a ROS2 system for a robot that maps, vacuums, and autonomously docks. It includes drivers for Arduino, IMU, Lidar, and nodes for SLAM, Navigation, Coverage Planning, and Auto-Docking.
 
 ## Architecture

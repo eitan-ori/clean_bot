@@ -1,19 +1,20 @@
 // --- הגדרות פינים ---
+
 // אנקודרים
-const int ENC_L_A = 2;
-const int ENC_L_B = 4;
-const int ENC_R_A = 3;
-const int ENC_R_B = 5;
+const int ENC_L_A = 3;
+const int ENC_L_B = 5;
+const int ENC_R_A = 2;
+const int ENC_R_B = 4;
 
 // מנוע שמאל (L298N)
-const int IN1 = 6;
-const int IN2 = 7;
-const int ENA = 9; // חייב להיות פין PWM
+const int IN1 = 12;
+const int IN2 = 8;
+const int ENA = 10; // חייב להיות פין PWM
 
 // מנוע ימין (L298N)
-const int IN3 = 8;
-const int IN4 = 12;
-const int ENB = 10; // חייב להיות פין PWM
+const int IN3 = 6;
+const int IN4 = 7;
+const int ENB = 9; // חייב להיות פין PWM
 
 // אולטרסוניק
 const int TRIG_PIN = 11;

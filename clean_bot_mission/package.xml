@@ -2,14 +2,22 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>clean_bot_mission</name>
-  <version>0.0.0</version>
-  <description>Mission logic for clean_bot</description>
-  <maintainer email="user@todo.todo">user</maintainer>
-  <license>TODO: License declaration</license>
+  <version>1.0.0</version>
+  <description>Autonomous exploration and coverage missions for Clean Bot</description>
+  <maintainer email="robot@cleanbot.dev">Clean Bot Team</maintainer>
+  <license>MIT</license>
 
   <depend>rclpy</depend>
+  <depend>nav2_msgs</depend>
   <depend>nav2_simple_commander</depend>
+  <depend>nav_msgs</depend>
   <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>visualization_msgs</depend>
+  <depend>tf2_ros</depend>
+
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-scipy</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

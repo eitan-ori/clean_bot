@@ -1,0 +1,67 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+    <!-- Ultrasonic Sensor (HC-SR04) -->
+    <!-- Mounted at front, pointing forward -->
+    <!-- Height: 3cm from ground -->
+    
+    <joint name="ultrasonic_joint" type="fixed">
+        <parent link="chassis"/>
+        <child link="ultrasonic_link"/>
+        <!-- Position: front of robot, low to ground -->
+        <!-- x=0.3 (front), y=0 (center), z=0.03 (3cm from ground) -->
+        <origin xyz="0.30 0 0.03" rpy="0 0 0"/>
+    </joint>
+
+    <link name="ultrasonic_link">
+        <visual>
+            <geometry>
+                <box size="0.045 0.02 0.015"/>
+            </geometry>
+            <material name="blue"/>
+        </visual>
+        <collision>
+            <geometry>
+                <box size="0.045 0.02 0.015"/>
+            </geometry>
+        </collision>
+        <inertial>
+            <mass value="0.01"/>
+            <inertia ixx="0.000001" ixy="0.0" ixz="0.0" iyy="0.000001" iyz="0.0" izz="0.000001"/>
+        </inertial>
+    </link>
+
+    <gazebo reference="ultrasonic_link">
+        <material>Gazebo/Blue</material>
+        
+        <!-- Gazebo sensor simulation (optional) -->
+        <sensor name="ultrasonic_sensor" type="ray">
+            <always_on>true</always_on>
+            <update_rate>20</update_rate>
+            <ray>
+                <scan>
+                    <horizontal>
+                        <samples>5</samples>
+                        <resolution>1</resolution>
+                        <min_angle>-0.13</min_angle>
+                        <max_angle>0.13</max_angle>
+                    </horizontal>
+                </scan>
+                <range>
+                    <min>0.02</min>
+                    <max>4.0</max>
+                    <resolution>0.01</resolution>
+                </range>
+            </ray>
+            <plugin name="ultrasonic_controller" filename="libgazebo_ros_ray_sensor.so">
+                <ros>
+                    <remapping>~/out:=ultrasonic_range</remapping>
+                </ros>
+                <output_type>sensor_msgs/Range</output_type>
+                <radiation_type>ultrasound</radiation_type>
+                <frame_name>ultrasonic_link</frame_name>
+            </plugin>
+        </sensor>
+    </gazebo>
+
+</robot>

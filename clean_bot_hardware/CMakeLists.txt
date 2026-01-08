@@ -32,6 +32,24 @@ install(PROGRAMS
   RENAME imu_odom_broadcaster
 )
 
+install(PROGRAMS
+  clean_bot_hardware/arduino_driver.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME arduino_driver
+)
+
+install(PROGRAMS
+  clean_bot_hardware/low_obstacle_detector.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME low_obstacle_detector
+)
+
+install(PROGRAMS
+  clean_bot_hardware/emergency_stop.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME emergency_stop
+)
+
 # Install launch files
 install(DIRECTORY launch/
   DESTINATION share/${PROJECT_NAME}/launch
