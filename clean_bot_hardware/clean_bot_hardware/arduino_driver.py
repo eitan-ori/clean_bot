@@ -144,23 +144,50 @@ class ArduinoDriver(Node):
         linear = msg.linear.x
         angular = msg.angular.z
         
-        # Differential drive kinematics
-        left_vel = linear - (angular * self.wheel_separation / 2.0)
-        right_vel = linear + (angular * self.wheel_separation / 2.0)
+        # Simplified movement: either rotate OR move forward
+        # This prevents weird combined movements that confuse SLAM
         
-        # Convert m/s to PWM (-255 to 255)
-        left_pwm = self._velocity_to_pwm(left_vel)
-        right_pwm = self._velocity_to_pwm(right_vel)
+        if abs(angular) > 0.1:
+            # Pure rotation - spin in place
+            # Positive angular = counter-clockwise = left backward, right forward
+            rotation_pwm = int((angular / 1.0) * 100)  # Scale to reasonable PWM
+            rotation_pwm = max(-100, min(100, rotation_pwm))
+            
+            # Ensure minimum PWM for movement
+            if 0 < rotation_pwm < 60:
+                rotation_pwm = 60
+            elif -60 < rotation_pwm < 0:
+                rotation_pwm = -60
+                
+            left_pwm = -rotation_pwm
+            right_pwm = rotation_pwm
+        elif abs(linear) > 0.01:
+            # Pure forward/backward motion - both wheels same speed
+            forward_pwm = int((linear / self.max_linear_speed) * self.max_pwm)
+            forward_pwm = max(-self.max_pwm, min(self.max_pwm, forward_pwm))
+            
+            # Ensure minimum PWM for movement
+            if 0 < forward_pwm < 60:
+                forward_pwm = 80  # Higher min for forward
+            elif -60 < forward_pwm < 0:
+                forward_pwm = -80
+                
+            left_pwm = forward_pwm
+            right_pwm = forward_pwm
+        else:
+            # Stop
+            left_pwm = 0
+            right_pwm = 0
         
-        # Publish debug info (what we're sending to Arduino)
+        # Publish debug info
         debug_msg = Twist()
-        debug_msg.linear.x = float(left_pwm)   # Left PWM in linear.x
-        debug_msg.linear.y = float(right_pwm)  # Right PWM in linear.y
-        debug_msg.angular.z = angular          # Original angular command
+        debug_msg.linear.x = float(left_pwm)
+        debug_msg.linear.y = float(right_pwm)
+        debug_msg.angular.z = angular
         self.debug_cmd_pub.publish(debug_msg)
         
         # Log significant commands
-        if abs(linear) > 0.01 or abs(angular) > 0.05:
+        if left_pwm != 0 or right_pwm != 0:
             self.get_logger().info(f'CMD: lin={linear:.2f} ang={angular:.2f} -> PWM L={left_pwm} R={right_pwm}')
         
         # Send to Arduino
