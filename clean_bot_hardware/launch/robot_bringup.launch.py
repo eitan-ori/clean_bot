@@ -49,8 +49,8 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
     
     # Hardware ports
-    arduino_port = LaunchConfiguration('arduino_port', default='/dev/ttyUSB0')
-    lidar_port = LaunchConfiguration('lidar_port', default='/dev/ttyUSB1')
+    arduino_port = LaunchConfiguration('arduino_port', default='/dev/ttyACM0')
+    lidar_port = LaunchConfiguration('lidar_port', default='/dev/ttyUSB0')
     i2c_bus = LaunchConfiguration('i2c_bus', default='1')
     
     # Robot parameters (for calibration)
