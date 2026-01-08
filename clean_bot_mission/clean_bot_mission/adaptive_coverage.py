@@ -278,32 +278,60 @@ class AdaptiveCoveragePlanner(Node):
 
     def optimize_path_order(self, waypoints: list) -> list:
         """
-        Reorder waypoints to minimize travel distance.
-        Simple greedy nearest-neighbor approach.
+        Reorder waypoint pairs to minimize travel distance.
+        Treats waypoints as pairs (start and end of segments) and optimizes pair order.
         """
-        if len(waypoints) <= 2:
+        if len(waypoints) <= 4:  # At least 2 pairs
             return waypoints
         
-        # Start from first waypoint
-        ordered = [waypoints[0]]
-        remaining = list(waypoints[1:])
+        # Group waypoints into pairs
+        pairs = []
+        for i in range(0, len(waypoints), 2):
+            if i + 1 < len(waypoints):
+                pairs.append((waypoints[i], waypoints[i+1]))
         
-        while remaining:
-            last = ordered[-1]
+        # Start from first pair
+        ordered_pairs = [pairs[0]]
+        remaining_pairs = list(pairs[1:])
+        
+        while remaining_pairs:
+            last_pair = ordered_pairs[-1]
+            last_point = last_pair[1]  # End of last pair
             
-            # Find nearest remaining waypoint
+            # Find nearest remaining pair
             min_dist = float('inf')
             nearest_idx = 0
             
-            for i, wp in enumerate(remaining):
-                dist = math.sqrt((wp[0] - last[0])**2 + (wp[1] - last[1])**2)
+            for i, pair in enumerate(remaining_pairs):
+                # Distance to start of pair
+                dist_to_start = math.sqrt((pair[0][0] - last_point[0])**2 + (pair[0][1] - last_point[1])**2)
+                # Distance to end of pair (in case we reverse)
+                dist_to_end = math.sqrt((pair[1][0] - last_point[0])**2 + (pair[1][1] - last_point[1])**2)
+                
+                dist = min(dist_to_start, dist_to_end)
                 if dist < min_dist:
                     min_dist = dist
                     nearest_idx = i
             
-            ordered.append(remaining.pop(nearest_idx))
+            # Add the nearest pair, possibly reversed if closer to end
+            nearest_pair = remaining_pairs[nearest_idx]
+            dist_to_start = math.sqrt((nearest_pair[0][0] - last_point[0])**2 + (nearest_pair[0][1] - last_point[1])**2)
+            dist_to_end = math.sqrt((nearest_pair[1][0] - last_point[0])**2 + (nearest_pair[1][1] - last_point[1])**2)
+            
+            if dist_to_end < dist_to_start:
+                # Reverse the pair
+                ordered_pairs.append((nearest_pair[1], nearest_pair[0]))
+            else:
+                ordered_pairs.append(nearest_pair)
+            
+            remaining_pairs.pop(nearest_idx)
         
-        return ordered
+        # Flatten back to list of waypoints
+        ordered_waypoints = []
+        for pair in ordered_pairs:
+            ordered_waypoints.extend(pair)
+        
+        return ordered_waypoints
 
     def send_next_goal(self):
         """Send next waypoint to Nav2."""
