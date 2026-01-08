@@ -51,12 +51,12 @@ ekf_filter_node:
     two_d_mode: true
     
     # =====================================================
-    # Odometry from wheel encoders (Arduino)
-    # PRIMARY SOURCE for position and rotation
+    # Laser Odometry from ICP (rtabmap)
+    # PRIMARY SOURCE - much more accurate than wheel encoders!
     # =====================================================
-    odom0: wheel_odom
+    odom0: laser_odom
     odom0_config: [true, true, false,    # x, y, z
-                   false, false, true,    # roll, pitch, yaw - USE YAW FROM WHEELS
+                   false, false, true,    # roll, pitch, yaw
                    true, true, false,     # vx, vy, vz
                    false, false, true,    # vroll, vpitch, vyaw
                    false, false, false]   # ax, ay, az
@@ -67,14 +67,13 @@ ekf_filter_node:
     
     # =====================================================
     # IMU (after Madgwick filter)
-    # ONLY use for angular velocity, NOT absolute orientation
-    # The IMU yaw drifts too much without magnetometer calibration
+    # Use angular velocity to smooth rotation estimates
     # =====================================================
     imu0: imu/data
     imu0_config: [false, false, false,    # x, y, z
-                  false, false, false,     # roll, pitch, yaw - DISABLED (drifts!)
+                  false, false, false,     # roll, pitch, yaw - laser handles this
                   false, false, false,     # vx, vy, vz
-                  false, false, true,      # vroll, vpitch, vyaw - only angular vel
+                  false, false, true,      # vroll, vpitch, vyaw - angular velocity only
                   false, false, false]     # ax, ay, az
     
     imu0_queue_size: 10
