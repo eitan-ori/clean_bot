@@ -1,7 +1,28 @@
 #!/usr/bin/env python3
 """
-Simple IMU Driver for Grove IMU 9DOF (ICM20600 + AK09918)
-Direct I2C communication using smbus2
+###############################################################################
+# FILE DESCRIPTION:
+# This library provides low-level I2C communication for the Grove IMU 9DOF,
+# which uses the ICM20600 (Accelerometer/Gyroscope) and AK09918 (Magnetometer).
+# It abstracts register-level operations into simple Python methods.
+#
+# MAIN FUNCTIONS:
+# 1. Initializes both chips over the I2C bus.
+# 2. Reads raw byte blocks and converts them into signed 16-bit integers.
+# 3. Scales raw values into standard SI units (m/s^2, rad/s, and Tesla).
+#
+# REGISTERS & CONSTANTS:
+# - ICM20600_ADDR: 0x69 (I2C address for the motion sensor).
+# - AK09918_ADDR: 0x0C (I2C address for the magnetometer).
+# - Accel Scale: 16384 LSB/g (Assuming +/- 2g range).
+# - Gyro Scale: 131 LSB/dps (Assuming +/- 250 dps range).
+#
+# ASSUMPTIONS:
+# - The 'smbus2' Python library is available on the system.
+# - The host (e.g., Raspberry Pi) has I2C enabled and the sensor is correctly
+#   powered (3.3V or 5V depending on board design).
+# - No advanced calibration (biases, soft-iron, etc.) is performed in this layer.
+###############################################################################
 """
 
 import time

@@ -1,6 +1,26 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
 
+    <!--
+    This file configures the diff-drive plugin for ROS 2 and Gazebo. It enables
+    simulated movement and odometry publishing based on commanded velocities.
+
+    Differential Drive Parameters:
+    - Wheel Separation: 0.35m (distance between the centers of the wheels).
+    - Wheel Diameter: 0.1m.
+    - Max Torque: 200 Nm per wheel.
+    - Max Acceleration: 10.0 m/s^2.
+    
+    Frames and TF:
+    - Odometry Frame: odom.
+    - Robot Base Frame: base_link.
+    - Publishes: Odometry message (/odom) and TF transforms for wheels and odom.
+
+    Assumptions:
+    - Physical joints named 'left_wheel_joint' and 'right_wheel_joint' exist in the model.
+    - The plugin subscribes to the default /cmd_vel topic for locomotion.
+    -->
+
     <gazebo>
         <plugin name="diff_drive" filename="libgazebo_ros_diff_drive.so">
 

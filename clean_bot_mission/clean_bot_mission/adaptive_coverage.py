@@ -1,31 +1,32 @@
 #!/usr/bin/env python3
 """
-Adaptive Coverage Planner for Complex Room Shapes
-
-This node generates a coverage path for cleaning that adapts to:
-- Irregular room shapes
-- Furniture and obstacles
-- Multiple rooms connected together
-
-Algorithm: Cell Decomposition + Boustrophedon
-1. Decompose free space into cells
-2. Generate zigzag path within each cell
-3. Connect cells optimally (TSP-like)
-
-The path follows actual free space from the map, not a simple rectangle!
-
-Topics Subscribed:
-- /map (nav_msgs/OccupancyGrid) - Complete map from SLAM
-- /exploration_complete (std_msgs/Bool) - Trigger to start coverage
-
-Actions Used:
-- /navigate_to_pose (nav2_msgs/NavigateToPose)
-
-Parameters:
-- coverage_width: Width of cleaning stripe (default: 0.14m = 14cm)
-- start_on_exploration_complete: Auto-start when exploration finishes
-
-Author: Clean Bot Team
+###############################################################################
+# FILE DESCRIPTION:
+# This node implements an advanced adaptive coverage planner for irregular
+# and complex indoor environments. Unlike simple rectangular planners, it
+# uses cell decomposition to break the free space into segments and applies
+# optimized zigzag paths to each segment.
+#
+# MAIN FUNCTIONS:
+# 1. Analyzes the current occupancy grid map and inflates obstacles to 
+#    account for robot footprint.
+# 2. Decomposes the floor into convex or near-convex cells.
+# 3. Calculates a coverage path (zigzag) within each cell, respecting the 
+#    robot's cleaning tool width.
+# 4. Sequences goals to Nav2 to execute the full coverage mission.
+#
+# PARAMETERS & VALUES:
+# - coverage_width: 0.14 m (Effective cleaning width of the robot).
+# - overlap_ratio: 0.15 (15% overlap between cleaning passes).
+# - robot_radius: 0.12 m (Used to avoid clipping walls/furniture).
+# - min_region_area: 0.1 m² (Ignore very small pockets of space).
+# - start_on_exploration_complete: True (Auto-trigger after mapping).
+#
+# ASSUMPTIONS:
+# - Scipy and Numpy are available for image processing/array operations.
+# - The map is accurate and represents the current physical state.
+# - The robot can execute point-to-point navigation reliably.
+###############################################################################
 """
 
 import math

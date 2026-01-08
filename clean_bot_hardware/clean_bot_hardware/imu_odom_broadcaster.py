@@ -1,8 +1,26 @@
 #!/usr/bin/env python3
 """
-Simple TF Broadcaster for IMU-based Odometry
-Publishes odom -> base_link transform based on IMU orientation.
-Assumes IMU is rotationally aligned with base_link.
+###############################################################################
+# FILE DESCRIPTION:
+# This node provides a simplified transformation broadcaster that maps IMU
+# orientation directly to the robot's odometry frame.
+#
+# MAIN FUNCTIONS:
+# 1. Subscribes to IMU data (orientation quaternion).
+# 2. Publishes a TF transform from 'odom' to 'base_link'.
+# 3. Keeps the robot's translation at zero while updating its rotation.
+#
+# PARAMETERS & VALUES:
+# - imu_topic: /imu/data (Source of absolute orientation).
+# - parent_frame: odom (The reference world/start frame).
+# - child_frame: base_link (The robot's local frame).
+#
+# ASSUMPTIONS:
+# - This node is intended for orientation-only testing or systems where 
+#   linear displacement is handled by a different source (or not needed).
+# - The IMU sensor is mounted level and aligned with the robot's forward axis.
+# - The IMU provides a filtered orientation estimate (not raw gyro data).
+###############################################################################
 """
 
 import rclpy

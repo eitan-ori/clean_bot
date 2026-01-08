@@ -1,3 +1,26 @@
+# #############################################################################
+# SLAM TOOLBOX CONFIGURATION
+# 
+# FILE DESCRIPTION:
+# This file contains the parameters for the 'slam_toolbox' node, specifically
+# for asynchronous online mapping. It defines how the robot builds a map
+# of its environment using LiDAR scans and odometry data.
+#
+# KEY PARAMETERS:
+# - odom_frame: odom (The input odometry frame).
+# - map_frame: map (The world-fixed coordinate frame).
+# - scan_topic: /scan (The source of laser measurements).
+# - resolution: 0.05 (Grid size of the occupancy map in meters).
+# - max_laser_range: 4.5 (LiDAR points beyond this are ignored for mapping).
+# - minimum_travel_distance: 0.1 (Robot must move 10cm before processing a new scan).
+# - do_loop_closing: true (Enables detection of previously visited areas).
+#
+# ASSUMPTIONS:
+# - The robot provides a TF transform from odom to base_link.
+# - A 2D LiDAR is mounted and publishing scan data.
+# - The solver (Ceres) is available on the system.
+# #############################################################################
+
 slam_toolbox:
   ros__parameters:
 

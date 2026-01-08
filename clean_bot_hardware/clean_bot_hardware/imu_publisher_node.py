@@ -1,7 +1,27 @@
 #!/usr/bin/env python3
 """
-ROS 2 IMU Publisher Node for Grove IMU 9DOF (ICM20600 + AK09918)
-Publishes sensor_msgs/Imu and sensor_msgs/MagneticField messages
+###############################################################################
+# FILE DESCRIPTION:
+# This node interfaces with the Grove IMU 9DOF (comprised of ICM20600 and 
+# AK09918 chips) via I2C. It reads raw physical measurements and converts 
+# them into standard ROS 2 sensor messages.
+#
+# MAIN FUNCTIONS:
+# 1. Periodically polls the IMU for acceleration, angular velocity, and 
+#    magnetic field data.
+# 2. Publishes raw IMU data to 'imu/data_raw' (sensor_msgs/Imu).
+# 3. Publishes magnetic field data to 'imu/mag' (sensor_msgs/MagneticField).
+#
+# PARAMETERS & VALUES:
+# - i2c_bus: 1 (The I2C bus index on the host SBC, usually Raspberry Pi).
+# - frame_id: imu_link (The TF frame name associated with the physical sensor).
+# - publish_rate: 50.0 Hz (Sampling and publishing frequency).
+#
+# ASSUMPTIONS:
+# - The Grove IMU 9DOF sensor is correctly wired to the I2C pins.
+# - The 'smbus2' or similar library is used by the underlying SimpleIMU driver.
+# - Magnetic field data is raw and not yet calibrated for local interference.
+###############################################################################
 """
 
 import rclpy

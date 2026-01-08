@@ -1,4 +1,27 @@
 #!/usr/bin/env python3
+"""
+###############################################################################
+# FILE DESCRIPTION:
+# This script is a diagnostic utility for identifying the serial port and
+# baud rate of a connected LiDAR sensor (especially RPLidar). It scans all 
+# matching device paths (/dev/ttyUSB*) and attempts to handshake with the sensor.
+#
+# MAIN FUNCTIONS:
+# 1. Lists all available serial devices.
+# 2. Iterates through common LiDAR baud rates (115200, 256000, 1000000).
+# 3. Sends a 'Get Health' command to trigger a response from the hardware.
+# 4. Reports success if valid bytes are received, helping the user configure
+#    their launch files correctly.
+#
+# PARAMETERS & VALUES:
+# - baudrates: [115200, 256000, 1000000] (Standard rates for A1, A2, A3 models).
+#
+# ASSUMPTIONS:
+# - The script is run on a Linux environment (Raspberry Pi/Ubuntu).
+# - The user has 'pyserial' installed in their Python environment.
+# - The sensor is an RPLidar or uses a similar start-up protocol.
+###############################################################################
+"""
 import serial
 import glob
 import time

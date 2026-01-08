@@ -1,6 +1,26 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" >
 
+    <!--
+    This file provides reusable Xacro macros for calculating the inertial properties 
+    of common geometric shapes (sphere, box, cylinder). These calculations are 
+    essential for realistic physical simulation in Gazebo.
+
+    Macros:
+    - inertial_sphere: Calculates inertia for a solid sphere based on mass and radius.
+    - inertial_box: Calculates inertia for a solid box based on mass and dimensions (x, y, z).
+    - inertial_cylinder: Calculates inertia for a solid cylinder based on mass, length, and radius.
+
+    Parameters:
+    - mass: Weight of the link in kilograms.
+    - dimensions (radius, length, x, y, z): Geometric measurements in meters.
+    - *origin: The origin of the inertial frame relative to the link frame.
+
+    Assumptions:
+    - Objects have uniform density.
+    - Formulas used are standard moments of inertia for solid primitives.
+    -->
+
     <!-- Specify some standard inertial calculations https://en.wikipedia.org/wiki/List_of_moments_of_inertia -->
     <!-- These make use of xacro's mathematical functionality -->
 

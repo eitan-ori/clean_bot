@@ -1,26 +1,32 @@
 #!/usr/bin/env python3
 """
-Emergency Stop Controller
-
-Monitors ultrasonic sensor for immediate collision threats and stops the robot.
-This is a safety layer that overrides navigation commands when obstacle is too close.
-
-This node acts as a "velocity mux" - it passes through cmd_vel normally,
-but blocks/modifies it when an obstacle is detected at close range.
-
-Sensor configuration:
-- Ultrasonic at 3cm height: detects low obstacles
-- Emergency stop distance: 10cm (stops immediately)
-- Slow down distance: 30cm (reduces speed)
-
-Topics Subscribed:
-- /ultrasonic_range (sensor_msgs/Range) - Ultrasonic readings
-- /cmd_vel_nav (geometry_msgs/Twist) - Input from Nav2
-
-Topics Published:
-- /cmd_vel (geometry_msgs/Twist) - Output to motors (filtered)
-
-Author: Clean Bot Team
+###############################################################################
+# FILE DESCRIPTION:
+# This node implements a safety supervisor (Emergency Stop) for the robot.
+# It monitors the distance to obstacles detected by the ultrasonic sensor and
+# modifies incoming velocity commands from navigation to prevent collisions.
+#
+# MAIN FUNCTIONS:
+# 1. Subscribes to /cmd_vel_nav (input from the navigation stack).
+# 2. Subscribes to /ultrasonic_range (real-time distance to obstacles).
+# 3. Filters forward velocity:
+#    - Obstacle < distance_stop: Linear velocity set to 0 (Full Stop).
+#    - Obstacle < distance_slow: Linear velocity scaled down (Caution).
+#    - Obstacle > distance_slow: Velocity passes through unchanged.
+# 4. Publishes final vetted commands to /cmd_vel.
+#
+# PARAMETERS & VALUES:
+# - emergency_stop_distance: 0.10 m (Triggers immediate halt).
+# - slow_down_distance: 0.30 m (Triggers speed reduction).
+# - slow_down_factor: 0.3 (Multiply original speed by 0.3 in caution zone).
+# - reverse_allowed: True (Allows backing away from obstacles).
+# - timeout_sec: 0.5 s (Safety fallback if sensor data stops arriving).
+#
+# ASSUMPTIONS:
+# - The navigation stack outputs to /cmd_vel_nav instead of /cmd_vel.
+# - The ultrasonic sensor is facing forward and providing accurate range data.
+# - Rotation is always allowed even in stop state (to let the robot turn away).
+###############################################################################
 """
 
 import rclpy

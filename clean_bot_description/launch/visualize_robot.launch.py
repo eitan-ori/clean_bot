@@ -1,3 +1,24 @@
+'''
+This launch file is used for standalone visualization of the robot model in RViz.
+It combines the robot state publisher, joint state publisher, and an RViz instance.
+
+Components:
+- robot_state_publisher: Converts Xacro/URDF to the '/robot_description' topic.
+- joint_state_publisher: Provides dummy state data for non-fixed joints (e.g., wheels).
+- RViz2: Opens the visualization window with a pre-defined configuration.
+
+Parameters:
+- None.
+
+Main Files Used:
+- urdf/robot.urdf.xacro: The source robot model.
+- config/robot_visualization.rviz: The pre-saved layout for RViz dashboard.
+
+Assumptions:
+- The user has RViz2 installed and graphic acceleration is available.
+- This is primarily used for verifying the model's appearance and joint hierarchy.
+'''
+
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription

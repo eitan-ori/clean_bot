@@ -1,18 +1,31 @@
 #!/usr/bin/env python3
 """
-Clean Bot Exploration Mission
-
-This node executes an autonomous exploration mission to map an unknown
-multi-room apartment using Nav2 navigation and SLAM Toolbox.
-
-The robot follows waypoints through different rooms:
-- Living Room
-- Kitchen
-- Bedroom 1
-- Bedroom 2
-- Bathroom/Hallway
-
-Author: Clean Bot Team
+###############################################################################
+# FILE DESCRIPTION:
+# This node manages an autonomous apartment exploration mission. It guides
+# the robot through a predefined sequence of waypoints designed to ensure that
+# every room in the simulated environment is visited and mapped by SLAM.
+#
+# MAIN FUNCTIONS:
+# 1. Blocks until the Navigation stack is ready.
+# 2. Sets an initial pose estimate within the known "Living Room" start area.
+# 3. Executes a sequential navigation mission through four phases:
+#    - Phase 1: Mapping the Living Room.
+#    - Phase 2: Passing through a doorway to map the Kitchen.
+#    - Phase 3: Transitioning back to the main hall.
+#    - Phase 4: Navigating into the Bedrooms.
+#
+# MISSION DETAILS:
+# - Start Position: (3.0, 5.5, 0.0).
+# - Rooms Covered: Living Room, Kitchen, Bedrooms, Bathroom, Hallways.
+# - Strategy: Progressive exploration with short-distance waypoint hops to
+#   maintain SLAM stability.
+#
+# ASSUMPTIONS:
+# - The robot is running in a simulation (or physical space) that matches the 
+#   apartment.world layout.
+# - SLAM Toolbox is active and successfully updating the map.
+###############################################################################
 """
 
 import time

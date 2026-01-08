@@ -2,6 +2,8 @@
 
 A ROS 2 Humble autonomous cleaning robot simulation featuring SLAM-based navigation, Gazebo simulation, and mission planning.
 
+> **Note:** All source files, configuration files, and launch files in this project have been documented with headers explaining their purpose, parameters, and underlying assumptions.
+
 ![ROS 2](https://img.shields.io/badge/ROS%202-Humble-blue)
 ![Gazebo](https://img.shields.io/badge/Gazebo-Classic-orange)
 ![Nav2](https://img.shields.io/badge/Nav2-Navigation-green)

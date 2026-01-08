@@ -1,3 +1,26 @@
+# #############################################################################
+# ROBOT LOCALIZATION (EKF) CONFIGURATION
+# 
+# FILE DESCRIPTION:
+# This file configures the Extended Kalman Filter (EKF) from the 
+# 'robot_localization' package. It fuses noisy sensor data to produce a stable 
+# and accurate estimate of the robot's pose (position and orientation).
+#
+# SENSOR SOURCES:
+# - odom0 (wheel_odom): Provides X/Y position and linear/angular velocity.
+# - imu0 (imu/data): Provides absolute orientation (Euler angles) and angular rates.
+#
+# PARAMETERS:
+# - frequency: 30.0 Hz (Rate of state estimation calculation).
+# - two_d_mode: true (Constrains the robot to the X-Y plane).
+# - publish_tf: true (Broadcaster for the odom -> base_link transform).
+#
+# ASSUMPTIONS:
+# - Wheel odometry is reasonably accurate over short distances but drifts.
+# - IMU data has been pre-filtered (e.g., via Madgwick) to provide stable 
+#   orientation as well as raw angular rates.
+# #############################################################################
+
 # Robot Localization EKF Configuration
 # Fuses wheel odometry from Arduino + IMU for better pose estimation
 #

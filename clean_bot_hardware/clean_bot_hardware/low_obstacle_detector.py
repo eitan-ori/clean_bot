@@ -1,25 +1,33 @@
 #!/usr/bin/env python3
 """
-Low Obstacle Detector
-
-Converts ultrasonic range sensor data to PointCloud2 for costmap integration.
-This allows Nav2 to detect and avoid low obstacles that the lidar misses.
-
-Sensor heights:
-- Lidar: 17cm - good for walls, furniture legs, etc.
-- Ultrasonic: 3cm - catches low obstacles (cables, pet bowls, shoes, thresholds)
-
-The ultrasonic creates a "virtual obstacle" point cloud that gets merged
-into the costmap, ensuring the robot avoids low obstacles.
-
-Topics Subscribed:
-- /ultrasonic_range (sensor_msgs/Range) - From Arduino
-
-Topics Published:
-- /low_obstacles (sensor_msgs/PointCloud2) - For costmap integration
-- /low_obstacle_marker (visualization_msgs/Marker) - For RViz
-
-Author: Clean Bot Team
+###############################################################################
+# FILE DESCRIPTION:
+# This node converts 1D distance data from an ultrasonic sensor into a 3D
+# PointCloud2 message. This allows the navigation stack to "see" low-profile
+# obstacles that would normally be invisible to a planar LiDAR mounted higher
+# on the robot.
+#
+# MAIN FUNCTIONS:
+# 1. Subscribes to /ultrasonic_range.
+# 2. When an obstacle is within range, it generates a set of virtual points
+#    in a 3D arc representing the sensor's field of view.
+# 3. Publishes a PointCloud2 to /low_obstacles for integration into Nav2 costmaps.
+# 4. Publishes a visualization marker to /low_obstacle_marker for RViz.
+#
+# PARAMETERS & VALUES:
+# - ultrasonic_frame: ultrasonic_link (TF frame associated with the sensor).
+# - min_obstacle_distance: 0.05 m (Ignore readings closer than 5cm due to noise).
+# - max_obstacle_distance: 0.50 m (Only report obstacles closer than 50cm).
+# - obstacle_height: 0.03 m (Assumed height of the "virtual" points).
+# - cone_angle: 0.26 rad (~15 deg half-angle of the sensor beam).
+# - points_per_detection: 5 (Number of points used to represent one detection).
+# - obstacle_persistence: 2.0 s (How long to keep publishing the obstacle after detection).
+#
+# ASSUMPTIONS:
+# - The ultrasonic sensor is mounted at a low height (e.g., 3cm).
+# - Obstacles detected by the ultrasonic sensor are standing on the floor.
+# - Nav2 is configured to include the /low_obstacles topic in its observation sources.
+###############################################################################
 """
 
 import math

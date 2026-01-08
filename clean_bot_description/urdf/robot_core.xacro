@@ -1,6 +1,30 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" >
 
+    <!--
+    This file defines the core physical structure of the robot, including the chassis,
+    drive wheels, and castor wheels. It specifies the geometry, materials, collision properties,
+    and inertial properties for each link.
+
+    Main Components:
+    - base_link: The origin of the robot, usually located at the center of the drive axle.
+    - chassis: The main body of the robot, a 30x30x15cm box offset from the base_link.
+    - left_wheel / right_wheel: Differential drive wheels with 5cm radius and 4cm thickness,
+      positioned 17.5cm from the center.
+    - castor_wheel: A spherical support wheel to provide stability.
+
+    Parameters & Values:
+    - Chassis mass: 0.5 kg
+    - Wheel mass: 0.1 kg
+    - Castor wheel mass: 0.1 kg
+    - Colors: white (chassis), blue (wheels), black (castor).
+
+    Assumptions:
+    - The robot is a differential drive mobile platform.
+    - The base_link is located on the ground directly between the drive wheels.
+    - Standard gravitational and physics parameters apply in Gazebo.
+    -->
+
     <xacro:include filename="inertial_macros.xacro"/>
 
     <material name="white">

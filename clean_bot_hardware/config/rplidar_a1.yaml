@@ -1,3 +1,22 @@
+# #############################################################################
+# RPLIDAR A1 DRIVER CONFIGURATION
+# 
+# FILE DESCRIPTION:
+# This file provides the specific parameters for the sllidar_ros2 driver
+# when used with the RPLidar A1M8 (Version 6) sensor.
+#
+# KEY PARAMETERS:
+# - serial_port: /dev/ttyUSB0 (The physical USB port).
+# - serial_baudrate: 115200 (Required for version A1).
+# - scan_mode: Standard (The default scanning mode).
+# - frame_id: laser_frame (Matches the child link in lidar.xacro).
+#
+# ASSUMPTIONS:
+# - The sensor is version A1. Older or newer versions (A2, A3) might
+#   require different baud rates (e.g., 256000).
+# - The user has mapped the USB port correctly.
+# #############################################################################
+
 # RPLidar A1M8 V6 Configuration
 
 rplidar_node:

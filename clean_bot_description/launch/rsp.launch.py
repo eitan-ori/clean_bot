@@ -1,3 +1,22 @@
+'''
+This launch file starts the Robot State Publisher node. It processes the Xacro
+description of the robot and publishes the 'robot_description' parameter,
+along with the TF transforms for all static joints in the model.
+
+Parameters:
+- use_sim_time: (string/bool) If 'true', synchronized timing is taken from Gazebo/Simulation.
+  Default: 'false'.
+
+Process:
+1. Locates the 'robot.urdf.xacro' file in the package's URDF directory.
+2. Uses the xacro library to compile the Xacro XML into a raw URDF string.
+3. Passes the URDF string to the 'robot_state_publisher' node as a parameter.
+
+Assumptions:
+- The package name is 'clean_bot_description'.
+- All required Xacro sub-files are available in the urdf folder.
+'''
+
 import os
 
 from ament_index_python.packages import get_package_share_directory

@@ -1,3 +1,18 @@
+'''
+This launch file starts ONLY the RViz2 visualization tool. It does not process
+the URDF or start state publishers.
+
+Parameters:
+- None.
+
+Main Files Used:
+- config/robot_visualization.rviz: The configuration file for the RViz layout.
+
+Assumptions:
+- The robot's state and description are already being published by another
+  running node (e.g., in a simulation or on real hardware).
+'''
+
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription

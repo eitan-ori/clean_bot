@@ -1,29 +1,30 @@
 #!/usr/bin/env python3
 """
-Clean Bot Coverage Mission
-
-This node executes a full coverage path (cleaning pattern) over a mapped area.
-Uses a boustrophedon (zigzag/lawnmower) pattern with configurable coverage width.
-
-Features:
-- Generates zigzag path based on map from SLAM
-- Configurable coverage width (default: 14cm for cleaning)
-- Skips obstacles and unknown areas
-- Recovery behaviors on navigation failures
-- Progress tracking and reporting
-
-Topics Subscribed:
-- /map (nav_msgs/OccupancyGrid) - Map from SLAM
-
-Actions Used:
-- /navigate_to_pose (nav2_msgs/NavigateToPose)
-
-Parameters:
-- coverage_width: Width of coverage stripe (default: 0.14m = 14cm)
-- overlap_ratio: How much stripes overlap (default: 0.1 = 10%)
-- timeout_per_waypoint: Max seconds per waypoint (default: 60)
-
-Author: Clean Bot Team
+###############################################################################
+# FILE DESCRIPTION:
+# This node executes a systematic area coverage mission, often called a 
+# "lawnmower" or "zigzag" pattern. It analyzes the occupancy grid map to 
+# generate a series of waypoints that ensure the robot's cleaning tool passes 
+# over every reachable square meter of the floor.
+#
+# MAIN FUNCTIONS:
+# 1. Listens for an OccupancyGrid on the /map topic.
+# 2. Extract boundaries of the free space (cells with occupancy < free_threshold).
+# 3. Generates a boustrophedon (zigzag) path with a fixed stripe width.
+# 4. Iteratively sends NavigateToPose goals to Nav2 until the entire area is covered.
+#
+# PARAMETERS & VALUES:
+# - coverage_width: 0.14 m (The physical width of the robot's cleaning brush/suction).
+# - overlap_ratio: 0.1 (10% overlap between stripes to ensure no spots are missed).
+# - margin: 0.15 m (Safety buffer to keep away from walls and permanent obstacles).
+# - free_threshold: 50 (Probability cutoff to distinguish between empty space and walls).
+# - timeout_per_waypoint: 60 s (Maximum time allowed to reach a single waypoint).
+#
+# ASSUMPTIONS:
+# - A static map has been pre-generated or is stable enough to plan over.
+# - The environment is mostly static; moving obstacles are handled by Nav2's
+#   local planner but may cause the coverage to be incomplete in those spots.
+###############################################################################
 """
 
 import math

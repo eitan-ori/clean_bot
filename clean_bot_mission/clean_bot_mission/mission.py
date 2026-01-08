@@ -1,12 +1,27 @@
 #!/usr/bin/env python3
 """
-Clean Bot Mission Node
-
-This node executes an autonomous cleaning mission using Nav2 navigation.
-The robot follows a predefined square path through waypoints and returns
-to the starting position (dock).
-
-Author: Clean Bot Team
+###############################################################################
+# FILE DESCRIPTION:
+# This node executes a high-level autonomous cleaning mission using the Nav2
+# Simple Commander API. It commands the robot to traverse a set of coordinates
+# in a loop, simulating a basic area coverage or patrol task.
+#
+# MAIN FUNCTIONS:
+# 1. Blocks until Nav2 and SLAM Toolbox are fully initialized and active.
+# 2. Sets the robot's initial pose estimate at (0,0) in the map frame.
+# 3. Dispatches a sequence of target waypoints (forming a square).
+# 4. Monitors execution status and reports success or failure.
+#
+# MISSION DETAILS:
+# - Initial Pose: (0,0,0) - Assumes starting at the home/dock position.
+# - Path: A 1.5 meter square pattern.
+# - Waypoints: (1.5,0), (1.5,1.5), (0,1.5), (0,0).
+#
+# ASSUMPTIONS:
+# - The 'nav2_simple_commander' package is available.
+# - The robot is in an environment large enough to accommodate the 1.5m path.
+# - Static and dynamic obstacles are handled by the underlying Nav2 planners.
+###############################################################################
 """
 
 import time

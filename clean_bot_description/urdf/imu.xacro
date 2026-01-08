@@ -1,6 +1,25 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" >
 
+    <!--
+    This file adds an Inertial Measurement Unit (IMU) sensor to the robot model.
+    The IMU provides linear acceleration and angular velocity data.
+
+    Physical Properties:
+    - Joint: imu_joint (fixed to chassis).
+    - Link: imu_link (small 5x5x5cm box).
+
+    Gazebo Sensor Parameters:
+    - Type: imu.
+    - Update Rate: 100 Hz (sensor), 10 Hz (plugin output).
+    - ROS Topic: /imu.
+    - Gaussian Noise: 0.0 (ideal sensor).
+
+    Assumptions:
+    - The IMU is placed in the center of the robot's main body.
+    - Used for enhancing odometry and providing heading information.
+    -->
+
     <joint name="imu_joint" type="fixed">
         <parent link="chassis"/>
         <child link="imu_link"/>

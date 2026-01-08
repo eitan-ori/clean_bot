@@ -1,27 +1,34 @@
 #!/usr/bin/env python3
 """
-Arduino Motor/Encoder Driver for Clean Bot
-
-This node communicates with an Arduino that controls:
-- 2x DC motors (via L298N driver)
-- 2x Encoders (GB37-131)
-- 1x Ultrasonic sensor (HC-SR04)
-
-Communication Protocol:
-- Send: "pwm_left,pwm_right\n" (values from -255 to 255)
-- Receive: "left_ticks,right_ticks,distance_cm\n"
-
-Topics Published:
-- /wheel_odom (nav_msgs/Odometry) - Wheel odometry
-- /ultrasonic_range (sensor_msgs/Range) - Ultrasonic distance
-
-Topics Subscribed:
-- /cmd_vel (geometry_msgs/Twist) - Velocity commands
-
-TF Published:
-- odom -> base_link (when publish_tf=true)
-
-Author: Clean Bot Team
+###############################################################################
+# FILE DESCRIPTION:
+# This node acts as the primary hardware bridge between ROS 2 and the physical
+# robot platform (Arduino-based). It handles bidirectional serial communication
+# to control motors and retrieve sensor feedback (encoders and ultrasonic).
+#
+# MAIN FUNCTIONS:
+# 1. Subscribes to /cmd_vel and converts twist commands into motor PWM values.
+# 2. Receives encoder ticks from Arduino and calculates wheel odometry.
+# 3. Publishes odometry data and TF transforms (odom -> base_link).
+# 4. Receives and publishes ultrasonic range data for obstacle avoidance.
+#
+# PARAMETERS & VALUES:
+# - serial_port: /dev/ttyUSB0 (The USB port where Arduino is connected)
+# - baud_rate: 57600 (Must match the Arduino sketch baud rate)
+# - wheel_radius: 0.0335 m (Physical radius of the drive wheels)
+# - wheel_separation: 0.20 m (Distance between the center of left and right wheels)
+# - ticks_per_revolution: 1320 (Total encoder counts for one full wheel rotation)
+# - max_linear_speed: 0.3 m/s (Maximum speed target for PWM 255)
+# - max_pwm: 255 (The maximum integer value for motor speed control)
+# - publish_rate: 20.0 Hz (Frequency of the main control loop)
+#
+# ASSUMPTIONS:
+# - The robot uses a differential drive configuration.
+# - The Arduino is programmed with the matching communication protocol:
+#   Input: "pwm_left,pwm_right\n"
+#   Output: "left_ticks,right_ticks,distance_cm\n"
+# - The user has serial port permissions (dialout group).
+###############################################################################
 """
 
 import math

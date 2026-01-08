@@ -1,3 +1,25 @@
+# #############################################################################
+# NAV2 STACK CONFIGURATION
+# 
+# FILE DESCRIPTION:
+# This file contains parameters for all nodes in the Navigation2 stack, 
+# including AMCL (localization), BT Navigator (behavior trees), 
+# Controller Server (local planning), Planner Server (global planning), 
+# and Costmaps.
+#
+# KEY PARAMETERS:
+# - robot_model_type: DifferentialMotionModel (For two-wheeled drive).
+# - inflation_layer: Configured for a small (~20cm) footprint.
+# - scan_topic: /scan (Used for both localization and obstacle avoidance).
+# - odom_frame: odom.
+# - base_frame: base_link.
+#
+# ASSUMPTIONS:
+# - The robot is a differential drive platform.
+# - A map is available for AMCL (if used) or SLAM is publishing the map frame.
+# - The sensor suite includes at least a 2D LiDAR.
+# #############################################################################
+
 # Nav2 Parameters for Clean Bot
 # Optimized for small indoor robot with differential drive
 # Robot width: ~20cm, Coverage width: 14cm

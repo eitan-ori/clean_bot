@@ -1,33 +1,32 @@
 #!/usr/bin/env python3
 """
-Clean Bot Main Bringup Launch File
-
-This is the main entry point for running the Clean Bot robot.
-It launches all necessary components:
-
-Hardware Layer:
-- Arduino Driver (motors, encoders, ultrasonic)
-- RPLidar A1 (laser scanner)
-- IMU (Grove 9DOF - ICM20600 + AK09918)
-- Robot State Publisher (URDF/TF)
-
-Perception Layer:
-- IMU Madgwick Filter (orientation fusion)
-- Robot Localization EKF (sensor fusion)
-
-Mapping & Navigation:
-- SLAM Toolbox (mapping)
-- Nav2 Stack (autonomous navigation)
-
-Usage:
-    ros2 launch clean_bot_hardware robot_bringup.launch.py
-
-    # With arguments:
-    ros2 launch clean_bot_hardware robot_bringup.launch.py \
-        arduino_port:=/dev/ttyUSB1 \
-        lidar_port:=/dev/ttyUSB0
-
-Author: Clean Bot Team
+###############################################################################
+# FILE DESCRIPTION:
+# This is the master bringup launch file for the Clean Bot robot. It initializes
+# all hardware drivers, perception filters, and the navigation/mapping stack.
+#
+# MAIN FUNCTIONS:
+# 1. Launches Hardware Drivers: Arduino (motors/encoders), RPLidar, and IMU.
+# 2. Starts Robot State Publisher: Broadcasts URDF and static TF transforms.
+# 3. Perception: Optional SLAM Toolbox for real-time mapping.
+# 4. Navigation: Optional Nav2 stack for autonomous movement.
+# 5. Sensor Fusion: Configures EKF (robot_localization) if available.
+#
+# PARAMETERS & VALUES:
+# - use_sim_time: false (Set to true only when running in Gazebo).
+# - arduino_port: /dev/ttyUSB0 (Primary motor/sensor interface).
+# - lidar_port: /dev/ttyUSB1 (Laser scanner interface).
+# - i2c_bus: 1 (I2C interface for the IMU).
+# - wheel_radius: 0.034 m (Calibrated wheel measurement).
+# - wheel_separation: 0.20 m (Calibrated width measurement).
+# - use_nav2: true (Whether to start the navigation stack).
+# - use_slam: true (Whether to start mapping).
+#
+# ASSUMPTIONS:
+# - All physical hardware is connected to the corresponding USB/I2C ports.
+# - The 'clean_bot_description' package is built and available.
+# - Necessary ROS 2 components (SLAM Toolbox, Nav2) are installed on the host.
+###############################################################################
 """
 
 import os

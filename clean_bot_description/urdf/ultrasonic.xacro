@@ -1,6 +1,28 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
 
+    <!-- 
+    This file describes an ultrasonic distance sensor (HC-SR04 model) for
+    detecting obstacles that may be too low for the primary LiDAR.
+
+    Physical Properties:
+    - Joint: ultrasonic_joint (fixed at the front exhaust, low height).
+    - Link: ultrasonic_link (approximate dimensions of HC-SR04 sensor).
+
+    Gazebo Sensor Parameters:
+    - Type: ray sensor configured as 'ultrasound'.
+    - Update Rate: 20 Hz.
+    - Samples: 5 rays across a narrow cone.
+    - FoV: ~15 degrees (-0.13 to 0.13 rad).
+    - Range: 2cm to 4.0m.
+    - Output Topic: /ultrasonic_range.
+    - Message Type: sensor_msgs/Range.
+
+    Assumptions:
+    - The sensor is mounted 3cm above the ground to detect low-profile obstacles.
+    - The simulation uses a narrow ray cone to approximate the ultrasound wave.
+    -->
+
     <!-- Ultrasonic Sensor (HC-SR04) -->
     <!-- Mounted at front, pointing forward -->
     <!-- Height: 3cm from ground -->

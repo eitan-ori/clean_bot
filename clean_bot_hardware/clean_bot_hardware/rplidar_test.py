@@ -1,7 +1,29 @@
 #!/usr/bin/env python3
 """
-RPLidar A1M8 Test Node
-Tests the physical RPLidar sensor and displays diagnostics.
+###############################################################################
+# FILE DESCRIPTION:
+# This node is a diagnostic utility for testing and monitoring the RPLidar A1M8
+# sensor output. It analyzes incoming LaserScan messages and prints summary
+# statistics to the terminal.
+#
+# MAIN FUNCTIONS:
+# 1. Subscribes to the LiDAR scan topic.
+# 2. Calculates and displays data such as:
+#    - Actual scan frequency (Hz).
+#    - Minimum, maximum, and average range measurements.
+#    - Number of valid vs. invalid (out of range/noise) points.
+#    - Direction (angle) of the closest detected obstacle.
+# 3. Acts as a sanity check before running complex navigation tasks.
+#
+# PARAMETERS & VALUES:
+# - scan_topic: /scan (The topic where the LiDAR driver publishes).
+# - display_interval: 1.0 s (Frequency of terminal updates).
+#
+# ASSUMPTIONS:
+# - A LiDAR driver node (e.g., sllidar_ros2) is already running and correctly
+#   configured with the right serial port (/dev/ttyUSB0).
+# - The sensor is physically clear of obstructions during testing for best results.
+###############################################################################
 """
 
 import rclpy
