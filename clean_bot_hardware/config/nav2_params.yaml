@@ -155,42 +155,42 @@ controller_server:
     FollowPath:
       plugin: "dwb_core::DWBLocalPlanner"
       debug_trajectory_details: True
-      min_vel_x: 0.0
+      # FORCE FORWARD MOTION - no pure rotation!
+      min_vel_x: 0.05        # MINIMUM forward speed - always move forward!
       min_vel_y: 0.0
-      max_vel_x: 0.15        # Max forward speed (m/s) - reduced for stability
+      max_vel_x: 0.15        # Max forward speed (m/s)
       max_vel_y: 0.0         # No lateral movement (diff drive)
-      max_vel_theta: 0.4     # Max rotation speed (rad/s) - REDUCED to prevent SLAM drift
-      min_speed_xy: 0.0
+      max_vel_theta: 0.25    # VERY SLOW rotation - prevent SLAM drift
+      min_speed_xy: 0.05     # Minimum speed - keep moving!
       max_speed_xy: 0.15
       min_speed_theta: 0.0
-      acc_lim_x: 0.5         # Slower acceleration
+      acc_lim_x: 0.5
       acc_lim_y: 0.0
-      acc_lim_theta: 0.8     # Slower angular acceleration
+      acc_lim_theta: 0.5     # Slower angular acceleration
       decel_lim_x: -0.5
       decel_lim_y: 0.0
-      decel_lim_theta: -0.8
+      decel_lim_theta: -0.5
       vx_samples: 20
       vy_samples: 0
-      vtheta_samples: 20
-      sim_time: 1.5
+      vtheta_samples: 10     # Fewer rotation samples
+      sim_time: 2.0          # Look further ahead
       linear_granularity: 0.05
       angular_granularity: 0.025
       transform_tolerance: 0.2
-      xy_goal_tolerance: 0.10
-      trans_stopped_velocity: 0.25
+      xy_goal_tolerance: 0.15    # More tolerance
+      trans_stopped_velocity: 0.1
       short_circuit_trajectory_evaluation: True
       stateful: True
-      critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
+      # PREFER FORWARD MOTION over rotation
+      critics: ["Oscillation", "BaseObstacle", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
+      # REMOVED RotateToGoal - don't rotate in place!
       BaseObstacle.scale: 0.02
       PathAlign.scale: 32.0
-      PathAlign.forward_point_distance: 0.1
+      PathAlign.forward_point_distance: 0.2
       GoalAlign.scale: 24.0
-      GoalAlign.forward_point_distance: 0.1
+      GoalAlign.forward_point_distance: 0.2
       PathDist.scale: 32.0
-      GoalDist.scale: 24.0
-      RotateToGoal.scale: 32.0
-      RotateToGoal.slowing_factor: 5.0
-      RotateToGoal.lookahead_time: -1.0
+      GoalDist.scale: 32.0     # Higher priority to reach goal
 
 local_costmap:
   local_costmap:
@@ -323,9 +323,8 @@ behavior_server:
     costmap_topic: local_costmap/costmap_raw
     footprint_topic: local_costmap/published_footprint
     cycle_frequency: 10.0
-    behavior_plugins: ["spin", "backup", "drive_on_heading", "wait"]
-    spin:
-      plugin: "nav2_behaviors/Spin"
+    # DISABLE SPIN - no rotation in place recovery!
+    behavior_plugins: ["backup", "drive_on_heading", "wait"]
     backup:
       plugin: "nav2_behaviors/BackUp"
     drive_on_heading:
@@ -337,9 +336,9 @@ behavior_server:
     transform_tolerance: 0.1
     use_sim_time: False
     simulate_ahead_time: 2.0
-    max_rotational_vel: 0.4    # REDUCED - prevent SLAM drift
-    min_rotational_vel: 0.2    # REDUCED
-    rotational_acc_lim: 0.8    # REDUCED
+    max_rotational_vel: 0.25   # VERY SLOW rotation
+    min_rotational_vel: 0.1
+    rotational_acc_lim: 0.5
 
 waypoint_follower:
   ros__parameters:
@@ -358,10 +357,10 @@ velocity_smoother:
     smoothing_frequency: 20.0
     scale_velocities: False
     feedback: "OPEN_LOOP"
-    max_velocity: [0.15, 0.0, 0.4]   # REDUCED angular to 0.4 rad/s
-    min_velocity: [-0.15, 0.0, -0.4]
-    max_accel: [0.5, 0.0, 0.8]       # Slower acceleration
-    max_decel: [-0.5, 0.0, -0.8]
+    max_velocity: [0.15, 0.0, 0.25]   # VERY SLOW angular
+    min_velocity: [-0.15, 0.0, -0.25]
+    max_accel: [0.5, 0.0, 0.5]
+    max_decel: [-0.5, 0.0, -0.5]
     odom_topic: "odom"
     odom_duration: 0.1
     deadband_velocity: [0.0, 0.0, 0.0]
