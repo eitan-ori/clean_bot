@@ -101,7 +101,7 @@ def generate_launch_description():
 
         # ==================== Arduino Driver ====================
         # Handles: Motors, Encoders, Ultrasonic
-        # Note: Wheel odometry published but NOT used - laser odom is primary
+        # Note: Wheel odometry published but RF2O provides TF
         Node(
             package='clean_bot_hardware',
             executable='arduino_driver',
@@ -113,7 +113,7 @@ def generate_launch_description():
                 'wheel_radius': wheel_radius,
                 'wheel_separation': wheel_separation,
                 'ticks_per_revolution': 1320,  # GB37-131: 11 CPR * 120 gear ratio
-                'publish_tf': False,  # EKF publishes odom->base_link
+                'publish_tf': False,  # RF2O publishes odom->base_link
                 'odom_frame_id': 'odom',
                 'base_frame_id': 'base_link',
             }]
@@ -201,41 +201,22 @@ def generate_launch_description():
             ]
         ),
 
-        # ==================== Laser Odometry (ICP Scan Matching) ====================
-        # Uses rtabmap's ICP odometry - much better than wheel encoders!
+        # ==================== RF2O Laser Odometry ====================
+        # Fast 2D laser odometry - much lighter than rtabmap ICP
         Node(
-            package='rtabmap_odom',
-            executable='icp_odometry',
-            name='icp_odometry',
+            package='rf2o_laser_odometry',
+            executable='rf2o_laser_odometry_node',
+            name='rf2o_laser_odometry',
             output='screen',
             parameters=[{
-                'frame_id': 'base_link',
+                'laser_scan_topic': '/scan',
+                'odom_topic': '/odom_rf2o',
+                'publish_tf': True,              # RF2O publishes odom->base_link
+                'base_frame_id': 'base_link',
                 'odom_frame_id': 'odom',
-                'publish_tf': False,  # EKF will publish tf
-                'wait_for_transform': 0.2,
-                'Icp/VoxelSize': '0.0',  # No voxel filtering for 2D
-                'Icp/MaxCorrespondenceDistance': '0.15',
-                'Icp/Iterations': '30',
-                'Icp/PointToPlane': 'false',  # Point-to-point for 2D
-                'Odom/Strategy': '0',  # ICP
-                'Odom/GuessMotion': 'true',
-                'Odom/ResetCountdown': '0',
-                'Odom/ScanKeyFrameThr': '0.7',
+                'init_pose_from_topic': '',
+                'freq': 20.0,
             }],
-            remappings=[
-                ('scan', '/scan'),
-                ('odom', '/laser_odom'),
-            ]
-        ),
-
-        # ==================== Robot Localization (EKF) ====================
-        # Fuses LASER odometry + IMU angular velocity
-        Node(
-            package='robot_localization',
-            executable='ekf_node',
-            name='ekf_filter_node',
-            output='screen',
-            parameters=[ekf_config, {'use_sim_time': use_sim_time}]
         ),
 
         # ==================== SLAM Toolbox ====================
