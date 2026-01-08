@@ -64,7 +64,7 @@ class EmergencyStopController(Node):
             Twist, 'cmd_vel_nav', self.cmd_vel_callback, 10)
 
         # ===================== State =====================
-        self.current_distance = float('inf')
+        self.current_distance = 100
         self.last_range_time = None
         self.obstacle_state = False  # False = clear, True = blocked
 
