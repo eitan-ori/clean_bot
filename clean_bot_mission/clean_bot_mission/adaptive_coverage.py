@@ -63,6 +63,7 @@ class AdaptiveCoveragePlanner(Node):
         self.declare_parameter('timeout_per_waypoint', 90)       # Seconds per goal
         self.declare_parameter('start_on_exploration_complete', True)
         self.declare_parameter('min_region_area', 0.1)           # Min area to cover (m²)
+        self.declare_parameter('max_retries', 1)                 # Number of times to retry missed areas
         
         self.coverage_width = self.get_parameter('coverage_width').value
         self.overlap_ratio = self.get_parameter('overlap_ratio').value
@@ -70,6 +71,7 @@ class AdaptiveCoveragePlanner(Node):
         self.timeout = self.get_parameter('timeout_per_waypoint').value
         self.auto_start = self.get_parameter('start_on_exploration_complete').value
         self.min_region_area = self.get_parameter('min_region_area').value
+        self.max_retries = self.get_parameter('max_retries').value
         
         # Effective step between lines
         self.step_size = self.coverage_width * (1 - self.overlap_ratio)
@@ -104,6 +106,8 @@ class AdaptiveCoveragePlanner(Node):
         self.is_navigating = False
         self.mission_started = False
         self.mission_complete = False
+        self.retry_count = 0
+        self.missed_waypoints = []
         
         # Statistics
         self.successful_waypoints = 0
@@ -191,52 +195,190 @@ class AdaptiveCoveragePlanner(Node):
 
     def generate_adaptive_coverage_path(self) -> list:
         """
-        Generate coverage path that follows actual room shape.
-        Uses cell decomposition: divides space into vertical strips
-        and generates zigzag within each strip.
+        Generate coverage path using Boustrophedon Cellular Decomposition.
+        Dividing map into "Cells" (continuous regions) and cleaning each cell fully
+        before moving to the next.
         """
-        waypoints = []
+        self.get_logger().info('Build Cells (Boustrophedon decomposition)...')
         
         height, width = self.inflated_map.shape
         resolution = self.map_info.resolution
         origin_x = self.map_info.origin.position.x
         origin_y = self.map_info.origin.position.y
         
-        # Calculate step in cells
         step_cells = max(1, int(self.step_size / resolution))
         
-        # Find all free columns and their vertical extents
-        going_up = True
+        # --- 1. Decompose Space into Cells ---
+        # Cells structure: key=cell_id, value={'segments': [], 'connections': set(), 'center': (x,y)}
+        cells = {}
+        active_cell_indices = {} # Map from segment_index in *previous column* to cell_id
         
+        # To track connectivity
+        prev_segments = []
+        cell_counter = 0
+
         for col in range(0, width, step_cells):
-            # Find free segments in this column
-            segments = self.find_free_segments_in_column(col)
-            
-            if not segments:
-                continue
-            
-            # Convert to world coordinates and add waypoints
+            curr_segments_raw = self.find_free_segments_in_column(col)
+            # Add x, y_start, y_end info
+            curr_segments = []
             x = origin_x + (col + 0.5) * resolution
             
-            for seg_start, seg_end in segments:
-                y_start = origin_y + (seg_start + 0.5) * resolution
-                y_end = origin_y + (seg_end + 0.5) * resolution
-                
-                if going_up:
-                    waypoints.append((x, y_start, math.pi / 2))  # Facing up
-                    waypoints.append((x, y_end, math.pi / 2))
-                else:
-                    waypoints.append((x, y_end, -math.pi / 2))  # Facing down
-                    waypoints.append((x, y_start, -math.pi / 2))
+            for seg in curr_segments_raw:
+                y_start = origin_y + (seg[0] + 0.5) * resolution
+                y_end = origin_y + (seg[1] + 0.5) * resolution
+                curr_segments.append({
+                    'raw': seg,
+                    'vals': (x, y_start, y_end, col, seg[0], seg[1])
+                })
             
-            if segments:  # Only flip if we added waypoints
+            # Match current segments with previous segments to find overlapping cells
+            curr_to_cell_map = {} # Map curr_seg_idx -> cell_id
+            
+            # Build overlap matrix
+            # connections[curr_idx] = [prev_idx, prev_idx...]
+            overlap_map = [[] for _ in curr_segments]
+            
+            for i, c_seg in enumerate(curr_segments):
+                c_y1, c_y2 = c_seg['vals'][1], c_seg['vals'][2]
+                
+                for j, p_seg in enumerate(prev_segments):
+                    p_y1, p_y2 = p_seg['vals'][1], p_seg['vals'][2]
+                    
+                    # Check overlap (with slight tolerance)
+                    if max(c_y1, p_y1) < min(c_y2, p_y2) + resolution:
+                        overlap_map[i].append(j)
+
+            # Assign cells based on overlaps
+            for i, overlaps in enumerate(overlap_map):
+                if len(overlaps) == 0:
+                    # Case: New Cell (Start)
+                    cell_counter += 1
+                    cid = cell_counter
+                    cells[cid] = {'segments': [], 'connections': set(), 'visited': False}
+                    curr_to_cell_map[i] = cid
+                    
+                elif len(overlaps) == 1:
+                    # Case: Continue Cell
+                    prev_idx = overlaps[0]
+                    # Check if this prev segment split into multiple current (Split event)
+                    # Count how many currents map to this prev
+                    count_splits = sum(1 for o_list in overlap_map if prev_idx in o_list)
+                    
+                    cid = active_cell_indices[prev_idx]
+                    
+                    if count_splits > 1:
+                        # Split event! Prev cell ends. New cells start.
+                        cell_counter += 1
+                        new_cid = cell_counter
+                        cells[new_cid] = {'segments': [], 'connections': {cid}, 'visited': False}
+                        cells[cid]['connections'].add(new_cid)
+                        curr_to_cell_map[i] = new_cid
+                    else:
+                        # Standard continuation
+                        curr_to_cell_map[i] = cid
+
+                else:
+                    # Case: Merge (Multiple prev segments -> 1 curr segment)
+                    # Identify all prev cells
+                    prev_cids = {active_cell_indices[p_idx] for p_idx in overlaps}
+                    
+                    # Merge event: All prev cells end. New cell starts.
+                    cell_counter += 1
+                    new_cid = cell_counter
+                    cells[new_cid] = {'segments': [], 'connections': set(), 'visited': False}
+                    
+                    # Connect all merging cells to this new one
+                    for pcid in prev_cids:
+                        cells[pcid]['connections'].add(new_cid)
+                        cells[new_cid]['connections'].add(pcid)
+                        
+                    curr_to_cell_map[i] = new_cid
+
+            # Store segments in cells
+            for i, c_seg in enumerate(curr_segments):
+                cid = curr_to_cell_map[i]
+                cells[cid]['segments'].append(c_seg['vals'])
+            
+            # Prepare for next iteration
+            prev_segments = curr_segments
+            active_cell_indices = curr_to_cell_map
+
+        self.get_logger().info(f'Detected {len(cells)} distinct cells/regions.')
+        
+        # --- 2. Filter Tiny Cells ---
+        valid_cells = {}
+        for cid, data in cells.items():
+            # Calculate area approx (num segments * step_size * avg_height)
+            # Actually easier: just ensure it has minimal segments
+            if len(data['segments']) * resolution * self.step_size > self.min_region_area:
+                valid_cells[cid] = data
+            else:
+                # If deleted, remove from neighbors? (Optional, skipping for simplicity)
+                pass
+        
+        cells = valid_cells
+        if not cells:
+            return []
+
+        # --- 3. Order Cells (TSP / Nearest Neighbor) ---
+        ordered_cell_ids = []
+        # Find cell closest to (0,0) or start
+        
+        # Calculate centroids
+        for cid, data in cells.items():
+            xs = [s[0] for s in data['segments']]
+            ys = [s[1] for s in data['segments']] # use starty approx
+            data['centroid'] = (sum(xs)/len(xs), sum(ys)/len(ys))
+        
+        # Start with closest to robot (assumed 0,0 for now or first waypoints)
+        curr_pos = (0.0, 0.0)
+        
+        remaining_ids = set(cells.keys())
+        
+        while remaining_ids:
+            # Find nearest cell to current position
+            best_id = None
+            min_dist = float('inf')
+            
+            for cid in remaining_ids:
+                cx, cy = cells[cid]['centroid']
+                dist = (cx - curr_pos[0])**2 + (cy - curr_pos[1])**2
+                
+                # Biased search: prefer connected neighbors of last visited cell
+                # (Not implemented fully here, but implicit by distance usually works)
+                
+                if dist < min_dist:
+                    min_dist = dist
+                    best_id = cid
+            
+            ordered_cell_ids.append(best_id)
+            remaining_ids.remove(best_id)
+            curr_pos = cells[best_id]['centroid']
+
+        # --- 4. Generate ZigZag Paths per Cell ---
+        final_waypoints = []
+        
+        for cid in ordered_cell_ids:
+            cell_segments = cells[cid]['segments']
+            # Zigzag logic
+            going_up = True
+            
+            # Optimize entry point:
+            # If start of first segment is closer to last waypoint, start there.
+            # Else start at end?
+            # Simple alternating is usually fine for within-cell.
+            
+            for x, y_start, y_end, col, r1, r2 in cell_segments:
+                if going_up:
+                    final_waypoints.append((x, y_start, math.pi / 2))
+                    final_waypoints.append((x, y_end, math.pi / 2))
+                else:
+                    final_waypoints.append((x, y_end, -math.pi / 2))
+                    final_waypoints.append((x, y_start, -math.pi / 2))
                 going_up = not going_up
-        
-        # Optimize path order (simple greedy nearest neighbor)
-        if len(waypoints) > 2:
-            waypoints = self.optimize_path_order(waypoints)
-        
-        return waypoints
+                
+        return final_waypoints
+
 
     def find_free_segments_in_column(self, col: int) -> list:
         """
@@ -369,6 +511,9 @@ class AdaptiveCoveragePlanner(Node):
         if not goal_handle.accepted:
             self.get_logger().warn('   ⚠️ Goal rejected - skipping')
             self.failed_waypoints += 1
+            # Add to missed list for later retry
+            self.missed_waypoints.append(self.waypoints[self.current_waypoint_idx])
+            
             self.is_navigating = False
             self.current_waypoint_idx += 1
             self.send_next_goal()
@@ -390,9 +535,11 @@ class AdaptiveCoveragePlanner(Node):
         elif status == 6:  # ABORTED
             self.get_logger().warn('   ❌ (obstacle)')
             self.failed_waypoints += 1
+            self.missed_waypoints.append(self.waypoints[self.current_waypoint_idx])
         else:
             self.get_logger().warn(f'   ❓ status={status}')
             self.failed_waypoints += 1
+            self.missed_waypoints.append(self.waypoints[self.current_waypoint_idx])
         
         self.current_waypoint_idx += 1
         self.send_next_goal()
@@ -444,6 +591,35 @@ class AdaptiveCoveragePlanner(Node):
 
     def finish_mission(self):
         """Called when coverage is complete."""
+        
+        # Check if we should retry missed spots
+        if self.missed_waypoints and self.retry_count < self.max_retries:
+            self.retry_count += 1
+            self.get_logger().info('')
+            self.get_logger().info('=' * 60)
+            self.get_logger().info(f'⚠️ Detected {len(self.missed_waypoints)} uncleaned areas!')
+            self.get_logger().info(f'🔄 Starting Retry Pass #{self.retry_count} to clean them...')
+            self.get_logger().info('=' * 60)
+            
+            # Use missed waypoints as the new plan
+            self.waypoints = self.missed_waypoints
+            self.missed_waypoints = []
+            
+            # Optimize the visit order to minimize travel
+            if len(self.waypoints) > 2:
+                self.waypoints = self.optimize_path_order(self.waypoints)
+            
+            # Reset state for retry
+            self.current_waypoint_idx = 0
+            
+            # Update visualization
+            self.publish_coverage_path()
+            self.publish_waypoint_markers()
+            
+            # Start retry mission
+            self.send_next_goal()
+            return
+
         self.mission_complete = True
         
         elapsed = 0
