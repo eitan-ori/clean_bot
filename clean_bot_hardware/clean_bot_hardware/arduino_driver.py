@@ -102,6 +102,9 @@ class ArduinoDriver(Node):
         self.odom_pub = self.create_publisher(Odometry, 'wheel_odom', 10)
         self.range_pub = self.create_publisher(Range, 'ultrasonic_range', 10)
         
+        # Debug publisher - shows commands sent to Arduino
+        self.debug_cmd_pub = self.create_publisher(Twist, 'cmd_vel_debug', 10)
+        
         # ===================== Subscribers =====================
         self.cmd_vel_sub = self.create_subscription(
             Twist, 'cmd_vel', self.cmd_vel_callback, 10)
@@ -149,6 +152,17 @@ class ArduinoDriver(Node):
         left_pwm = self._velocity_to_pwm(left_vel)
         right_pwm = self._velocity_to_pwm(right_vel)
         
+        # Publish debug info (what we're sending to Arduino)
+        debug_msg = Twist()
+        debug_msg.linear.x = float(left_pwm)   # Left PWM in linear.x
+        debug_msg.linear.y = float(right_pwm)  # Right PWM in linear.y
+        debug_msg.angular.z = angular          # Original angular command
+        self.debug_cmd_pub.publish(debug_msg)
+        
+        # Log significant commands
+        if abs(linear) > 0.01 or abs(angular) > 0.05:
+            self.get_logger().info(f'CMD: lin={linear:.2f} ang={angular:.2f} -> PWM L={left_pwm} R={right_pwm}')
+        
         # Send to Arduino
         command = f"{left_pwm},{right_pwm}\n"
         try:
@@ -165,6 +179,13 @@ class ArduinoDriver(Node):
         
         # Linear mapping (could be improved with calibration curve)
         pwm = int((velocity / self.max_linear_speed) * self.max_pwm)
+        
+        # Minimum PWM threshold - motors won't move below ~50 PWM
+        MIN_PWM = 60
+        if 0 < pwm < MIN_PWM:
+            pwm = MIN_PWM
+        elif -MIN_PWM < pwm < 0:
+            pwm = -MIN_PWM
         
         # Clamp to valid range
         return max(-self.max_pwm, min(self.max_pwm, pwm))
