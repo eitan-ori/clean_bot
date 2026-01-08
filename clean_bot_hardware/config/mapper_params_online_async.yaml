@@ -50,44 +50,46 @@ slam_toolbox:
     stack_size_to_use: 40000000
     enable_interactive_mode: true
 
-    # General Params - TRUST SCAN MATCHING MORE THAN ODOMETRY
+    # General Params - PURE LASER ODOMETRY MODE
+    # Trust scan matching 100%, odometry is just a hint
     use_scan_matching: true
     use_scan_barycenter: true
-    minimum_travel_distance: 0.05   # Process scans more often (5cm)
-    minimum_travel_heading: 0.05    # Process on smaller rotations
+    minimum_travel_distance: 0.0    # Process EVERY scan
+    minimum_travel_heading: 0.0     # Process on ANY rotation
     scan_buffer_size: 10
     scan_buffer_maximum_scan_distance: 5.0
-    link_match_minimum_response_fine: 0.1  
-    link_scan_maximum_distance: 5.0
-    loop_search_maximum_distance: 2.0
+    link_match_minimum_response_fine: 0.05   # Lower = more aggressive matching
+    link_scan_maximum_distance: 3.0
+    loop_search_maximum_distance: 3.0
     do_loop_closing: true 
-    loop_match_minimum_chain_size: 10           
-    loop_match_maximum_variance_coarse: 3.0  
-    loop_match_minimum_response_coarse: 0.35    
-    loop_match_minimum_response_fine: 0.45
+    loop_match_minimum_chain_size: 5            # Faster loop closure
+    loop_match_maximum_variance_coarse: 5.0     # More tolerant
+    loop_match_minimum_response_coarse: 0.25    # Lower threshold
+    loop_match_minimum_response_fine: 0.35
 
     # Probability / Clearing Params
     laserscan_adaptive_vals: false
     laserscan_hit_rating: 0.75
     laserscan_miss_rating: 0.025
 
-    # Correlation Parameters - Correlation Parameters
-    correlation_search_space_dimension: 0.5
+    # Correlation Parameters - WIDER SEARCH for scan matching
+    # Helps when odometry is unreliable
+    correlation_search_space_dimension: 0.8    # Search 80cm area (was 0.5)
     correlation_search_space_resolution: 0.01
-    correlation_search_space_smear_deviation: 0.1 
+    correlation_search_space_smear_deviation: 0.15  # More smear tolerance
 
     # Correlation Parameters - Loop Closure Parameters
-    loop_search_space_dimension: 8.0
+    loop_search_space_dimension: 10.0   # Larger loop search
     loop_search_space_resolution: 0.05
-    loop_search_space_smear_deviation: 0.03
+    loop_search_space_smear_deviation: 0.05
 
-    # Scan Matcher Parameters
-    distance_variance_penalty: 0.5      
-    angle_variance_penalty: 1.0    
+    # Scan Matcher Parameters - TRUST LASER OVER ODOMETRY
+    distance_variance_penalty: 0.3      # Lower = trust laser more
+    angle_variance_penalty: 0.5         # Lower = trust laser rotation more
 
-    fine_search_angle_offset: 0.00349     
-    coarse_search_angle_offset: 0.349   
+    fine_search_angle_offset: 0.00523   # ~0.3 degrees
+    coarse_search_angle_offset: 0.5     # ~28 degrees - wider search
     coarse_angle_resolution: 0.0349        
-    minimum_angle_penalty: 0.9
-    minimum_distance_penalty: 0.5
+    minimum_angle_penalty: 0.8
+    minimum_distance_penalty: 0.4
     use_response_expansion: true

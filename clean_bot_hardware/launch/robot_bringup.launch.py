@@ -112,7 +112,7 @@ def generate_launch_description():
                 'wheel_radius': wheel_radius,
                 'wheel_separation': wheel_separation,
                 'ticks_per_revolution': 1320,  # GB37-131: 11 CPR * 120 gear ratio
-                'publish_tf': False,  # EKF will publish TF
+                'publish_tf': True,  # Arduino publishes odom->base_link (SLAM corrects via map->odom)
                 'odom_frame_id': 'odom',
                 'base_frame_id': 'base_link',
             }]
@@ -200,14 +200,15 @@ def generate_launch_description():
         ),
 
         # ==================== Robot Localization (EKF) ====================
-        # Fuses wheel odometry + IMU for better pose estimation
-        Node(
-            package='robot_localization',
-            executable='ekf_node',
-            name='ekf_filter_node',
-            output='screen',
-            parameters=[ekf_config, {'use_sim_time': use_sim_time}]
-        ),
+        # DISABLED - relying on SLAM scan matching instead
+        # The wheel odometry is too unreliable for fusion
+        # Node(
+        #     package='robot_localization',
+        #     executable='ekf_node',
+        #     name='ekf_filter_node',
+        #     output='screen',
+        #     parameters=[ekf_config, {'use_sim_time': use_sim_time}]
+        # ),
 
         # ==================== SLAM Toolbox ====================
         Node(
