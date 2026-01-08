@@ -35,6 +35,7 @@ import struct
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
+from rclpy.time import Time
 
 from sensor_msgs.msg import Range, PointCloud2, PointField
 from visualization_msgs.msg import Marker
@@ -140,7 +141,9 @@ class LowObstacleDetector(Node):
         
         # Create PointCloud2 message
         header = Header()
-        header.stamp = self.get_clock().now().to_msg()
+        # Use Time(0) to tell the costmap to use latest available transform
+        # This avoids timing issues where message timestamp is ahead of TF buffer
+        header.stamp = Time(seconds=0).to_msg()
         header.frame_id = self.frame_id
         
         # Define fields
