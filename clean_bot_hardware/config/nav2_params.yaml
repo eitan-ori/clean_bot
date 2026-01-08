@@ -323,8 +323,10 @@ behavior_server:
     costmap_topic: local_costmap/costmap_raw
     footprint_topic: local_costmap/published_footprint
     cycle_frequency: 10.0
-    # DISABLE SPIN - no rotation in place recovery!
-    behavior_plugins: ["backup", "drive_on_heading", "wait"]
+    # Keep spin but make it very slow
+    behavior_plugins: ["spin", "backup", "drive_on_heading", "wait"]
+    spin:
+      plugin: "nav2_behaviors/Spin"
     backup:
       plugin: "nav2_behaviors/BackUp"
     drive_on_heading:
@@ -336,9 +338,9 @@ behavior_server:
     transform_tolerance: 0.1
     use_sim_time: False
     simulate_ahead_time: 2.0
-    max_rotational_vel: 0.25   # VERY SLOW rotation
+    max_rotational_vel: 0.2    # VERY SLOW spin for recovery only
     min_rotational_vel: 0.1
-    rotational_acc_lim: 0.5
+    rotational_acc_lim: 0.3
 
 waypoint_follower:
   ros__parameters:
