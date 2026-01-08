@@ -144,36 +144,41 @@ class ArduinoDriver(Node):
         linear = msg.linear.x
         angular = msg.angular.z
         
+        # Minimum PWM to overcome motor friction (adjust if motors still strain)
+        MIN_PWM = 90
+        MAX_PWM = 150  # Don't go too fast
+        
         # Simplified movement: either rotate OR move forward
         # This prevents weird combined movements that confuse SLAM
         
         if abs(angular) > 0.1:
             # Pure rotation - spin in place
             # Positive angular = counter-clockwise = left backward, right forward
-            rotation_pwm = int((angular / 1.0) * 100)  # Scale to reasonable PWM
-            rotation_pwm = max(-100, min(100, rotation_pwm))
+            rotation_pwm = int((abs(angular) / 1.0) * MAX_PWM)
+            rotation_pwm = max(MIN_PWM, min(MAX_PWM, rotation_pwm))
             
-            # Ensure minimum PWM for movement
-            if 0 < rotation_pwm < 60:
-                rotation_pwm = 60
-            elif -60 < rotation_pwm < 0:
-                rotation_pwm = -60
+            if angular > 0:
+                # Counter-clockwise: left back, right forward
+                left_pwm = rotation_pwm     # Left forward (will be negated = backward)
+                right_pwm = -rotation_pwm   # Right backward (will be negated = forward)
+            else:
+                # Clockwise: left forward, right back
+                left_pwm = -rotation_pwm
+                right_pwm = rotation_pwm
                 
-            left_pwm = -rotation_pwm
-            right_pwm = rotation_pwm
         elif abs(linear) > 0.01:
             # Pure forward/backward motion - both wheels same speed
-            forward_pwm = int((linear / self.max_linear_speed) * self.max_pwm)
-            forward_pwm = max(-self.max_pwm, min(self.max_pwm, forward_pwm))
+            forward_pwm = int((abs(linear) / self.max_linear_speed) * MAX_PWM)
+            forward_pwm = max(MIN_PWM, min(MAX_PWM, forward_pwm))
             
-            # Ensure minimum PWM for movement
-            if 0 < forward_pwm < 60:
-                forward_pwm = 80  # Higher min for forward
-            elif -60 < forward_pwm < 0:
-                forward_pwm = -80
-                
-            left_pwm = forward_pwm
-            right_pwm = forward_pwm
+            if linear > 0:
+                # Forward: NEGATE because motors are inverted!
+                left_pwm = -forward_pwm
+                right_pwm = -forward_pwm
+            else:
+                # Backward
+                left_pwm = forward_pwm
+                right_pwm = forward_pwm
         else:
             # Stop
             left_pwm = 0
