@@ -88,6 +88,12 @@ class EmergencyStopController(Node):
         Filter velocity commands based on obstacle proximity.
         Passes through commands but limits forward motion when obstacle detected.
         """
+        # TEMPORARILY DISABLED EMERGENCY STOP
+        # Just pass through the command
+        self.cmd_vel_pub.publish(msg)
+        return
+
+        # Original Logic (Disabled)
         output = Twist()
         output.angular.z = msg.angular.z  # Always allow rotation
         
