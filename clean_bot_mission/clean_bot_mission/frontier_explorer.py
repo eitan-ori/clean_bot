@@ -104,7 +104,7 @@ class FrontierExplorer(Node):
         self.goals_attempted = 0
         self.goals_reached = 0
         self.consecutive_failures = 0      # Track consecutive navigation failures
-        self.max_consecutive_failures = 5  # Finish if too many failures in a row
+        self.max_consecutive_failures = 3  # Finish if too many failures in a row
 
         # ===================== Timer =====================
         # Main exploration loop
