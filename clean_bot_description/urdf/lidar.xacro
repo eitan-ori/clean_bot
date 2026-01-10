@@ -26,7 +26,9 @@
     <joint name="laser_joint" type="fixed">
         <parent link="chassis"/>
         <child link="laser"/>
-        <origin xyz="0.15 0 0.175" rpy="0 0 0"/>
+        <!-- RPLIDAR A1 mounted with USB port facing BACK -->
+        <!-- If robot goes towards walls, try rpy="0 0 3.14159" (180 degrees) -->
+        <origin xyz="0.15 0 0.175" rpy="0 0 3.14159"/>
     </joint>
 
     <link name="laser">
