@@ -103,6 +103,8 @@ class FrontierExplorer(Node):
         self.current_goal_handle = None    # To cancel goals
         self.goals_attempted = 0
         self.goals_reached = 0
+        self.consecutive_failures = 0      # Track consecutive navigation failures
+        self.max_consecutive_failures = 5  # Finish if too many failures in a row
 
         # ===================== Timer =====================
         # Main exploration loop
@@ -163,10 +165,21 @@ class FrontierExplorer(Node):
         
         if best_frontier is None:
             self.get_logger().warn('⚠️ Could not find reachable frontier')
-            # Clear failed goals and try again
-            self.failed_goals.clear()
-            return
+            # Check if we've tried clearing failed goals already
+            if not hasattr(self, '_retry_after_clear') or not self._retry_after_clear:
+                self.get_logger().info('🔄 Clearing failed goals and retrying once...')
+                self.failed_goals.clear()
+                self._retry_after_clear = True
+                return
+            else:
+                # We already tried clearing - all frontiers are unreachable
+                self.get_logger().info('✅ All remaining frontiers are unreachable - exploration complete!')
+                self.finish_exploration()
+                return
 
+        # Reset retry flag when we successfully find a frontier
+        self._retry_after_clear = False
+        
         # Navigate to frontier
         self.navigate_to_frontier(best_frontier)
 
@@ -394,15 +407,23 @@ class FrontierExplorer(Node):
         if status == 4:  # SUCCEEDED
             self.get_logger().info('   ✅ Reached exploration point!')
             self.goals_reached += 1
+            self.consecutive_failures = 0  # Reset failure counter on success
         elif status == 6:  # ABORTED
             self.get_logger().warn('   ❌ Navigation aborted (obstacle?)')
+            self.consecutive_failures += 1
             if self.current_goal:
                 key = (round(self.current_goal['x'], 1), round(self.current_goal['y'], 1))
                 self.failed_goals.add(key)
+            # Check if too many consecutive failures
+            if self.consecutive_failures >= self.max_consecutive_failures:
+                self.get_logger().warn(f'⚠️ {self.consecutive_failures} consecutive failures - finishing exploration')
+                self.finish_exploration()
         elif status == 5:  # CANCELED
             self.get_logger().info('   🛑 Navigation was canceled')
+            self.consecutive_failures += 1
         else:
             self.get_logger().warn(f'   ❓ Navigation ended with status: {status}')
+            self.consecutive_failures += 1
 
     def publish_frontier_markers(self):
         """Publish frontier markers for RViz visualization."""
