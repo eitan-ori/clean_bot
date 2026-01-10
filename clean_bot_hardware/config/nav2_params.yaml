@@ -182,15 +182,16 @@ controller_server:
       short_circuit_trajectory_evaluation: True
       stateful: True
       # PREFER FORWARD MOTION over rotation
-      critics: ["Oscillation", "BaseObstacle", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
+      critics: ["Oscillation", "BaseObstacle", "ObstacleFootprint", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
       # REMOVED RotateToGoal - don't rotate in place!
-      BaseObstacle.scale: 0.02
+      BaseObstacle.scale: 0.1          # INCREASED - avoid obstacles more!
+      ObstacleFootprint.scale: 1.0     # NEW - check robot footprint collision
       PathAlign.scale: 32.0
       PathAlign.forward_point_distance: 0.2
       GoalAlign.scale: 24.0
       GoalAlign.forward_point_distance: 0.2
       PathDist.scale: 32.0
-      GoalDist.scale: 32.0     # Higher priority to reach goal
+      GoalDist.scale: 24.0     # Slightly lower - safety over speed
 
 local_costmap:
   local_costmap:
@@ -208,8 +209,8 @@ local_costmap:
       plugins: ["obstacle_layer", "inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 3.0
-        inflation_radius: 0.25  # Inflate obstacles by 25cm
+        cost_scaling_factor: 2.5       # Lower = costs spread further
+        inflation_radius: 0.35         # INCREASED - 35cm inflation for safety
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
@@ -293,8 +294,8 @@ global_costmap:
         map_subscribe_transient_local: True
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 3.0
-        inflation_radius: 0.25
+        cost_scaling_factor: 2.5       # Lower = costs spread further  
+        inflation_radius: 0.35         # INCREASED - 35cm inflation for safety
       always_send_full_costmap: True
 
 planner_server:
