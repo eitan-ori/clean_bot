@@ -50,6 +50,12 @@ install(PROGRAMS
   RENAME emergency_stop
 )
 
+install(PROGRAMS
+  clean_bot_hardware/cleaning_switch_node.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME clean_switch_node
+)
+
 # Install launch files
 install(DIRECTORY launch/
   DESTINATION share/${PROJECT_NAME}/launch
