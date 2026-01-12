@@ -100,8 +100,8 @@ def generate_launch_description():
         ),
 
         # ==================== Arduino Driver ====================
-        # Handles: Motors, Encoders, Ultrasonic
-        # Note: Wheel odometry published but RF2O provides TF
+        # Handles: Motors and Ultrasonic sensor
+        # NOTE: No encoders - odometry comes from RF2O laser odometry
         Node(
             package='clean_bot_hardware',
             executable='arduino_driver',
@@ -112,14 +112,16 @@ def generate_launch_description():
                 'baud_rate': 57600,
                 'wheel_radius': wheel_radius,
                 'wheel_separation': wheel_separation,
-                'ticks_per_revolution': 1320,  # GB37-131: 11 CPR * 120 gear ratio
-                'publish_tf': False,  # RF2O publishes odom->base_link
+                'ticks_per_revolution': 1320,  # Not used - no encoders
+                'publish_tf': False,  # RF2O publishes odom->base_link (LIDAR required!)
                 'odom_frame_id': 'odom',
                 'base_frame_id': 'base_link',
             }]
         ),
 
         # ==================== RPLidar A1 ====================
+        # Note: If LIDAR fails, rf2o won't work but Arduino provides wheel odom TF
+        # Common issues: wrong port, no power, permissions (sudo chmod 666 /dev/ttyUSB0)
         Node(
             package='sllidar_ros2',
             executable='sllidar_node',
@@ -132,8 +134,11 @@ def generate_launch_description():
                 'frame_id': 'laser',
                 'inverted': False,
                 'angle_compensate': True,
-                'scan_mode': '', # Auto-detect scans
-            }]
+                'scan_mode': '',  # Auto-detect scan mode
+                'scan_frequency': 10.0,  # Target scan frequency
+            }],
+            # Respawn if it crashes - allows recovery if LIDAR reconnects
+            respawn=False,  # Set to True to auto-restart on failure
         ),
 
         # ==================== IMU Publisher ====================
@@ -202,7 +207,8 @@ def generate_launch_description():
         ),
 
         # ==================== RF2O Laser Odometry ====================
-        # Fast 2D laser odometry - much lighter than rtabmap ICP
+        # CRITICAL: This is the ONLY source of odometry (no wheel encoders!)
+        # Provides odom->base_link TF based on laser scan matching
         Node(
             package='rf2o_laser_odometry',
             executable='rf2o_laser_odometry_node',
@@ -210,8 +216,8 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'laser_scan_topic': '/scan',
-                'odom_topic': '/odom_rf2o',
-                'publish_tf': True,              # RF2O publishes odom->base_link
+                'odom_topic': '/odom',       # Main odometry topic
+                'publish_tf': True,          # MUST be True - only odom source!
                 'base_frame_id': 'base_link',
                 'odom_frame_id': 'odom',
                 'init_pose_from_topic': '',

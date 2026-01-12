@@ -140,7 +140,7 @@ class FrontierExplorer(Node):
 
         self.get_logger().info('=' * 60)
         self.get_logger().info('🔍 Frontier Explorer Started')
-        self.get_logger().info(f'   Waiting for start command or map (auto_start={self.auto_start})...')
+        self.get_logger().info('   Waiting for start command or map (auto_start=%s)...', self.auto_start)
         self.get_logger().info('   Robot will autonomously explore unknown areas')
         self.get_logger().info('=' * 60)
 
@@ -618,7 +618,8 @@ def main(args=None):
         node.get_logger().info('Exploration interrupted by user')
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

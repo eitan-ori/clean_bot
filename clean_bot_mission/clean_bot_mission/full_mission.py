@@ -454,7 +454,8 @@ def main(args=None):
         mission_controller.destroy_node()
         explorer.destroy_node()
         coverage_planner.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':
