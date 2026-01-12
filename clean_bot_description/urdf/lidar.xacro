@@ -27,8 +27,8 @@
         <parent link="chassis"/>
         <child link="laser"/>
         <!-- RPLIDAR A1 mounted with USB port facing BACK -->
-        <!-- If robot goes towards walls, try rpy="0 0 3.14159" (180 degrees) -->
-        <origin xyz="0.15 0 0.175" rpy="0 0 3.14159"/>
+        <!-- Fixed: LiDAR is now mounted facing forward -->
+        <origin xyz="0.15 0 0.175" rpy="0 0 0"/>
     </joint>
 
     <link name="laser">

@@ -346,11 +346,11 @@ async def cmd_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Reset mission to initial state."""
+    """Reset mission: Stop robot and return to initial state."""
     if not await check_auth(update):
         return
     ros_node.send_command('reset')
-    await update.message.reply_text('🔄 Mission reset. Ready for new commands.')
+    await update.message.reply_text('🛑 Stopping robot...\n🔄 Mission reset to initial state.\nReady for commands.')
 
 
 async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE):
