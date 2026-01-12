@@ -42,46 +42,44 @@ class CleaningSwitchNode(Node):
             raise e
 
         # ===================== Subscribers =====================
-        self.clean_sub = self.create_subscription(
-            Empty, 'clean', self.clean_callback, 10)
-        self.stop_sub = self.create_subscription(
-            Empty, 'stop_clean_relay', self.stop_callback, 10)
+        self.cmd_sub = self.create_subscription(
+            Empty, 'mission_command', self.clean_callback, 10)
+
         
         self.get_logger().info('🧹 Cleaning Switch Node ready (with Relay Sequences)')
 
-    def clean_callback(self, msg):
-        self.get_logger().info('🔌 START SEQUENCE: Activating Gadget...')
-        
-        # 1. Servo Action
-        self.servo.max()
-        
-        # 2. Relay Activation Pulse Sequence
-        # Close for 0.5s -> Open for 0.5s -> Close for 0.5s -> Open
-        self.relay.on()
-        sleep(0.5)
-        self.relay.off()
-        sleep(0.5)
-        self.relay.on()
-        sleep(0.5)
-        self.relay.off()
-        
-        sleep(0.5) # Wait for servo to finish
-        self.servo.value = None # Stop jitter
-
-    def stop_callback(self, msg):
-        self.get_logger().info('🔌 STOP SEQUENCE: Deactivating Gadget...')
-        
-        # 1. Servo Action
-        self.servo.min()
-        
-        # 2. Relay Deactivation Pulse Sequence
-        # Close for 1.0s -> Open
-        self.relay.on()
-        sleep(1.0)
-        self.relay.off()
-        
-        sleep(0.5) # Wait for servo to finish
-        self.servo.value = None # Stop jitter
+    def cmd_callback(self, msg):
+        if msg.data == 'start_clean':
+            self.get_logger().info('🔌 START SEQUENCE: Activating Gadget...')
+            
+            # 1. Servo Action
+            self.servo.max()
+            
+            # 2. Relay Activation Pulse Sequence
+            # Close for 0.5s -> Open for 0.5s -> Close for 0.5s -> Open
+            self.relay.on()
+            sleep(0.5)
+            self.relay.off()
+            sleep(0.5)
+            self.relay.on()
+            sleep(0.5)
+            self.relay.off()
+            
+            sleep(0.5) # Wait for servo to finish
+            self.servo.value = None # Stop jitter
+        elif msg.data == 'stop_clean':
+            self.get_logger().info('🔌 STOP SEQUENCE: Deactivating Gadget...')
+            # 1. Servo Action
+            self.servo.min()
+            
+            # 2. Relay Deactivation Pulse Sequence
+            # Close for 1.0s -> Open
+            self.relay.on()
+            sleep(1.0)
+            self.relay.off()
+            
+            sleep(0.5) # Wait for servo to finish
+            self.servo.value = None # Stop jitter
 
 def main(args=None):
     rclpy.init(args=args)
