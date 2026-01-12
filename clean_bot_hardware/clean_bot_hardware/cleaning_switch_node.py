@@ -54,7 +54,7 @@ class CleaningSwitchNode(Node):
                 self.get_logger().info(f'🔧 Servo created: {self.servo}')
                 
                 self.get_logger().info(f'🔧 Creating Relay on GPIO {relay_pin}...')
-                self.relay = OutputDevice(relay_pin, active_high=True, initial_value=False)
+                self.relay = OutputDevice(relay_pin, active_high=False, initial_value=False)
                 self.get_logger().info(f'🔧 Relay created: {self.relay}')
                 
                 self.get_logger().info(f'✅ Servo on GPIO {servo_pin}, Relay on GPIO {relay_pin}')
@@ -95,9 +95,9 @@ class CleaningSwitchNode(Node):
         
         try:
             # 1. Servo Action
-            self.get_logger().info('🔧 Step 1: Moving servo to MAX position...')
-            self.servo.max()
-            self.get_logger().info(f'🔧 Servo value after max(): {self.servo.value}')
+            self.get_logger().info('🔧 Step 1: Moving servo to MIN position...')
+            self.servo.min()
+            self.get_logger().info(f'🔧 Servo value after min(): {self.servo.value}')
             
             # 2. Relay Activation Pulse Sequence
             self.get_logger().info('🔧 Step 2: Relay ON for 2 seconds...')
@@ -136,9 +136,9 @@ class CleaningSwitchNode(Node):
         
         try:
             # 1. Servo Action
-            self.get_logger().info('🔧 Step 1: Moving servo to MIN position...')
-            self.servo.min()
-            self.get_logger().info(f'🔧 Servo value after min(): {self.servo.value}')
+            self.get_logger().info('🔧 Step 1: Moving servo to Max position...')
+            self.servo.max()
+            self.get_logger().info(f'🔧 Servo value after max(): {self.servo.value}')
             
             # 2. Relay Deactivation Pulse Sequence
             self.get_logger().info('🔧 Step 2: Relay ON for 3 seconds...')
