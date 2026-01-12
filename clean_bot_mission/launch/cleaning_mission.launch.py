@@ -98,7 +98,14 @@ def generate_launch_description():
             }]
         ),
 
+        Node(
+            package='clean_bot_hardware',
+            executable='clean_switch_node',
+            name='clean_switch_node',
+            output='screen'
+        ),
         # Full Mission Controller - receives commands from Telegram bridge
+
         Node(
             package='clean_bot_mission',
             executable='full_mission',
