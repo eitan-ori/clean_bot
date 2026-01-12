@@ -140,7 +140,7 @@ class FrontierExplorer(Node):
 
         self.get_logger().info('=' * 60)
         self.get_logger().info('🔍 Frontier Explorer Started')
-        self.get_logger().info('   Waiting for start command or map (auto_start=%s)...', self.auto_start)
+        self.get_logger().info(f'   Waiting for start command or map (auto_start={self.auto_start})...')
         self.get_logger().info('   Robot will autonomously explore unknown areas')
         self.get_logger().info('=' * 60)
 
