@@ -13,8 +13,16 @@ The robot will autonomously:
 
 This is a true autonomous exploration - no predefined waypoints needed!
 
+Control (via /exploration_control topic, std_msgs/String):
+- "start"  : Start/resume exploration
+- "stop"   : Stop exploration
+- "pause"  : Pause exploration (can resume)
+- "resume" : Resume from pause
+- "reset"  : Reset exploration state
+
 Topics Subscribed:
 - /map (nav_msgs/OccupancyGrid) - Map from SLAM
+- /exploration_control (std_msgs/String) - External control commands
 
 Topics Published:
 - /exploration_complete (std_msgs/Bool) - True when done
@@ -33,7 +41,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from nav2_msgs.action import NavigateToPose
 from nav_msgs.msg import OccupancyGrid
 from geometry_msgs.msg import PoseStamped, Point
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String
 from visualization_msgs.msg import Marker, MarkerArray
 
 from scipy import ndimage
@@ -47,6 +55,15 @@ OCCUPIED = 100
 FREE_THRESHOLD = 50
 
 
+class ExplorationState:
+    """Exploration state enumeration."""
+    IDLE = 'IDLE'           # Waiting for start command
+    EXPLORING = 'EXPLORING' # Actively exploring
+    PAUSED = 'PAUSED'       # Temporarily paused
+    STOPPED = 'STOPPED'     # Stopped by user command
+    COMPLETE = 'COMPLETE'   # Exploration finished
+
+
 class FrontierExplorer(Node):
     def __init__(self):
         super().__init__('frontier_explorer')
@@ -58,6 +75,7 @@ class FrontierExplorer(Node):
         self.declare_parameter('goal_tolerance', 0.3)        # How close to get to frontier
         self.declare_parameter('min_goal_distance', 0.5)     # Don't go to very close frontiers
         self.declare_parameter('navigation_timeout', 60.0)   # Single goal timeout
+        self.declare_parameter('auto_start', True)           # Start automatically when map received
         
         self.min_frontier_size = self.get_parameter('min_frontier_size').value
         self.robot_radius = self.get_parameter('robot_radius').value
@@ -65,6 +83,7 @@ class FrontierExplorer(Node):
         self.goal_tolerance = self.get_parameter('goal_tolerance').value
         self.min_goal_distance = self.get_parameter('min_goal_distance').value
         self.navigation_timeout = self.get_parameter('navigation_timeout').value
+        self.auto_start = self.get_parameter('auto_start').value
 
         # ===================== Action Client =====================
         self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
@@ -77,14 +96,21 @@ class FrontierExplorer(Node):
         )
         self.map_sub = self.create_subscription(
             OccupancyGrid, 'map', self.map_callback, map_qos)
+        
+        # Control subscriber
+        self.control_sub = self.create_subscription(
+            String, 'exploration_control', self.control_callback, 10)
 
         # ===================== Publishers =====================
         self.exploration_complete_pub = self.create_publisher(
             Bool, 'exploration_complete', 10)
         self.frontier_markers_pub = self.create_publisher(
             MarkerArray, 'frontiers', 10)
+        self.state_pub = self.create_publisher(
+            String, 'exploration_state', 10)
 
         # ===================== State =====================
+        self.exploration_state = ExplorationState.IDLE
         self.map_data = None
         self.map_info = None
         self.map_array = None
@@ -109,12 +135,97 @@ class FrontierExplorer(Node):
         # ===================== Timer =====================
         # Main exploration loop
         self.create_timer(2.0, self.exploration_loop)
+        # State publisher
+        self.create_timer(1.0, self.publish_state)
 
         self.get_logger().info('=' * 60)
         self.get_logger().info('🔍 Frontier Explorer Started')
-        self.get_logger().info('   Waiting for map from SLAM...')
+        self.get_logger().info('   Waiting for start command or map (auto_start=%s)...', self.auto_start)
         self.get_logger().info('   Robot will autonomously explore unknown areas')
         self.get_logger().info('=' * 60)
+
+    def control_callback(self, msg: String):
+        """Handle external control commands."""
+        command = msg.data.lower().strip()
+        self.get_logger().info(f'📬 Explorer received command: "{command}"')
+        
+        if command == 'start':
+            self.handle_start()
+        elif command == 'stop':
+            self.handle_stop()
+        elif command == 'pause':
+            self.handle_pause()
+        elif command == 'resume':
+            self.handle_resume()
+        elif command == 'reset':
+            self.handle_reset()
+        else:
+            self.get_logger().warn(f'❓ Unknown command: "{command}"')
+
+    def handle_start(self):
+        """Start exploration."""
+        if self.exploration_state in [ExplorationState.IDLE, ExplorationState.STOPPED]:
+            self.get_logger().info('▶️ Starting exploration...')
+            self.exploration_state = ExplorationState.EXPLORING
+            if self.start_time is None:
+                self.start_time = self.get_clock().now()
+        elif self.exploration_state == ExplorationState.PAUSED:
+            self.handle_resume()
+        else:
+            self.get_logger().info(f'   Already in state: {self.exploration_state}')
+
+    def handle_stop(self):
+        """Stop exploration."""
+        if self.exploration_state in [ExplorationState.EXPLORING, ExplorationState.PAUSED]:
+            self.get_logger().info('🛑 Stopping exploration...')
+            self.cancel_current_goal()
+            self.exploration_state = ExplorationState.STOPPED
+        else:
+            self.get_logger().info(f'   Already in state: {self.exploration_state}')
+
+    def handle_pause(self):
+        """Pause exploration."""
+        if self.exploration_state == ExplorationState.EXPLORING:
+            self.get_logger().info('⏸️ Pausing exploration...')
+            self.cancel_current_goal()
+            self.exploration_state = ExplorationState.PAUSED
+        else:
+            self.get_logger().info(f'   Cannot pause from state: {self.exploration_state}')
+
+    def handle_resume(self):
+        """Resume exploration from pause."""
+        if self.exploration_state == ExplorationState.PAUSED:
+            self.get_logger().info('▶️ Resuming exploration...')
+            self.exploration_state = ExplorationState.EXPLORING
+        elif self.exploration_state == ExplorationState.STOPPED:
+            self.handle_start()
+        else:
+            self.get_logger().info(f'   Cannot resume from state: {self.exploration_state}')
+
+    def handle_reset(self):
+        """Reset exploration state."""
+        self.get_logger().info('🔄 Resetting exploration...')
+        self.cancel_current_goal()
+        
+        # Reset all state
+        self.exploration_state = ExplorationState.IDLE
+        self.exploration_complete = False
+        self.is_navigating = False
+        self.frontiers = []
+        self.visited_frontiers = set()
+        self.failed_goals = set()
+        self.start_time = None
+        self.goals_attempted = 0
+        self.goals_reached = 0
+        self.consecutive_failures = 0
+        self.current_goal = None
+        self._retry_after_clear = False
+
+    def publish_state(self):
+        """Publish current exploration state."""
+        msg = String()
+        msg.data = self.exploration_state
+        self.state_pub.publish(msg)
 
     def map_callback(self, msg: OccupancyGrid):
         """Process incoming map and convert to numpy array."""
@@ -125,12 +236,18 @@ class FrontierExplorer(Node):
         self.map_array = np.array(msg.data, dtype=np.int8).reshape(
             (msg.info.height, msg.info.width))
         
-        if self.start_time is None:
+        if self.start_time is None and self.auto_start:
             self.start_time = self.get_clock().now()
+            self.exploration_state = ExplorationState.EXPLORING
             self.get_logger().info(f'📍 First map received: {msg.info.width}x{msg.info.height}')
+            self.get_logger().info('   Auto-starting exploration...')
 
     def exploration_loop(self):
         """Main exploration state machine."""
+        # Only explore if in EXPLORING state
+        if self.exploration_state != ExplorationState.EXPLORING:
+            return
+            
         if self.exploration_complete or self.map_array is None:
             return
 
@@ -466,6 +583,7 @@ class FrontierExplorer(Node):
     def finish_exploration(self):
         """Called when exploration is complete."""
         self.exploration_complete = True
+        self.exploration_state = ExplorationState.COMPLETE
         
         elapsed = 0
         if self.start_time:
@@ -481,7 +599,7 @@ class FrontierExplorer(Node):
         self.get_logger().info('')
         self.get_logger().info('💡 Map is ready! You can now:')
         self.get_logger().info('   1. Save it: ros2 run nav2_map_server map_saver_cli -f ~/my_map')
-        self.get_logger().info('   2. Start coverage: ros2 run clean_bot_mission coverage_mission')
+        self.get_logger().info('   2. Start coverage: ros2 topic pub --once /mission_command std_msgs/msg/String "data: \'start_clean\'"')
         self.get_logger().info('=' * 60)
         
         # Publish completion

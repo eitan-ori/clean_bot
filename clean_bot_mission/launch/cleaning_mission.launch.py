@@ -39,8 +39,8 @@ def generate_launch_description():
     use_rviz = LaunchConfiguration('use_rviz', default='false')
     
     # Hardware arguments (pass through to hardware launch)
-    arduino_port = LaunchConfiguration('arduino_port', default='/dev/ttyUSB0')
-    lidar_port = LaunchConfiguration('lidar_port', default='/dev/ttyUSB1')
+    arduino_port = LaunchConfiguration('arduino_port', default='/dev/ttyACM0')
+    lidar_port = LaunchConfiguration('lidar_port', default='/dev/ttyUSB0')
 
     return LaunchDescription([
         # ===================== Arguments =====================
@@ -50,9 +50,9 @@ def generate_launch_description():
                               description='Skip exploration and use existing map'),
         DeclareLaunchArgument('use_rviz', default_value='false',
                               description='Launch RViz for visualization'),
-        DeclareLaunchArgument('arduino_port', default_value='/dev/ttyUSB0',
+        DeclareLaunchArgument('arduino_port', default_value='/dev/ttyACM0',
                               description='Arduino serial port'),
-        DeclareLaunchArgument('lidar_port', default_value='/dev/ttyUSB1',
+        DeclareLaunchArgument('lidar_port', default_value='/dev/ttyUSB0',
                               description='Lidar serial port'),
 
         # ===================== Hardware + SLAM + Nav2 =====================

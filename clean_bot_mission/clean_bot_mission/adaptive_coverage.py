@@ -15,6 +15,13 @@
 #    robot's cleaning tool width.
 # 4. Sequences goals to Nav2 to execute the full coverage mission.
 #
+# CONTROL (via /coverage_control topic, std_msgs/String):
+# - "start"  : Start/resume coverage
+# - "stop"   : Stop coverage
+# - "pause"  : Pause coverage (can resume)
+# - "resume" : Resume from pause
+# - "reset"  : Reset coverage state
+#
 # PARAMETERS & VALUES:
 # - coverage_width: 0.14 m (Effective cleaning width of the robot).
 # - overlap_ratio: 0.15 (15% overlap between cleaning passes).
@@ -39,7 +46,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from nav2_msgs.action import NavigateToPose
 from nav_msgs.msg import OccupancyGrid, Path
 from geometry_msgs.msg import PoseStamped
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String
 from visualization_msgs.msg import Marker, MarkerArray
 
 from scipy import ndimage
@@ -50,6 +57,15 @@ import heapq
 # Occupancy grid values
 FREE_THRESHOLD = 50
 OCCUPIED_THRESHOLD = 65
+
+
+class CoverageState:
+    """Coverage state enumeration."""
+    IDLE = 'IDLE'           # Waiting for start command
+    RUNNING = 'RUNNING'     # Actively covering
+    PAUSED = 'PAUSED'       # Temporarily paused
+    STOPPED = 'STOPPED'     # Stopped by user command
+    COMPLETE = 'COMPLETE'   # Coverage finished
 
 
 class AdaptiveCoveragePlanner(Node):
@@ -93,13 +109,19 @@ class AdaptiveCoveragePlanner(Node):
         
         self.exploration_complete_sub = self.create_subscription(
             Bool, 'exploration_complete', self.exploration_complete_callback, 10)
+        
+        # Control subscriber
+        self.control_sub = self.create_subscription(
+            String, 'coverage_control', self.control_callback, 10)
 
         # ===================== Publishers =====================
         self.coverage_complete_pub = self.create_publisher(Bool, 'coverage_complete', 10)
         self.coverage_path_pub = self.create_publisher(Path, 'coverage_path', 10)
         self.waypoint_markers_pub = self.create_publisher(MarkerArray, 'coverage_waypoints', 10)
+        self.state_pub = self.create_publisher(String, 'coverage_state', 10)
 
         # ===================== State =====================
+        self.coverage_state = CoverageState.IDLE
         self.map_array = None
         self.map_info = None
         self.inflated_map = None
@@ -112,18 +134,126 @@ class AdaptiveCoveragePlanner(Node):
         self.retry_count = 0
         self.missed_waypoints = []
         
+        # For pause/resume
+        self.current_goal_handle = None
+        
         # Statistics
         self.successful_waypoints = 0
         self.failed_waypoints = 0
         self.start_time = None
         self.total_distance = 0.0
 
+        # ===================== Timer =====================
+        self.create_timer(1.0, self.publish_state)
+
         self.get_logger().info('=' * 60)
         self.get_logger().info('🧹 Adaptive Coverage Planner Started')
         self.get_logger().info(f'   Coverage width: {self.coverage_width * 100:.0f}cm')
         self.get_logger().info(f'   Step size: {self.step_size * 100:.1f}cm')
-        self.get_logger().info('   Waiting for map...')
+        self.get_logger().info('   Waiting for start command...')
         self.get_logger().info('=' * 60)
+
+    def control_callback(self, msg: String):
+        """Handle external control commands."""
+        command = msg.data.lower().strip()
+        self.get_logger().info(f'📬 Coverage received command: "{command}"')
+        
+        if command == 'start':
+            self.handle_start()
+        elif command == 'stop':
+            self.handle_stop()
+        elif command == 'pause':
+            self.handle_pause()
+        elif command == 'resume':
+            self.handle_resume()
+        elif command == 'reset':
+            self.handle_reset()
+        else:
+            self.get_logger().warn(f'❓ Unknown command: "{command}"')
+
+    def handle_start(self):
+        """Start coverage."""
+        if self.coverage_state == CoverageState.IDLE:
+            self.get_logger().info('▶️ Starting coverage...')
+            self.start_coverage_mission()
+        elif self.coverage_state == CoverageState.STOPPED:
+            # Resume from stopped - continue where we left off
+            self.get_logger().info('▶️ Resuming coverage from stopped state...')
+            self.coverage_state = CoverageState.RUNNING
+            if self.waypoints and self.current_waypoint_idx < len(self.waypoints):
+                self.send_next_goal()
+            else:
+                self.start_coverage_mission()
+        elif self.coverage_state == CoverageState.PAUSED:
+            self.handle_resume()
+        else:
+            self.get_logger().info(f'   Already in state: {self.coverage_state}')
+
+    def handle_stop(self):
+        """Stop coverage."""
+        if self.coverage_state in [CoverageState.RUNNING, CoverageState.PAUSED]:
+            self.get_logger().info('🛑 Stopping coverage...')
+            self.cancel_current_goal()
+            self.coverage_state = CoverageState.STOPPED
+            self.is_navigating = False
+        else:
+            self.get_logger().info(f'   Already in state: {self.coverage_state}')
+
+    def handle_pause(self):
+        """Pause coverage."""
+        if self.coverage_state == CoverageState.RUNNING:
+            self.get_logger().info('⏸️ Pausing coverage...')
+            self.cancel_current_goal()
+            self.coverage_state = CoverageState.PAUSED
+            self.is_navigating = False
+        else:
+            self.get_logger().info(f'   Cannot pause from state: {self.coverage_state}')
+
+    def handle_resume(self):
+        """Resume coverage from pause."""
+        if self.coverage_state == CoverageState.PAUSED:
+            self.get_logger().info('▶️ Resuming coverage...')
+            self.coverage_state = CoverageState.RUNNING
+            self.send_next_goal()
+        elif self.coverage_state == CoverageState.STOPPED:
+            self.handle_start()
+        else:
+            self.get_logger().info(f'   Cannot resume from state: {self.coverage_state}')
+
+    def handle_reset(self):
+        """Reset coverage state."""
+        self.get_logger().info('🔄 Resetting coverage...')
+        self.cancel_current_goal()
+        
+        # Reset all state
+        self.coverage_state = CoverageState.IDLE
+        self.mission_started = False
+        self.mission_complete = False
+        self.is_navigating = False
+        self.waypoints = []
+        self.current_waypoint_idx = 0
+        self.retry_count = 0
+        self.missed_waypoints = []
+        self.successful_waypoints = 0
+        self.failed_waypoints = 0
+        self.start_time = None
+
+    def cancel_current_goal(self):
+        """Cancel the current navigation goal."""
+        if self.current_goal_handle is not None:
+            self.get_logger().info('   🛑 Canceling current goal...')
+            try:
+                cancel_future = self.current_goal_handle.cancel_goal_async()
+                # We don't wait for the result to avoid blocking
+            except Exception as e:
+                self.get_logger().warn(f'   Could not cancel goal: {e}')
+            self.current_goal_handle = None
+
+    def publish_state(self):
+        """Publish current coverage state."""
+        msg = String()
+        msg.data = self.coverage_state
+        self.state_pub.publish(msg)
 
     def map_callback(self, msg: OccupancyGrid):
         """Store latest map."""
@@ -143,7 +273,7 @@ class AdaptiveCoveragePlanner(Node):
             self.get_logger().error('❌ No map available!')
             return
         
-        if self.mission_started:
+        if self.mission_started and self.coverage_state == CoverageState.RUNNING:
             self.get_logger().warn('⚠️ Mission already in progress')
             return
 
@@ -166,6 +296,7 @@ class AdaptiveCoveragePlanner(Node):
         
         # Step 4: Start mission
         self.mission_started = True
+        self.coverage_state = CoverageState.RUNNING
         self.start_time = self.get_clock().now()
         self.current_waypoint_idx = 0
         
@@ -532,6 +663,10 @@ class AdaptiveCoveragePlanner(Node):
 
     def send_next_goal(self):
         """Send next waypoint to Nav2."""
+        # Check if we should continue
+        if self.coverage_state != CoverageState.RUNNING:
+            return
+            
         if self.current_waypoint_idx >= len(self.waypoints):
             self.finish_mission()
             return
@@ -567,13 +702,16 @@ class AdaptiveCoveragePlanner(Node):
             self.get_logger().warn('   ⚠️ Goal rejected - skipping')
             self.failed_waypoints += 1
             # Add to missed list for later retry
-            self.missed_waypoints.append(self.waypoints[self.current_waypoint_idx])
+            if self.current_waypoint_idx < len(self.waypoints):
+                self.missed_waypoints.append(self.waypoints[self.current_waypoint_idx])
             
             self.is_navigating = False
             self.current_waypoint_idx += 1
             self.send_next_goal()
             return
 
+        # Store handle for potential cancellation
+        self.current_goal_handle = goal_handle
         get_result_future = goal_handle.get_result_async()
         get_result_future.add_done_callback(self.get_result_callback)
 
@@ -583,6 +721,11 @@ class AdaptiveCoveragePlanner(Node):
         status = result.status
         
         self.is_navigating = False
+        self.current_goal_handle = None
+        
+        # Check if we were stopped/paused
+        if self.coverage_state != CoverageState.RUNNING:
+            return
         
         if status == 4:  # SUCCEEDED
             self.get_logger().info('   ✅')
@@ -590,11 +733,17 @@ class AdaptiveCoveragePlanner(Node):
         elif status == 6:  # ABORTED
             self.get_logger().warn('   ❌ (obstacle)')
             self.failed_waypoints += 1
-            self.missed_waypoints.append(self.waypoints[self.current_waypoint_idx])
+            if self.current_waypoint_idx < len(self.waypoints):
+                self.missed_waypoints.append(self.waypoints[self.current_waypoint_idx])
+        elif status == 5:  # CANCELED
+            self.get_logger().info('   🛑 (canceled)')
+            # Don't count as failed, we'll resume later
+            return
         else:
             self.get_logger().warn(f'   ❓ status={status}')
             self.failed_waypoints += 1
-            self.missed_waypoints.append(self.waypoints[self.current_waypoint_idx])
+            if self.current_waypoint_idx < len(self.waypoints):
+                self.missed_waypoints.append(self.waypoints[self.current_waypoint_idx])
         
         self.current_waypoint_idx += 1
         self.send_next_goal()
@@ -676,6 +825,7 @@ class AdaptiveCoveragePlanner(Node):
             return
 
         self.mission_complete = True
+        self.coverage_state = CoverageState.COMPLETE
         
         elapsed = 0
         if self.start_time:

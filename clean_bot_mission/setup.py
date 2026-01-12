@@ -14,6 +14,8 @@ setup(
         ('share/' + package_name, ['package.xml']),
         # Install launch files
         (os.path.join('share', package_name, 'launch'), glob('launch/*.py')),
+        # Install scripts
+        (os.path.join('share', package_name, 'scripts'), glob('scripts/*.py')),
     ],
     install_requires=['setuptools', 'numpy', 'scipy'],
     zip_safe=True,
