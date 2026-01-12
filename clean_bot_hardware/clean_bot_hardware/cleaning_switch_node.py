@@ -18,7 +18,7 @@
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Empty
+from std_msgs.msg import String
 from gpiozero import Servo, OutputDevice
 from time import sleep
 
@@ -43,7 +43,7 @@ class CleaningSwitchNode(Node):
 
         # ===================== Subscribers =====================
         self.cmd_sub = self.create_subscription(
-            Empty, 'mission_command', self.clean_callback, 10)
+            String, 'mission_command', self.cmd_callback, 10)
 
         
         self.get_logger().info('🧹 Cleaning Switch Node ready (with Relay Sequences)')
