@@ -27,8 +27,8 @@ class CleaningSwitchNode(Node):
         super().__init__('cleaning_switch_node')
         
         # ===================== Parameters =====================
-        self.declare_parameter('servo_pin', 18)
-        self.declare_parameter('relay_pin', 17)
+        self.declare_parameter('servo_pin', 10)
+        self.declare_parameter('relay_pin', 8)
         servo_pin = self.get_parameter('servo_pin').value
         relay_pin = self.get_parameter('relay_pin').value
         
@@ -58,7 +58,7 @@ class CleaningSwitchNode(Node):
             # 2. Relay Activation Pulse Sequence
             # Close for 0.5s -> Open for 0.5s -> Close for 0.5s -> Open
             self.relay.on()
-            sleep(0.5)
+            sleep(2)
             self.relay.off()
             sleep(0.5)
             self.relay.on()
@@ -75,7 +75,7 @@ class CleaningSwitchNode(Node):
             # 2. Relay Deactivation Pulse Sequence
             # Close for 1.0s -> Open
             self.relay.on()
-            sleep(1.0)
+            sleep(3.0)
             self.relay.off()
             
             sleep(0.5) # Wait for servo to finish
