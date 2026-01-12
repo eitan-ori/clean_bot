@@ -141,10 +141,10 @@ class CleaningSwitchNode(Node):
             self.get_logger().info(f'🔧 Servo value after max(): {self.servo.value}')
             
             # 2. Relay Deactivation Pulse Sequence
-            self.get_logger().info('🔧 Step 2: Relay ON for 3 seconds...')
+            self.get_logger().info('🔧 Step 2: Relay ON for 4 seconds...')
             self.relay.on()
             self.get_logger().info(f'🔧 Relay is_active: {self.relay.is_active}')
-            sleep(3.0)
+            sleep(4.0)
             
             self.get_logger().info('🔧 Step 3: Relay OFF (final)...')
             self.relay.off()
