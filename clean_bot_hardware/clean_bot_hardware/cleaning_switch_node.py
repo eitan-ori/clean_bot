@@ -19,7 +19,7 @@
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Empty
-from gpiozero import Servo
+from gpiozero import Servo, OutputDevice
 from time import sleep
 
 class CleaningSwitchNode(Node):
@@ -28,14 +28,17 @@ class CleaningSwitchNode(Node):
         
         # ===================== Parameters =====================
         self.declare_parameter('servo_pin', 18)
+        self.declare_parameter('relay_pin', 17)
         servo_pin = self.get_parameter('servo_pin').value
+        relay_pin = self.get_parameter('relay_pin').value
         
         # ===================== Initialization =====================
         try:
             self.servo = Servo(servo_pin)
-            self.get_logger().info(f'✅ Servo initialized on GPIO {servo_pin}')
+            self.relay = OutputDevice(relay_pin, active_high=True, initial_value=False)
+            self.get_logger().info(f'✅ Servo on GPIO {servo_pin}, Relay on GPIO {relay_pin}')
         except Exception as e:
-            self.get_logger().error(f'❌ Failed to initialize servo: {e}')
+            self.get_logger().error(f'❌ Failed to initialize hardware: {e}')
             raise e
 
         # ===================== Subscribers =====================
@@ -44,18 +47,40 @@ class CleaningSwitchNode(Node):
         self.stop_sub = self.create_subscription(
             Empty, 'stop_clean_relay', self.stop_callback, 10)
         
-        self.get_logger().info('🧹 Cleaning Switch Node ready')
+        self.get_logger().info('🧹 Cleaning Switch Node ready (with Relay Sequences)')
 
     def clean_callback(self, msg):
-        self.get_logger().info('🔌 ACTIVATE: Turning switch ON...')
+        self.get_logger().info('🔌 START SEQUENCE: Activating Gadget...')
+        
+        # 1. Servo Action
         self.servo.max()
-        sleep(1.0)
+        
+        # 2. Relay Activation Pulse Sequence
+        # Close for 0.5s -> Open for 0.5s -> Close for 0.5s -> Open
+        self.relay.on()
+        sleep(0.5)
+        self.relay.off()
+        sleep(0.5)
+        self.relay.on()
+        sleep(0.5)
+        self.relay.off()
+        
+        sleep(0.5) # Wait for servo to finish
         self.servo.value = None # Stop jitter
 
     def stop_callback(self, msg):
-        self.get_logger().info('🔌 DEACTIVATE: Turning switch OFF...')
+        self.get_logger().info('🔌 STOP SEQUENCE: Deactivating Gadget...')
+        
+        # 1. Servo Action
         self.servo.min()
+        
+        # 2. Relay Deactivation Pulse Sequence
+        # Close for 1.0s -> Open
+        self.relay.on()
         sleep(1.0)
+        self.relay.off()
+        
+        sleep(0.5) # Wait for servo to finish
         self.servo.value = None # Stop jitter
 
 def main(args=None):
