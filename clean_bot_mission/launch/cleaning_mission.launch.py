@@ -111,13 +111,5 @@ def generate_launch_description():
             }]
         ),
 
-        # ===================== RViz (Optional) =====================
-        Node(
-            package='rviz2',
-            executable='rviz2',
-            name='rviz2',
-            condition=IfCondition(use_rviz),
-            arguments=['-d', os.path.join(hardware_pkg, 'config', 'rplidar_rviz.rviz')],
-            output='screen'
-        ),
+
     ])
