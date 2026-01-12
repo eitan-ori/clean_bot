@@ -40,18 +40,28 @@ class CleaningSwitchNode(Node):
         servo_pin = self.get_parameter('servo_pin').value
         relay_pin = self.get_parameter('relay_pin').value
         
+        self.get_logger().info(f'🔧 Initializing with servo_pin={servo_pin}, relay_pin={relay_pin}')
+        self.get_logger().info(f'🔧 HAS_GPIO={HAS_GPIO}')
+        
         # ===================== Hardware Initialization =====================
         self.servo = None
         self.relay = None
         
         if HAS_GPIO:
             try:
+                self.get_logger().info(f'🔧 Creating Servo on GPIO {servo_pin}...')
                 self.servo = Servo(servo_pin)
+                self.get_logger().info(f'🔧 Servo created: {self.servo}')
+                
+                self.get_logger().info(f'🔧 Creating Relay on GPIO {relay_pin}...')
                 self.relay = OutputDevice(relay_pin, active_high=True, initial_value=False)
+                self.get_logger().info(f'🔧 Relay created: {self.relay}')
+                
                 self.get_logger().info(f'✅ Servo on GPIO {servo_pin}, Relay on GPIO {relay_pin}')
             except Exception as e:
-                self.get_logger().warn(f'⚠️ Failed to initialize GPIO hardware: {e}')
-                self.get_logger().warn('   Running in simulation mode (no hardware control)')
+                self.get_logger().error(f'⚠️ Failed to initialize GPIO hardware: {e}')
+                import traceback
+                self.get_logger().error(traceback.format_exc())
         else:
             self.get_logger().warn('⚠️ gpiozero not available - running in simulation mode')
 
@@ -64,6 +74,7 @@ class CleaningSwitchNode(Node):
 
     def cmd_callback(self, msg):
         command = msg.data.lower().strip()
+        self.get_logger().info(f'📬 Received command: "{command}"')
         
         if command == 'start_clean':
             self.get_logger().info('🔌 START SEQUENCE: Activating Gadget...')
@@ -71,55 +82,82 @@ class CleaningSwitchNode(Node):
         elif command == 'stop_clean':
             self.get_logger().info('🔌 STOP SEQUENCE: Deactivating Gadget...')
             self.deactivate_cleaning()
-        # Ignore other commands (they're handled by full_mission_controller)
+        else:
+            self.get_logger().info(f'   (Ignoring command "{command}" - not for me)')
 
     def activate_cleaning(self):
         """Activate the cleaning mechanism."""
+        self.get_logger().info(f'🔧 activate_cleaning() called. servo={self.servo}, relay={self.relay}')
+        
         if self.servo is None or self.relay is None:
-            self.get_logger().info('   [SIMULATION] Would activate servo and relay')
+            self.get_logger().warn('   [SIMULATION] Would activate servo and relay (hardware not available)')
             return
         
         try:
             # 1. Servo Action
+            self.get_logger().info('🔧 Step 1: Moving servo to MAX position...')
             self.servo.max()
+            self.get_logger().info(f'🔧 Servo value after max(): {self.servo.value}')
             
             # 2. Relay Activation Pulse Sequence
+            self.get_logger().info('🔧 Step 2: Relay ON for 2 seconds...')
             self.relay.on()
+            self.get_logger().info(f'🔧 Relay is_active: {self.relay.is_active}')
             sleep(2)
+            
+            self.get_logger().info('🔧 Step 3: Relay OFF for 0.5 seconds...')
             self.relay.off()
             sleep(0.5)
+            
+            self.get_logger().info('🔧 Step 4: Relay ON for 0.5 seconds...')
             self.relay.on()
             sleep(0.5)
+            
+            self.get_logger().info('🔧 Step 5: Relay OFF (final)...')
             self.relay.off()
             
-            sleep(0.5)  # Wait for servo to finish
+            self.get_logger().info('🔧 Step 6: Waiting 0.5s then stopping servo jitter...')
+            sleep(0.5)
             self.servo.value = None  # Stop jitter
             
-            self.get_logger().info('✅ Cleaning mechanism activated')
+            self.get_logger().info('✅ Cleaning mechanism activated successfully!')
         except Exception as e:
             self.get_logger().error(f'❌ Failed to activate: {e}')
+            import traceback
+            self.get_logger().error(traceback.format_exc())
 
     def deactivate_cleaning(self):
         """Deactivate the cleaning mechanism."""
+        self.get_logger().info(f'🔧 deactivate_cleaning() called. servo={self.servo}, relay={self.relay}')
+        
         if self.servo is None or self.relay is None:
-            self.get_logger().info('   [SIMULATION] Would deactivate servo and relay')
+            self.get_logger().warn('   [SIMULATION] Would deactivate servo and relay (hardware not available)')
             return
         
         try:
             # 1. Servo Action
+            self.get_logger().info('🔧 Step 1: Moving servo to MIN position...')
             self.servo.min()
+            self.get_logger().info(f'🔧 Servo value after min(): {self.servo.value}')
             
             # 2. Relay Deactivation Pulse Sequence
+            self.get_logger().info('🔧 Step 2: Relay ON for 3 seconds...')
             self.relay.on()
+            self.get_logger().info(f'🔧 Relay is_active: {self.relay.is_active}')
             sleep(3.0)
+            
+            self.get_logger().info('🔧 Step 3: Relay OFF (final)...')
             self.relay.off()
             
-            sleep(0.5)  # Wait for servo to finish
+            self.get_logger().info('🔧 Step 4: Waiting 0.5s then stopping servo jitter...')
+            sleep(0.5)
             self.servo.value = None  # Stop jitter
             
-            self.get_logger().info('✅ Cleaning mechanism deactivated')
+            self.get_logger().info('✅ Cleaning mechanism deactivated successfully!')
         except Exception as e:
             self.get_logger().error(f'❌ Failed to deactivate: {e}')
+            import traceback
+            self.get_logger().error(traceback.format_exc())
 
 
 def main(args=None):
@@ -131,7 +169,10 @@ def main(args=None):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        try:
+            rclpy.shutdown()
+        except Exception:
+            pass  # Ignore shutdown errors (may already be shut down)
 
 
 if __name__ == '__main__':
