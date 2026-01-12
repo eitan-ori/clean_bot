@@ -162,6 +162,7 @@ bool raw_serial::open(const char * portname, uint32_t baudrate, uint32_t flags)
     tio.c_cflag &= ~CSTOPB;   //1 stop bit
     tio.c_cflag &= ~CRTSCTS;  //No CTS
     tio.c_cflag &= ~PARENB;   //No Parity
+    tio.c_cflag &= ~HUPCL;    //Don't lower DTR on close (keeps motor running)
 
 #ifdef CNEW_RTSCTS
     tio.c_cflag &= ~CNEW_RTSCTS; // no hw flow control
