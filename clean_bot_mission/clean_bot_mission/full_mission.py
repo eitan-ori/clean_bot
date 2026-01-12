@@ -53,11 +53,12 @@ Author: Clean Bot Team
 import math
 import time
 import rclpy
+import subprocess
 from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup
 
-from std_msgs.msg import Bool, String
+from std_msgs.msg import Bool, String, Empty
 from geometry_msgs.msg import PoseStamped, Twist
 from nav_msgs.msg import OccupancyGrid
 
@@ -110,6 +111,10 @@ class FullMissionController(Node):
         self.exploration_control_pub = self.create_publisher(String, 'exploration_control', 10)
         self.coverage_control_pub = self.create_publisher(String, 'coverage_control', 10)
         self.exploration_complete_pub = self.create_publisher(Bool, 'exploration_complete', 10)
+        
+        # Physical switch control
+        self.clean_trigger_pub = self.create_publisher(Empty, 'clean', 10)
+        self.stop_clean_trigger_pub = self.create_publisher(Empty, 'stop_clean_relay', 10)
 
         # ===================== Subscribers =====================
         self.exploration_complete_sub = self.create_subscription(
@@ -238,6 +243,10 @@ class FullMissionController(Node):
             self.get_logger().info('🛑 Stopping cleaning...')
             self.stop_robot()
             
+            # DEACTIVATE SERVO VIA TOPIC
+            self.get_logger().info('🔌 Deactivating cleaning switch...')
+            self.stop_clean_trigger_pub.publish(Empty())
+
             # Tell coverage planner to stop
             ctrl_msg = String()
             ctrl_msg.data = 'stop'
@@ -365,6 +374,11 @@ class FullMissionController(Node):
         """Trigger coverage phase."""
         self.get_logger().info('')
         self.get_logger().info('🧹 Starting coverage/cleaning phase...')
+        
+        # ACTIVATE SERVO VIA TOPIC
+        self.get_logger().info('🔌 Activating cleaning switch...')
+        self.clean_trigger_pub.publish(Empty())
+
         self.get_logger().info('   Robot will clean all free space')
         self.get_logger().info('   Send "stop_clean" to stop')
         self.get_logger().info('')
@@ -387,6 +401,11 @@ class FullMissionController(Node):
             self.coverage_complete = True
             self.get_logger().info('')
             self.get_logger().info('✅ Coverage phase complete!')
+            
+            # DEACTIVATE SERVO VIA TOPIC
+            self.get_logger().info('🔌 Deactivating cleaning switch...')
+            self.stop_clean_trigger_pub.publish(Empty())
+
             self.get_logger().info('')
             
             if self.return_home:
