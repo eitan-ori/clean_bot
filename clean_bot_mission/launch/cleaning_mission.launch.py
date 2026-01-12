@@ -98,6 +98,19 @@ def generate_launch_description():
             }]
         ),
 
+        # Full Mission Controller - receives commands from Telegram bridge
+        Node(
+            package='clean_bot_mission',
+            executable='full_mission',
+            name='full_mission_controller',
+            output='screen',
+            parameters=[{
+                'coverage_width': coverage_width,
+                'auto_start': False,  # Wait for Telegram command
+                'return_home_after': True,
+            }]
+        ),
+
         # ===================== RViz (Optional) =====================
         Node(
             package='rviz2',
