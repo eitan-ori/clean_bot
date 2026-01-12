@@ -39,8 +39,11 @@ from rclpy.time import Time
 
 from sensor_msgs.msg import Range, PointCloud2, PointField
 from visualization_msgs.msg import Marker
-from geometry_msgs.msg import Point
+from geometry_msgs.msg import Point, PointStamped
 from std_msgs.msg import Header
+
+import tf2_ros
+import tf2_geometry_msgs
 
 
 class LowObstacleDetector(Node):
@@ -77,7 +80,12 @@ class LowObstacleDetector(Node):
         # ===================== State =====================
         self.last_obstacle_time = None
         self.last_obstacle_distance = None
+        self.marker_id_counter = 0
         
+        # TF Listener
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
+
         # Publish rate for persistent obstacles
         self.create_timer(0.1, self.publish_persistent_obstacle)
 
@@ -174,36 +182,52 @@ class LowObstacleDetector(Node):
 
     def publish_obstacle_marker(self, distance: float):
         """Publish visualization marker for RViz."""
-        marker = Marker()
-        marker.header.frame_id = self.frame_id
-        marker.header.stamp = self.get_clock().now().to_msg()
-        marker.ns = 'low_obstacles'
-        marker.id = 0
-        marker.type = Marker.CYLINDER
-        marker.action = Marker.ADD
-        
-        # Position at detected distance
-        marker.pose.position.x = distance
-        marker.pose.position.y = 0.0
-        marker.pose.position.z = 0.0
-        marker.pose.orientation.w = 1.0
-        
-        # Size - small cylinder representing obstacle
-        marker.scale.x = 0.10  # Diameter
-        marker.scale.y = 0.10
-        marker.scale.z = 0.05  # Height
-        
-        # Color - orange warning
-        marker.color.r = 1.0
-        marker.color.g = 0.5
-        marker.color.b = 0.0
-        marker.color.a = 0.8
-        
-        # Lifetime
-        marker.lifetime.sec = int(self.persistence)
-        marker.lifetime.nanosec = int((self.persistence % 1) * 1e9)
-        
-        self.marker_pub.publish(marker)
+        # Create point in sensor frame
+        point_in_sensor = PointStamped()
+        point_in_sensor.header.frame_id = self.frame_id
+        point_in_sensor.header.stamp = self.get_clock().now().to_msg()
+        point_in_sensor.point.x = distance
+        point_in_sensor.point.y = 0.0
+        point_in_sensor.point.z = 0.0
+
+        try:
+            # Transform to map frame so marker stays in one place
+            transform = self.tf_buffer.lookup_transform('map', self.frame_id, rclpy.time.Time())
+            point_in_map = tf2_geometry_msgs.do_transform_point(point_in_sensor, transform)
+            
+            marker = Marker()
+            marker.header.frame_id = 'map'
+            marker.header.stamp = self.get_clock().now().to_msg()
+            marker.ns = 'low_obstacles'
+            marker.id = self.marker_id_counter
+            self.marker_id_counter += 1
+            
+            marker.type = Marker.CYLINDER
+            marker.action = Marker.ADD
+            
+            # Position in map frame
+            marker.pose.position = point_in_map.point
+            marker.pose.orientation.w = 1.0
+            
+            # Size - small cylinder representing obstacle
+            marker.scale.x = 0.10  # Diameter
+            marker.scale.y = 0.10
+            marker.scale.z = 0.05  # Height
+            
+            # Color - orange warning
+            marker.color.r = 1.0
+            marker.color.g = 0.5
+            marker.color.b = 0.0
+            marker.color.a = 0.8
+            
+            # Lifetime - 0 means forever
+            marker.lifetime.sec = 0
+            marker.lifetime.nanosec = 0
+            
+            self.marker_pub.publish(marker)
+            
+        except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException) as e:
+            self.get_logger().warn(f'Could not transform obstacle to map frame: {e}')
 
 
 def main(args=None):
