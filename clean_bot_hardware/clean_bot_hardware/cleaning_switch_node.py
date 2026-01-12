@@ -36,7 +36,7 @@ class CleaningSwitchNode(Node):
         
         # ===================== Parameters =====================
         self.declare_parameter('servo_pin', 18)
-        self.declare_parameter('relay_pin', 22)
+        self.declare_parameter('relay_pin', 17)
         servo_pin = self.get_parameter('servo_pin').value
         relay_pin = self.get_parameter('relay_pin').value
         
