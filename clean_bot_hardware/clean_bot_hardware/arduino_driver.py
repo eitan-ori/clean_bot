@@ -35,8 +35,6 @@ from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import Range
 from std_msgs.msg import String
-from time import sleep
-import threading
 
 
 class ArduinoDriver(Node):
@@ -102,9 +100,6 @@ class ArduinoDriver(Node):
         # Last command time (for watchdog)
         self.last_cmd_time = self.get_clock().now()
         
-        # Cleaning sequence state
-        self.cleaning_active = False
-        
         # ===================== Timer =====================
         timer_period = 1.0 / publish_rate
         self.timer = self.create_timer(timer_period, self.update_loop)
@@ -127,66 +122,11 @@ class ArduinoDriver(Node):
         self.get_logger().info(f'📬 Mission command: "{command}"')
         
         if command == 'start_clean':
-            # Run cleaning sequence in separate thread to not block
-            threading.Thread(target=self.activate_cleaning, daemon=True).start()
+            self.get_logger().info('🧹 Sending CLEAN_START to Arduino')
+            self.send_command('CLEAN_START')
         elif command == 'stop_clean':
-            threading.Thread(target=self.deactivate_cleaning, daemon=True).start()
-
-    def activate_cleaning(self):
-        """Activate the cleaning mechanism (servo + relay sequence)."""
-        self.get_logger().info('🧹 START CLEANING SEQUENCE')
-        self.cleaning_active = True
-        
-        try:
-            # 1. Move servo to MIN position
-            self.get_logger().info('   Step 1: Servo MIN')
-            self.send_command('SERVO_MIN')
-            
-            # 2. Relay sequence: ON (2s) -> OFF (1s) -> ON (0.5s) -> OFF
-            self.get_logger().info('   Step 2: Relay ON (2s)')
-            self.send_command('RELAY_ON')
-            sleep(2.0)
-            
-            self.get_logger().info('   Step 3: Relay OFF (1s)')
-            self.send_command('RELAY_OFF')
-            sleep(1.0)
-            
-            self.get_logger().info('   Step 4: Relay ON (0.5s)')
-            self.send_command('RELAY_ON')
-            sleep(0.5)
-            
-            self.get_logger().info('   Step 5: Relay OFF')
-            self.send_command('RELAY_OFF')
-            
-            self.get_logger().info('✅ Cleaning activated!')
-        except Exception as e:
-            self.get_logger().error(f'❌ Cleaning activation failed: {e}')
-        
-        self.cleaning_active = False
-
-    def deactivate_cleaning(self):
-        """Deactivate the cleaning mechanism (servo + relay sequence)."""
-        self.get_logger().info('🧹 STOP CLEANING SEQUENCE')
-        self.cleaning_active = True
-        
-        try:
-            # 1. Move servo to MAX position
-            self.get_logger().info('   Step 1: Servo MAX')
-            self.send_command('SERVO_MAX')
-            
-            # 2. Relay sequence: ON (4s) -> OFF
-            self.get_logger().info('   Step 2: Relay ON (4s)')
-            self.send_command('RELAY_ON')
-            sleep(4.0)
-            
-            self.get_logger().info('   Step 3: Relay OFF')
-            self.send_command('RELAY_OFF')
-            
-            self.get_logger().info('✅ Cleaning deactivated!')
-        except Exception as e:
-            self.get_logger().error(f'❌ Cleaning deactivation failed: {e}')
-        
-        self.cleaning_active = False
+            self.get_logger().info('🧹 Sending CLEAN_STOP to Arduino')
+            self.send_command('CLEAN_STOP')
 
     def cmd_vel_callback(self, msg: Twist):
         """Convert Twist message to motor PWM commands and send to Arduino."""
@@ -306,12 +246,11 @@ class ArduinoDriver(Node):
         self.range_pub.publish(range_msg)
 
     def destroy_node(self):
-        """Clean shutdown - stop motors, relay, and servo."""
+        """Clean shutdown - stop motors and cleaning system."""
         if hasattr(self, 'serial') and self.serial.is_open:
             try:
-                self.serial.write(b"0,0\n")        # Stop motors
-                self.serial.write(b"RELAY_OFF\n")  # Ensure relay is off
-                self.serial.write(b"SERVO_MIN\n")  # Return servo to start
+                self.serial.write(b"0,0\n")         # Stop motors
+                self.serial.write(b"CLEAN_STOP\n")  # Stop cleaning
                 self.serial.close()
             except:
                 pass
