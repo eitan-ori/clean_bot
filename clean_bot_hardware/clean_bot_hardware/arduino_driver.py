@@ -149,18 +149,19 @@ class ArduinoDriver(Node):
         linear = msg.linear.x
         angular = msg.angular.z
         
-        # Minimum PWM to overcome motor friction (adjust if motors still strain)
-        MIN_PWM = 90
-        MAX_PWM = 150  # Don't go too fast
+        # PWM limits
+        MIN_PWM_FORWARD = 90  # Minimum for forward motion (overcome friction)
+        MIN_PWM_ROTATE = 50   # Lower minimum for rotation (can be slower)
+        MAX_PWM = 150         # Don't go too fast
         
         # Simplified movement: either rotate OR move forward
         # This prevents weird combined movements that confuse SLAM
         
-        if abs(angular) > 0.1:
+        if abs(angular) > 0.05:  # Lower threshold for rotation
             # Pure rotation - spin in place
             # Positive angular = counter-clockwise = left backward, right forward
             rotation_pwm = int((abs(angular) / 1.0) * MAX_PWM)
-            rotation_pwm = max(MIN_PWM, min(MAX_PWM, rotation_pwm))
+            rotation_pwm = max(MIN_PWM_ROTATE, min(MAX_PWM, rotation_pwm))
             
             if angular > 0:
                 # Counter-clockwise: left back, right forward
@@ -174,7 +175,7 @@ class ArduinoDriver(Node):
         elif abs(linear) > 0.01:
             # Pure forward/backward motion - both wheels same speed
             forward_pwm = int((abs(linear) / self.max_linear_speed) * MAX_PWM)
-            forward_pwm = max(MIN_PWM, min(MAX_PWM, forward_pwm))
+            forward_pwm = max(MIN_PWM_FORWARD, min(MAX_PWM, forward_pwm))
             
             if linear > 0:
                 # Forward: NEGATE because motors are inverted!

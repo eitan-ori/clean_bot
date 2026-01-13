@@ -87,8 +87,8 @@ class AdaptiveCoveragePlanner(Node):
         # Direct movement parameters (turn-then-drive)
         self.declare_parameter('use_direct_drive', True)         # Use direct cmd_vel instead of Nav2
         self.declare_parameter('linear_speed', 0.12)             # Forward speed (m/s)
-        self.declare_parameter('angular_speed', 0.15)            # Turn speed (rad/s) - SLOW for stability
-        self.declare_parameter('angle_tolerance', 0.35)          # Radians (~20°) - don't need precision
+        self.declare_parameter('angular_speed', 0.10)            # Turn speed (rad/s) - VERY SLOW
+        self.declare_parameter('angle_tolerance', 0.5)           # Radians (~30°) - approximate is fine
         self.declare_parameter('position_tolerance', 0.08)       # Meters (8cm)
         
         self.coverage_width = self.get_parameter('coverage_width').value
