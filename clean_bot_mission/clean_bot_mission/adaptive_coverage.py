@@ -183,6 +183,11 @@ class AdaptiveCoveragePlanner(Node):
         self.get_logger().info('🧹 Adaptive Coverage Planner Started')
         self.get_logger().info(f'   Coverage width: {self.coverage_width * 100:.0f}cm')
         self.get_logger().info(f'   Step size: {self.step_size * 100:.1f}cm')
+        if self.use_direct_drive:
+            self.get_logger().info(f'   Movement: DIRECT DRIVE (turn-then-straight)')
+            self.get_logger().info(f'   Speed: {self.linear_speed} m/s, Turn: {self.angular_speed} rad/s')
+        else:
+            self.get_logger().info(f'   Movement: Nav2 (path planning)')
         self.get_logger().info('   Waiting for start command...')
         self.get_logger().info('=' * 60)
 
@@ -275,6 +280,7 @@ class AdaptiveCoveragePlanner(Node):
         self.successful_waypoints = 0
         self.failed_waypoints = 0
         self.start_time = None
+        self.movement_phase = 'idle'
 
     def cancel_current_goal(self):
         """Cancel the current navigation goal and stop robot."""
@@ -298,7 +304,7 @@ class AdaptiveCoveragePlanner(Node):
         self.cmd_vel_pub.publish(stop_cmd)
 
     def odom_callback(self, msg: Odometry):
-        \"\"\"Update robot pose from odometry.\"\"\"
+        """Update robot pose from odometry."""
         self.robot_x = msg.pose.pose.position.x
         self.robot_y = msg.pose.pose.position.y
         
@@ -318,7 +324,7 @@ class AdaptiveCoveragePlanner(Node):
                 self.execute_drive()
 
     def normalize_angle(self, angle):
-        \"\"\"Normalize angle to [-pi, pi].\"\"\"
+        """Normalize angle to [-pi, pi]."""
         while angle > math.pi:
             angle -= 2.0 * math.pi
         while angle < -math.pi:
@@ -326,7 +332,7 @@ class AdaptiveCoveragePlanner(Node):
         return angle
 
     def execute_turn(self):
-        \"\"\"Execute turning phase - rotate to face target.\"\"\"
+        """Execute turning phase - rotate to face target."""
         # Calculate angle to target
         dx = self.target_x - self.robot_x
         dy = self.target_y - self.robot_y
@@ -351,7 +357,7 @@ class AdaptiveCoveragePlanner(Node):
         self.cmd_vel_pub.publish(cmd)
 
     def execute_drive(self):
-        \"\"\"Execute driving phase - move straight to target.\"\"\"
+        """Execute driving phase - move straight to target."""
         dx = self.target_x - self.robot_x
         dy = self.target_y - self.robot_y
         distance = math.sqrt(dx*dx + dy*dy)
@@ -932,7 +938,7 @@ class AdaptiveCoveragePlanner(Node):
         return ordered_waypoints
 
     def send_next_goal(self):
-        """Send next waypoint to Nav2."""
+        """Send next waypoint - uses direct drive (turn-then-straight) or Nav2."""
         # Check if we should continue
         if self.coverage_state != CoverageState.RUNNING:
             return
@@ -941,11 +947,44 @@ class AdaptiveCoveragePlanner(Node):
             self.finish_mission()
             return
 
+        x, y, yaw = self.waypoints[self.current_waypoint_idx]
+        
+        progress = (self.current_waypoint_idx + 1) / len(self.waypoints) * 100
+        self.get_logger().info(
+            f'[{self.current_waypoint_idx + 1}/{len(self.waypoints)}] '
+            f'({progress:.0f}%) → ({x:.2f}, {y:.2f})')
+
+        self.is_navigating = True
+        
+        if self.use_direct_drive:
+            # Direct drive mode: Turn to face target, then drive straight
+            self.target_x = x
+            self.target_y = y
+            self.target_yaw = yaw
+            
+            if not self.odom_received:
+                self.get_logger().warn('⚠️ No odometry received yet, waiting...')
+                # Create a one-shot timer to retry
+                self.create_timer(0.5, self._retry_send_goal_once)
+                return
+            
+            # Start the turn phase
+            self.get_logger().info(f'   🔄 Turning to face target...')
+            self.movement_phase = 'turning'
+        else:
+            # Nav2 mode (fallback)
+            self.send_goal_nav2(x, y, yaw)
+
+    def _retry_send_goal_once(self):
+        """Retry sending goal after waiting for odom."""
+        if self.odom_received and self.coverage_state == CoverageState.RUNNING:
+            self.send_next_goal()
+
+    def send_goal_nav2(self, x, y, yaw):
+        """Send goal using Nav2 NavigateToPose action."""
         if not self.nav_client.wait_for_server(timeout_sec=5.0):
             self.get_logger().error('❌ Nav2 action server not available!')
             return
-
-        x, y, yaw = self.waypoints[self.current_waypoint_idx]
         
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose.header.frame_id = 'map'
@@ -955,12 +994,6 @@ class AdaptiveCoveragePlanner(Node):
         goal_msg.pose.pose.orientation.z = math.sin(yaw / 2.0)
         goal_msg.pose.pose.orientation.w = math.cos(yaw / 2.0)
 
-        progress = (self.current_waypoint_idx + 1) / len(self.waypoints) * 100
-        self.get_logger().info(
-            f'[{self.current_waypoint_idx + 1}/{len(self.waypoints)}] '
-            f'({progress:.0f}%) → ({x:.2f}, {y:.2f})')
-
-        self.is_navigating = True
         send_goal_future = self.nav_client.send_goal_async(goal_msg)
         send_goal_future.add_done_callback(self.goal_response_callback)
 
