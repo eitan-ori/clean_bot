@@ -75,7 +75,7 @@ class FrontierExplorer(Node):
         self.declare_parameter('goal_tolerance', 0.3)        # How close to get to frontier
         self.declare_parameter('min_goal_distance', 0.5)     # Don't go to very close frontiers
         self.declare_parameter('navigation_timeout', 60.0)   # Single goal timeout
-        self.declare_parameter('auto_start', True)           # Start automatically when map received
+        self.declare_parameter('auto_start', False)          # Wait for explicit start command
         
         self.min_frontier_size = self.get_parameter('min_frontier_size').value
         self.robot_radius = self.get_parameter('robot_radius').value

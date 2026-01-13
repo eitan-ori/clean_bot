@@ -80,7 +80,7 @@ class AdaptiveCoveragePlanner(Node):
         # This allows cleaning edges even with 18cm radius body.
         
         self.declare_parameter('timeout_per_waypoint', 90)       # Seconds per goal
-        self.declare_parameter('start_on_exploration_complete', True)
+        self.declare_parameter('start_on_exploration_complete', False)  # Wait for explicit start command
         self.declare_parameter('min_region_area', 0.1)           # Min area to cover (m²)
         self.declare_parameter('max_retries', 1)                 # Number of times to retry missed areas
         

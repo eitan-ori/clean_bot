@@ -70,33 +70,8 @@ def generate_launch_description():
         ),
 
         # ===================== Mission Nodes =====================
-        # Frontier Explorer - autonomous exploration
-        Node(
-            package='clean_bot_mission',
-            executable='frontier_explorer',
-            name='frontier_explorer',
-            output='screen',
-            condition=UnlessCondition(skip_exploration),
-            parameters=[{
-                'min_frontier_size': 5,
-                'robot_radius': 0.15,
-                'exploration_timeout': 600.0,
-            }]
-        ),
-
-        # Adaptive Coverage Planner - cleaning path
-        Node(
-            package='clean_bot_mission',
-            executable='adaptive_coverage',
-            name='adaptive_coverage',
-            output='screen',
-            parameters=[{
-                'coverage_width': coverage_width,
-                'overlap_ratio': 0.15,
-                'robot_radius': 0.12,
-                'start_on_exploration_complete': True,
-            }]
-        ),
+        # NOTE: frontier_explorer and adaptive_coverage are created internally by full_mission node
+        # Do NOT launch them separately to avoid duplicate nodes and conflicting auto-start behavior
 
         Node(
             package='clean_bot_hardware',
