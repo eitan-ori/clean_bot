@@ -4,12 +4,12 @@
 # FILE DESCRIPTION:
 # This node acts as the primary hardware bridge between ROS 2 and the physical
 # robot platform (Arduino-based). It handles bidirectional serial communication
-# to control motors, relay, and retrieve sensor feedback (ultrasonic).
+# to control motors, relay, servo, and retrieve sensor feedback (ultrasonic).
 #
 # MAIN FUNCTIONS:
 # 1. Subscribes to /cmd_vel and converts twist commands into motor PWM values.
 # 2. Receives and publishes ultrasonic range data for obstacle avoidance.
-# 3. Handles relay commands (RELAY_ON/RELAY_OFF) from other nodes.
+# 3. Handles cleaning commands (start_clean/stop_clean) - controls relay & servo.
 #
 # PARAMETERS & VALUES:
 # - serial_port: /dev/ttyUSB0 (The USB port where Arduino is connected)
@@ -23,6 +23,7 @@
 # - The Arduino is programmed with the matching communication protocol:
 #   Input: "pwm_left,pwm_right\n" for motors
 #   Input: "RELAY_ON\n" / "RELAY_OFF\n" for relay
+#   Input: "SERVO_MIN\n" / "SERVO_MAX\n" for servo
 #   Output: "distance_cm\n"
 # - The user has serial port permissions (dialout group).
 ###############################################################################
@@ -34,6 +35,8 @@ from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import Range
 from std_msgs.msg import String
+from time import sleep
+import threading
 
 
 class ArduinoDriver(Node):
@@ -91,29 +94,99 @@ class ArduinoDriver(Node):
         self.cmd_vel_sub = self.create_subscription(
             Twist, 'cmd_vel', self.cmd_vel_callback, 10)
         
-        # Subscribe to relay commands from cleaning_switch_node
-        self.relay_cmd_sub = self.create_subscription(
-            String, 'relay_command', self.relay_command_callback, 10)
+        # Subscribe to mission commands for cleaning control
+        self.mission_cmd_sub = self.create_subscription(
+            String, 'mission_command', self.mission_command_callback, 10)
         
         # ===================== State Variables =====================
         # Last command time (for watchdog)
         self.last_cmd_time = self.get_clock().now()
         
+        # Cleaning sequence state
+        self.cleaning_active = False
+        
         # ===================== Timer =====================
         timer_period = 1.0 / publish_rate
         self.timer = self.create_timer(timer_period, self.update_loop)
         
-        self.get_logger().info(f'Arduino Driver started (no encoders)')
+        self.get_logger().info(f'Arduino Driver started (with cleaning control)')
 
-    def relay_command_callback(self, msg: String):
-        """Handle relay commands from other nodes."""
-        command = msg.data.strip()
-        if command in ['RELAY_ON', 'RELAY_OFF']:
-            try:
-                self.serial.write(f"{command}\n".encode('utf-8'))
-                self.get_logger().info(f'📤 Relay command sent: {command}')
-            except serial.SerialException as e:
-                self.get_logger().warning(f'Serial write error: {e}')
+    def send_command(self, command: str):
+        """Send a command to Arduino."""
+        try:
+            self.serial.write(f"{command}\n".encode('utf-8'))
+            self.get_logger().info(f'📤 Sent: {command}')
+            return True
+        except serial.SerialException as e:
+            self.get_logger().warning(f'Serial write error: {e}')
+            return False
+
+    def mission_command_callback(self, msg: String):
+        """Handle mission commands for cleaning control."""
+        command = msg.data.lower().strip()
+        self.get_logger().info(f'📬 Mission command: "{command}"')
+        
+        if command == 'start_clean':
+            # Run cleaning sequence in separate thread to not block
+            threading.Thread(target=self.activate_cleaning, daemon=True).start()
+        elif command == 'stop_clean':
+            threading.Thread(target=self.deactivate_cleaning, daemon=True).start()
+
+    def activate_cleaning(self):
+        """Activate the cleaning mechanism (servo + relay sequence)."""
+        self.get_logger().info('🧹 START CLEANING SEQUENCE')
+        self.cleaning_active = True
+        
+        try:
+            # 1. Move servo to MIN position
+            self.get_logger().info('   Step 1: Servo MIN')
+            self.send_command('SERVO_MIN')
+            
+            # 2. Relay sequence: ON (2s) -> OFF (1s) -> ON (0.5s) -> OFF
+            self.get_logger().info('   Step 2: Relay ON (2s)')
+            self.send_command('RELAY_ON')
+            sleep(2.0)
+            
+            self.get_logger().info('   Step 3: Relay OFF (1s)')
+            self.send_command('RELAY_OFF')
+            sleep(1.0)
+            
+            self.get_logger().info('   Step 4: Relay ON (0.5s)')
+            self.send_command('RELAY_ON')
+            sleep(0.5)
+            
+            self.get_logger().info('   Step 5: Relay OFF')
+            self.send_command('RELAY_OFF')
+            
+            self.get_logger().info('✅ Cleaning activated!')
+        except Exception as e:
+            self.get_logger().error(f'❌ Cleaning activation failed: {e}')
+        
+        self.cleaning_active = False
+
+    def deactivate_cleaning(self):
+        """Deactivate the cleaning mechanism (servo + relay sequence)."""
+        self.get_logger().info('🧹 STOP CLEANING SEQUENCE')
+        self.cleaning_active = True
+        
+        try:
+            # 1. Move servo to MAX position
+            self.get_logger().info('   Step 1: Servo MAX')
+            self.send_command('SERVO_MAX')
+            
+            # 2. Relay sequence: ON (4s) -> OFF
+            self.get_logger().info('   Step 2: Relay ON (4s)')
+            self.send_command('RELAY_ON')
+            sleep(4.0)
+            
+            self.get_logger().info('   Step 3: Relay OFF')
+            self.send_command('RELAY_OFF')
+            
+            self.get_logger().info('✅ Cleaning deactivated!')
+        except Exception as e:
+            self.get_logger().error(f'❌ Cleaning deactivation failed: {e}')
+        
+        self.cleaning_active = False
 
     def cmd_vel_callback(self, msg: Twist):
         """Convert Twist message to motor PWM commands and send to Arduino."""
@@ -233,11 +306,12 @@ class ArduinoDriver(Node):
         self.range_pub.publish(range_msg)
 
     def destroy_node(self):
-        """Clean shutdown - stop motors and relay."""
+        """Clean shutdown - stop motors, relay, and servo."""
         if hasattr(self, 'serial') and self.serial.is_open:
             try:
-                self.serial.write(b"0,0\n")       # Stop motors
-                self.serial.write(b"RELAY_OFF\n") # Ensure relay is off
+                self.serial.write(b"0,0\n")        # Stop motors
+                self.serial.write(b"RELAY_OFF\n")  # Ensure relay is off
+                self.serial.write(b"SERVO_MIN\n")  # Return servo to start
                 self.serial.close()
             except:
                 pass
