@@ -311,8 +311,28 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start scanning/exploration."""
     if not await check_auth(update):
         return
+    if ros_node is None:
+        await update.message.reply_text(
+            '❌ ROS bridge not initialized.\n'
+            'Start this script from a terminal where ROS2 is sourced, then try again.'
+        )
+        return
+
     ros_node.send_command('start_scan')
     await update.message.reply_text('🔍 Starting scan...\nRobot will explore the environment.')
+
+    # If DDS discovery/network is broken, we typically never receive /mission_state.
+    # Give it a moment, then provide a concrete hint instead of failing silently.
+    await asyncio.sleep(1.0)
+    if ros_node.mission_state == "UNKNOWN":
+        await update.message.reply_text(
+            '⚠️ I sent the command, but I am not receiving any ROS2 state from the robot yet.\n\n'
+            'Most common causes:\n'
+            '- PC and Pi have different `ROS_DOMAIN_ID`\n'
+            '- Windows firewall/router blocks DDS multicast/UDP (ports ~7400-7500)\n'
+            '- Running ROS2 in WSL2 (multicast to LAN often fails)\n\n'
+            'Quick check: on the machine running this script, run `ros2 topic list` and confirm you can see `/mission_state`.'
+        )
 
 
 async def cmd_stopscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -410,9 +430,16 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Map info
     map_info = "Not received"
+    map_age = ""
     if ros_node.map_data:
         m = ros_node.map_data.info
         map_info = f"{m.width}x{m.height} @ {m.resolution:.3f}m/px"
+        if ros_node.last_map_time is not None:
+            try:
+                age_s = (ros_node.get_clock().now() - ros_node.last_map_time).nanoseconds / 1e9
+                map_age = f" (age {age_s:.1f}s)"
+            except Exception:
+                map_age = ""
     
     status = f"""
 📊 *Robot Status*
@@ -422,7 +449,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 *Coverage:* {coverage_emoji} {ros_node.coverage_state}
 
 *Position:* {pos_str}
-*Map:* {map_info}
+*Map:* {map_info}{map_age}
     """
     await update.message.reply_text(status, parse_mode='Markdown')
 

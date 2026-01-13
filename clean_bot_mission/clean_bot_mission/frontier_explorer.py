@@ -32,11 +32,15 @@ Author: Clean Bot Team
 """
 
 import math
+import time
 import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
+from rclpy.time import Time
+
+from tf2_ros import Buffer, TransformListener
 
 from nav2_msgs.action import NavigateToPose
 from nav_msgs.msg import OccupancyGrid
@@ -115,7 +119,7 @@ class FrontierExplorer(Node):
         self.map_info = None
         self.map_array = None
         
-        self.robot_pose = None  # Will be updated from TF or odom
+        self.robot_pose = None  # Best-effort (x, y) in map frame
         self.current_goal = None
         self.is_navigating = False
         self.exploration_complete = False
@@ -143,6 +147,10 @@ class FrontierExplorer(Node):
         self.get_logger().info(f'   Waiting for start command or map (auto_start={self.auto_start})...')
         self.get_logger().info('   Robot will autonomously explore unknown areas')
         self.get_logger().info('=' * 60)
+
+        # TF for robot position (map -> base_link)
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
 
     def control_callback(self, msg: String):
         """Handle external control commands."""
@@ -221,6 +229,10 @@ class FrontierExplorer(Node):
         self.current_goal = None
         self._retry_after_clear = False
 
+        # Diagnostics (throttled logs)
+        self._last_no_map_warn = 0.0
+        self._no_map_warn_period_s = 5.0
+
     def publish_state(self):
         """Publish current exploration state."""
         msg = String()
@@ -249,6 +261,16 @@ class FrontierExplorer(Node):
             return
             
         if self.exploration_complete or self.map_array is None:
+            # NOTE: Without /map, the explorer has nothing to plan against.
+            # This is a very common "robot doesn't move" failure mode.
+            if self.map_array is None:
+                now = time.monotonic()
+                if (now - self._last_no_map_warn) >= self._no_map_warn_period_s:
+                    self._last_no_map_warn = now
+                    self.get_logger().warn(
+                        '🗺️ No /map received yet, so exploration cannot start moving. '
+                        'Check SLAM Toolbox is running and publishing /map, and that the robot can see /scan and /tf.'
+                    )
             return
 
         # Check timeout
@@ -365,11 +387,14 @@ class FrontierExplorer(Node):
         
         best_frontier = None
         best_score = float('-inf')
+        skipped_failed = 0
+        skipped_too_close = 0
         
         for frontier in self.frontiers:
             # Skip if we've failed to reach this area before
             key = (round(frontier['x'], 1), round(frontier['y'], 1))
             if key in self.failed_goals:
+                skipped_failed += 1
                 continue
             
             # Calculate distance
@@ -379,6 +404,7 @@ class FrontierExplorer(Node):
             
             # Skip very close frontiers (likely unreachable due to obstacles)
             if distance < self.min_goal_distance:
+                skipped_too_close += 1
                 continue
             
             # Score: prefer larger frontiers that are closer
@@ -393,12 +419,31 @@ class FrontierExplorer(Node):
                 best_score = score
                 best_frontier = frontier
 
+        if best_frontier is None:
+            self.get_logger().warn(
+                f'⚠️ No suitable frontier selected (frontiers={len(self.frontiers)}, '
+                f'skipped_failed={skipped_failed}, skipped_too_close={skipped_too_close}). '
+                'This can happen if TF map->base_link is missing/wrong or Nav2 keeps failing goals.'
+            )
+
         return best_frontier
 
     def get_robot_position(self) -> tuple:
         """Get current robot position. Returns (x, y)."""
-        # TODO: Get from TF or /odom topic
-        # For now, estimate from map center or last goal
+        # Prefer TF (map -> base_link). If unavailable, fall back.
+        try:
+            trans = self.tf_buffer.lookup_transform('map', 'base_link', Time())
+            x = float(trans.transform.translation.x)
+            y = float(trans.transform.translation.y)
+            self.robot_pose = (x, y)
+            return (x, y)
+        except Exception:
+            pass
+
+        if self.robot_pose is not None:
+            return self.robot_pose
+
+        # Fallback: estimate from last goal or map center
         if self.current_goal:
             return (self.current_goal['x'], self.current_goal['y'])
         
