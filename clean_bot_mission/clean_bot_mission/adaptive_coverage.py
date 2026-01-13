@@ -87,8 +87,9 @@ class AdaptiveCoveragePlanner(Node):
         # Direct movement parameters (turn-then-drive)
         self.declare_parameter('use_direct_drive', True)         # Use direct cmd_vel instead of Nav2
         self.declare_parameter('linear_speed', 0.12)             # Forward speed (m/s)
-        self.declare_parameter('angular_speed', 0.3)             # Turn speed (rad/s)
-        self.declare_parameter('angle_tolerance', 0.25)          # Radians (~15°) - tolerance for turning
+        self.declare_parameter('angular_speed', 0.4)             # Max turn speed (rad/s)
+        self.declare_parameter('min_angular_speed', 0.15)        # Min turn speed (rad/s)
+        self.declare_parameter('angle_tolerance', 0.35)          # Radians (~20°) - tolerance for turning
         self.declare_parameter('position_tolerance', 0.10)       # Meters (10cm)
         
         self.coverage_width = self.get_parameter('coverage_width').value
@@ -103,6 +104,7 @@ class AdaptiveCoveragePlanner(Node):
         self.use_direct_drive = self.get_parameter('use_direct_drive').value
         self.linear_speed = self.get_parameter('linear_speed').value
         self.angular_speed = self.get_parameter('angular_speed').value
+        self.min_angular_speed = self.get_parameter('min_angular_speed').value
         self.angle_tolerance = self.get_parameter('angle_tolerance').value
         self.position_tolerance = self.get_parameter('position_tolerance').value
         
@@ -384,12 +386,22 @@ class AdaptiveCoveragePlanner(Node):
             self.get_logger().debug(f'   🚗 Sent drive cmd: linear={cmd.linear.x}, angular={cmd.angular.z}')
             return
         
+        # PROPORTIONAL turn speed - slow down as we approach target angle
+        # This prevents overshooting and oscillation
+        # Scale from min_angular_speed (at tolerance) to angular_speed (at 90°+)
+        abs_error = abs(angle_error)
+        if abs_error < 0.5:  # Less than ~30°
+            # Proportional speed: slower when closer to target
+            turn_speed = self.min_angular_speed + (self.angular_speed - self.min_angular_speed) * (abs_error / 0.5)
+        else:
+            turn_speed = self.angular_speed
+        
         # Turn in the direction that reduces angle_error (shortest path)
         cmd = Twist()
         if angle_error > 0:
-            cmd.angular.z = self.angular_speed   # Turn left (counter-clockwise)
+            cmd.angular.z = turn_speed   # Turn left (counter-clockwise)
         else:
-            cmd.angular.z = -self.angular_speed  # Turn right (clockwise)
+            cmd.angular.z = -turn_speed  # Turn right (clockwise)
         
         self.cmd_vel_pub.publish(cmd)
         self.get_logger().debug(f'   🔄 Turning: err={math.degrees(angle_error):.0f}° → cmd.angular.z={cmd.angular.z:.2f}')
