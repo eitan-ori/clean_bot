@@ -132,7 +132,7 @@ def generate_launch_description():
                 'serial_port': lidar_port,
                 'serial_baudrate': 115200,
                 'frame_id': 'laser',
-                'inverted': False,
+                'inverted': True,  # LiDAR mounted 180 degrees rotated
                 'angle_compensate': True,
                 'scan_mode': '',  # Auto-detect scan mode
                 'scan_frequency': 10.0,  # Target scan frequency
@@ -186,6 +186,9 @@ def generate_launch_description():
                 'reverse_allowed': True,           # Allow backing up
             }]
         ),
+
+        # NOTE: Cleaning control is handled by arduino_driver via arduino_command topic
+        # The servo/relay commands are sent to Arduino which handles the actual hardware
 
         # ==================== IMU Madgwick Filter ====================
         Node(
