@@ -37,10 +37,13 @@ class CleaningSwitchNode(Node):
         # ===================== Parameters =====================
         self.declare_parameter('servo_pin', 18)
         self.declare_parameter('relay_pin', 17)
+        self.declare_parameter('relay_active_high', False) # Set to True if relay turns ON with 3.3V
+        
         servo_pin = self.get_parameter('servo_pin').value
         relay_pin = self.get_parameter('relay_pin').value
+        relay_active_high = self.get_parameter('relay_active_high').value
         
-        self.get_logger().info(f'🔧 Initializing with servo_pin={servo_pin}, relay_pin={relay_pin}')
+        self.get_logger().info(f'🔧 Init: servo={servo_pin}, relay={relay_pin}, active_high={relay_active_high}')
         self.get_logger().info(f'🔧 HAS_GPIO={HAS_GPIO}')
         
         # ===================== Hardware Initialization =====================
@@ -50,14 +53,16 @@ class CleaningSwitchNode(Node):
         if HAS_GPIO:
             try:
                 self.get_logger().info(f'🔧 Creating Servo on GPIO {servo_pin}...')
-                self.servo = Servo(servo_pin)
+                self.servo = Servo(servo_pin, initial_value=-1)
                 self.get_logger().info(f'🔧 Servo created: {self.servo}')
                 
                 self.get_logger().info(f'🔧 Creating Relay on GPIO {relay_pin}...')
-                self.relay = OutputDevice(relay_pin, active_high=False, initial_value=False)
+                # active_high determines if ON=1/OFF=0 (True) or ON=0/OFF=1 (False)
+                # initial_value=False means start in "Logical OFF" state
+                self.relay = OutputDevice(relay_pin, active_high=relay_active_high, initial_value=False)
                 self.get_logger().info(f'🔧 Relay created: {self.relay}')
                 
-                self.get_logger().info(f'✅ Servo on GPIO {servo_pin}, Relay on GPIO {relay_pin}')
+                self.get_logger().info('✅ Hardware initialized')
             except Exception as e:
                 self.get_logger().error(f'⚠️ Failed to initialize GPIO hardware: {e}')
                 import traceback
@@ -99,25 +104,26 @@ class CleaningSwitchNode(Node):
             self.servo.min()
             self.get_logger().info(f'🔧 Servo value after min(): {self.servo.value}')
             
-            # 2. Relay Activation Pulse Sequence
+            # 2. Relay Activation Pulse Sequence (Matches Arduino "Start" Pattern)
+            # Pattern: ON (2s) -> OFF (1s) -> ON (0.5s) -> OFF (1s)
+            
             self.get_logger().info('🔧 Step 2: Relay ON for 2 seconds...')
             self.relay.on()
-            self.get_logger().info(f'🔧 Relay is_active: {self.relay.is_active}')
-            sleep(2)
+            sleep(2.0)
             
-            self.get_logger().info('🔧 Step 3: Relay OFF for 0.5 seconds...')
+            self.get_logger().info('🔧 Step 3: Relay OFF for 1 second...')
             self.relay.off()
-            sleep(0.5)
+            sleep(1.0)
             
             self.get_logger().info('🔧 Step 4: Relay ON for 0.5 seconds...')
             self.relay.on()
             sleep(0.5)
             
-            self.get_logger().info('🔧 Step 5: Relay OFF (final)...')
+            self.get_logger().info('🔧 Step 5: Relay OFF for 1 second (End of Start Sequence)...')
             self.relay.off()
+            sleep(1.0)
             
-            self.get_logger().info('🔧 Step 6: Waiting 0.5s then stopping servo jitter...')
-            sleep(0.5)
+            self.get_logger().info('🔧 Step 6: Stopping servo jitter...')
             self.servo.value = None  # Stop jitter
             
             self.get_logger().info('✅ Cleaning mechanism activated successfully!')
