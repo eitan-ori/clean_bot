@@ -73,12 +73,7 @@ def generate_launch_description():
         ),
 
         # ===================== Mission Nodes =====================
-        # NOTE: frontier_explorer and adaptive_coverage are created internally by full_mission node
-        # Do NOT launch them separately to avoid duplicate nodes and conflicting auto-start behavior
-        # NOTE: cleaning_switch is already launched by robot_bringup.launch.py, do not launch again
-
         # Full Mission Controller - receives commands from Telegram bridge
-
         Node(
             package='clean_bot_mission',
             executable='full_mission',
@@ -89,6 +84,21 @@ def generate_launch_description():
                 'coverage_width': coverage_width,
                 'auto_start': False,  # Wait for Telegram command
                 'return_home_after': True,
+            }]
+        ),
+
+        # Adaptive Coverage Planner - handles the actual cleaning movement
+        Node(
+            package='clean_bot_mission',
+            executable='adaptive_coverage',
+            name='adaptive_coverage_planner',
+            output='screen',
+            arguments=['--ros-args', '--log-level', log_level],
+            parameters=[{
+                'coverage_width': coverage_width,
+                'use_direct_drive': True,  # Simple drive, no Nav2
+                'linear_speed': 0.12,
+                'angular_speed': 0.4,
             }]
         ),
 
