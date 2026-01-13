@@ -136,8 +136,10 @@ class AdaptiveCoveragePlanner(Node):
         self.waypoint_markers_pub = self.create_publisher(MarkerArray, 'coverage_waypoints', 10)
         self.state_pub = self.create_publisher(String, 'coverage_state', 10)
         
-        # Direct movement publisher - send directly to cmd_vel
-        self.cmd_vel_pub = self.create_publisher(Twist, 'cmd_vel', 10)
+        # Direct movement publisher - use dedicated topic that goes through arduino_driver
+        self.cmd_vel_pub = self.create_publisher(Twist, 'cmd_vel_coverage', 10)
+        # Also publish to cmd_vel directly as backup
+        self.cmd_vel_direct_pub = self.create_publisher(Twist, 'cmd_vel', 10)
         
         # Odometry subscriber for position feedback
         self.odom_sub = self.create_subscription(
@@ -313,6 +315,13 @@ class AdaptiveCoveragePlanner(Node):
         """Send zero velocity to stop the robot."""
         stop_cmd = Twist()
         self.cmd_vel_pub.publish(stop_cmd)
+        self.cmd_vel_direct_pub.publish(stop_cmd)
+
+    def publish_cmd(self, cmd):
+        """Publish command to both topics."""
+        self.cmd_vel_pub.publish(cmd)
+        self.cmd_vel_direct_pub.publish(cmd)
+        self.get_logger().info(f'   ✉️ CMD: lin={cmd.linear.x:.2f}, ang={cmd.angular.z:.2f}')
 
     def odom_callback(self, msg: Odometry):
         """Update robot pose from odometry."""
@@ -382,18 +391,17 @@ class AdaptiveCoveragePlanner(Node):
         if abs(angle_error) > 1.57:
             cmd.linear.x = 0.0
             cmd.angular.z = 0.3 if angle_error > 0 else -0.3
-            self.get_logger().info(f'   🔄 ROTATE: err={math.degrees(angle_error):.0f}° cmd=({cmd.linear.x},{cmd.angular.z:.2f})')
+            self.get_logger().info(f'   🔄 ROTATE: err={math.degrees(angle_error):.0f}°')
         else:
             # DRIVE forward with steering
             cmd.linear.x = 0.12  # Fixed speed
             cmd.angular.z = max(-0.3, min(0.3, angle_error * 0.5))
-            self.get_logger().info(f'   🚗 DRIVE: err={math.degrees(angle_error):.0f}° cmd=({cmd.linear.x},{cmd.angular.z:.2f})')
+            self.get_logger().info(f'   🚗 DRIVE: err={math.degrees(angle_error):.0f}°')
             self.movement_phase = 'driving'
             self.drive_start_time = self.get_clock().now().nanoseconds / 1e9
         
-        # PUBLISH THE COMMAND
-        self.cmd_vel_pub.publish(cmd)
-        self.get_logger().info(f'   ✉️ SENT to cmd_vel')
+        # PUBLISH THE COMMAND to both topics
+        self.publish_cmd(cmd)
 
     def execute_drive(self):
         """Execute driving phase - drive toward target with steering."""
@@ -437,8 +445,7 @@ class AdaptiveCoveragePlanner(Node):
         # Limit steering speed
         cmd.angular.z = max(-self.angular_speed, min(self.angular_speed, cmd.angular.z))
         
-        self.cmd_vel_pub.publish(cmd)
-        self.get_logger().debug(f'   🚗 Drive: dist={distance:.2f}m, steer={math.degrees(angle_error):.0f}°')
+        self.publish_cmd(cmd)
 
     def publish_state(self):
         """Publish current coverage state."""
