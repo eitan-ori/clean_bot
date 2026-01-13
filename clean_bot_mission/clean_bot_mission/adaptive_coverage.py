@@ -335,7 +335,7 @@ class AdaptiveCoveragePlanner(Node):
 
     def execute_turn(self):
         """Execute turning phase - rotate to face target.
-        Always turns in a consistent direction to avoid oscillation.
+        Simple logic: turn the shortest way to face target.
         """
         # Calculate angle to target
         dx = self.target_x - self.robot_x
@@ -344,30 +344,22 @@ class AdaptiveCoveragePlanner(Node):
         
         angle_error = self.normalize_angle(target_angle - self.robot_yaw)
         
+        # Debug log
+        self.get_logger().debug(f'Turn: error={math.degrees(angle_error):.1f}° tol={math.degrees(self.angle_tolerance):.1f}°')
+        
         if abs(angle_error) < self.angle_tolerance:
             # Turn complete, start driving
             self.stop_robot()
-            self.get_logger().info(f'   🔄 Turn complete, driving straight...')
+            self.get_logger().info(f'   🔄 Turn complete (err={math.degrees(angle_error):.0f}°), driving straight...')
             self.movement_phase = 'driving'
             return
         
-        # Determine turn direction - MAINTAIN CONSISTENCY
-        # If angle_error is small (< 90°), use shortest path
-        # Otherwise, continue in the same direction as last turn
-        if abs(angle_error) < math.pi / 2:
-            # Small turn - use natural direction (shortest path)
-            turn_direction = 1 if angle_error > 0 else -1
-        else:
-            # Large turn - keep same direction as last turn to avoid reversing
-            # This means we might turn 270° instead of 90° but in same direction
-            turn_direction = self.last_turn_direction
-        
-        # Update last turn direction
-        self.last_turn_direction = turn_direction
-        
-        # Turn towards target
+        # Simple: turn in the direction that reduces angle_error (shortest path)
         cmd = Twist()
-        cmd.angular.z = self.angular_speed * turn_direction
+        if angle_error > 0:
+            cmd.angular.z = self.angular_speed   # Turn left (counter-clockwise)
+        else:
+            cmd.angular.z = -self.angular_speed  # Turn right (clockwise)
         
         self.cmd_vel_pub.publish(cmd)
 
