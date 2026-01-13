@@ -101,7 +101,7 @@ class FullMissionController(Node):
         self.declare_parameter('square_turn_left', True)
 
         # Plan B random cleaning (random turn + straight drive; open-loop)
-        self.declare_parameter('random_drive_time', 2.0)        # seconds
+        self.declare_parameter('random_drive_time', 10.0)       # seconds
         self.declare_parameter('random_turn_max_angle', 1.57)   # radians (<= pi)
         self.declare_parameter('random_linear_speed', 0.12)     # m/s
         self.declare_parameter('random_angular_speed', 0.6)     # rad/s
