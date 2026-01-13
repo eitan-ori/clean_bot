@@ -596,7 +596,7 @@ class AdaptiveCoveragePlanner(Node):
         self.get_logger().info('🚀 Coverage started! Robot will drive forward until wall.')
         self.get_logger().info('-' * 60)
         
-        self.send_next_goal()
+        # Simple mode - no waypoints needed, control loop handles everything
 
     def inflate_obstacles(self):
         """Inflate obstacles by robot radius for safe navigation."""
