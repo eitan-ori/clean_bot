@@ -112,9 +112,13 @@ class FullMissionController(Node):
         self.coverage_control_pub = self.create_publisher(String, 'coverage_control', 10)
         self.exploration_complete_pub = self.create_publisher(Bool, 'exploration_complete', 10)
         
-        # Physical switch control
+        # Physical switch control (legacy - for external nodes that might listen)
         self.clean_trigger_pub = self.create_publisher(Empty, 'clean', 10)
         self.stop_clean_trigger_pub = self.create_publisher(Empty, 'stop_clean_relay', 10)
+        
+        # Arduino cleaning control - publishes to mission_command for arduino_driver
+        # NOTE: We use a DIFFERENT topic name to avoid infinite loop since we also subscribe to mission_command
+        self.arduino_clean_pub = self.create_publisher(String, 'arduino_command', 10)
 
         # ===================== Subscribers =====================
         self.exploration_complete_sub = self.create_subscription(
@@ -230,10 +234,11 @@ class FullMissionController(Node):
 
     def handle_start_clean(self):
         """Handle start_clean command."""
-        if self.state == MissionState.WAITING_FOR_CLEAN:
+        if self.state in [MissionState.WAITING_FOR_CLEAN, MissionState.WAITING_FOR_SCAN]:
+            # Allow cleaning even without scanning - the coverage planner will use whatever map is available
+            if self.state == MissionState.WAITING_FOR_SCAN:
+                self.get_logger().info('⚠️ Starting cleaning without completing scan first')
             self.start_coverage()
-        elif self.state == MissionState.WAITING_FOR_SCAN:
-            self.get_logger().warn('⚠️ Must scan first before cleaning!')
         else:
             self.get_logger().warn(f'⚠️ Cannot start clean in state: {self.state}')
 
@@ -243,9 +248,13 @@ class FullMissionController(Node):
             self.get_logger().info('🛑 Stopping cleaning...')
             self.stop_robot()
             
-            # DEACTIVATE SERVO VIA TOPIC
+            # DEACTIVATE CLEANING VIA ARDUINO
             self.get_logger().info('🔌 Deactivating cleaning switch...')
-            self.stop_clean_trigger_pub.publish(Empty())
+            self.stop_clean_trigger_pub.publish(Empty())  # Legacy topic
+            # Send to arduino_driver via arduino_command topic
+            arduino_msg = String()
+            arduino_msg.data = 'stop_clean'
+            self.arduino_clean_pub.publish(arduino_msg)
 
             # Tell coverage planner to stop
             ctrl_msg = String()
@@ -375,9 +384,13 @@ class FullMissionController(Node):
         self.get_logger().info('')
         self.get_logger().info('🧹 Starting coverage/cleaning phase...')
         
-        # ACTIVATE SERVO VIA TOPIC
+        # ACTIVATE CLEANING VIA ARDUINO
         self.get_logger().info('🔌 Activating cleaning switch...')
-        self.clean_trigger_pub.publish(Empty())
+        self.clean_trigger_pub.publish(Empty())  # Legacy topic
+        # Send to arduino_driver via arduino_command topic
+        arduino_msg = String()
+        arduino_msg.data = 'start_clean'
+        self.arduino_clean_pub.publish(arduino_msg)
 
         self.get_logger().info('   Robot will clean all free space')
         self.get_logger().info('   Send "stop_clean" to stop')
@@ -402,9 +415,13 @@ class FullMissionController(Node):
             self.get_logger().info('')
             self.get_logger().info('✅ Coverage phase complete!')
             
-            # DEACTIVATE SERVO VIA TOPIC
+            # DEACTIVATE CLEANING VIA ARDUINO
             self.get_logger().info('🔌 Deactivating cleaning switch...')
-            self.stop_clean_trigger_pub.publish(Empty())
+            self.stop_clean_trigger_pub.publish(Empty())  # Legacy topic
+            # Send to arduino_driver via arduino_command topic
+            arduino_msg = String()
+            arduino_msg.data = 'stop_clean'
+            self.arduino_clean_pub.publish(arduino_msg)
 
             self.get_logger().info('')
             

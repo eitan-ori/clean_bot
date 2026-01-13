@@ -92,9 +92,13 @@ class ArduinoDriver(Node):
         self.cmd_vel_sub = self.create_subscription(
             Twist, 'cmd_vel', self.cmd_vel_callback, 10)
         
-        # Subscribe to mission commands for cleaning control
+        # Subscribe to mission commands for cleaning control (legacy)
         self.mission_cmd_sub = self.create_subscription(
             String, 'mission_command', self.mission_command_callback, 10)
+        
+        # Subscribe to arduino_command topic (from full_mission controller)
+        self.arduino_cmd_sub = self.create_subscription(
+            String, 'arduino_command', self.arduino_command_callback, 10)
         
         # ===================== State Variables =====================
         # Last command time (for watchdog)
@@ -117,9 +121,21 @@ class ArduinoDriver(Node):
             return False
 
     def mission_command_callback(self, msg: String):
-        """Handle mission commands for cleaning control."""
+        """Handle mission commands for cleaning control (legacy topic)."""
         command = msg.data.lower().strip()
         self.get_logger().info(f'📬 Mission command: "{command}"')
+        
+        if command == 'start_clean':
+            self.get_logger().info('🧹 Sending CLEAN_START to Arduino')
+            self.send_command('CLEAN_START')
+        elif command == 'stop_clean':
+            self.get_logger().info('🧹 Sending CLEAN_STOP to Arduino')
+            self.send_command('CLEAN_STOP')
+
+    def arduino_command_callback(self, msg: String):
+        """Handle arduino commands from full_mission controller."""
+        command = msg.data.lower().strip()
+        self.get_logger().info(f'📬 Arduino command: "{command}"')
         
         if command == 'start_clean':
             self.get_logger().info('🧹 Sending CLEAN_START to Arduino')

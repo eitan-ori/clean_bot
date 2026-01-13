@@ -72,13 +72,8 @@ def generate_launch_description():
         # ===================== Mission Nodes =====================
         # NOTE: frontier_explorer and adaptive_coverage are created internally by full_mission node
         # Do NOT launch them separately to avoid duplicate nodes and conflicting auto-start behavior
+        # NOTE: cleaning_switch is already launched by robot_bringup.launch.py, do not launch again
 
-        Node(
-            package='clean_bot_hardware',
-            executable='clean_switch_node',
-            name='clean_switch_node',
-            output='screen'
-        ),
         # Full Mission Controller - receives commands from Telegram bridge
 
         Node(
