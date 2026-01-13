@@ -172,6 +172,8 @@ class AdaptiveCoveragePlanner(Node):
         self.last_turn_direction = 1  # 1 = counter-clockwise (left), -1 = clockwise (right)
         self.last_cmd_time = 0.0  # For rate limiting command publishing
         self.control_rate = 10.0  # Hz - how often to send cmd_vel commands
+        self.drive_start_time = 0.0  # When driving phase started (for minimum drive time)
+        self.min_drive_time = 0.3  # Minimum seconds to drive before allowing re-turn
         
         # Statistics
         self.successful_waypoints = 0
@@ -285,6 +287,7 @@ class AdaptiveCoveragePlanner(Node):
         self.start_time = None
         self.movement_phase = 'idle'
         self.last_turn_direction = 1  # Reset to default (counter-clockwise)
+        self.drive_start_time = 0.0
 
     def cancel_current_goal(self):
         """Cancel the current navigation goal and stop robot."""
@@ -365,10 +368,16 @@ class AdaptiveCoveragePlanner(Node):
         self.get_logger().debug(f'Turn: error={math.degrees(angle_error):.1f}°, dist={distance_to_target:.2f}m')
         
         if abs(angle_error) < self.angle_tolerance:
-            # Turn complete, start driving
-            self.stop_robot()
+            # Turn complete - IMMEDIATELY start driving forward (no stop!)
             self.get_logger().info(f'   ➡️ Turn complete, driving straight ({distance_to_target:.2f}m)...')
             self.movement_phase = 'driving'
+            self.drive_start_time = self.get_clock().now().nanoseconds / 1e9
+            
+            # Send first drive command immediately to ensure forward motion
+            cmd = Twist()
+            cmd.linear.x = self.linear_speed
+            cmd.angular.z = 0.0
+            self.cmd_vel_pub.publish(cmd)
             return
         
         # Simple: turn in the direction that reduces angle_error (shortest path)
@@ -404,11 +413,15 @@ class AdaptiveCoveragePlanner(Node):
         target_angle = math.atan2(dy, dx)
         angle_error = self.normalize_angle(target_angle - self.robot_yaw)
         
-        # If we've drifted too much (more than 25°), go back to turning
-        # This ensures we stay on course and don't spiral
-        if abs(angle_error) > 0.44:  # ~25 degrees
+        # Check how long we've been driving
+        current_time = self.get_clock().now().nanoseconds / 1e9
+        driving_time = current_time - self.drive_start_time
+        
+        # Only allow return to turning after minimum drive time AND if way off course
+        # This prevents immediate re-turning after turn completes
+        if driving_time > self.min_drive_time and abs(angle_error) > 0.52:  # ~30 degrees
             self.stop_robot()
-            self.get_logger().info(f'   ↩️ Off course by {math.degrees(angle_error):.0f}°, re-aligning...')
+            self.get_logger().info(f'   ↩️ Off course by {math.degrees(angle_error):.0f}° after {driving_time:.1f}s, re-aligning...')
             self.movement_phase = 'turning'
             return
         
@@ -416,15 +429,16 @@ class AdaptiveCoveragePlanner(Node):
         cmd = Twist()
         cmd.linear.x = self.linear_speed
         
-        # Only apply angular correction if error is significant (> 5°)
+        # Only apply angular correction if error is significant (> 10°)
         # Keep correction very small to avoid zigzag behavior
-        if abs(angle_error) > 0.087:  # ~5 degrees
-            cmd.angular.z = angle_error * 0.3  # Very gentle correction
+        if abs(angle_error) > 0.17:  # ~10 degrees
+            cmd.angular.z = angle_error * 0.2  # Very gentle correction
         else:
             cmd.angular.z = 0.0  # Go straight
         
-        # Log progress periodically
-        self.get_logger().debug(f'   ➡️ Driving: dist={distance:.2f}m, err={math.degrees(angle_error):.1f}°')
+        # Log progress periodically (every ~1 second)
+        if int(driving_time) != int(driving_time - 0.1):
+            self.get_logger().info(f'   🚗 Driving: {distance:.2f}m to go, heading err={math.degrees(angle_error):.0f}°')
         
         self.cmd_vel_pub.publish(cmd)
 
