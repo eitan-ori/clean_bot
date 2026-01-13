@@ -208,7 +208,15 @@ def generate_launch_description():
                 ('imu/data', 'imu/data'),
             ]
         ),
-
+        # ==================== Scan Throttler ====================
+        # מוריד את קצב הלייזר מ-10/15 הרץ ל-5 הרץ כדי להקל על המעבד
+        Node(
+            package='topic_tools',
+            executable='throttle',
+            name='scan_throttler',
+            output='screen',
+            arguments=['messages', '/scan', '5.0', '/scan_throttled']
+        ),
         # ==================== RF2O Laser Odometry ====================
         # CRITICAL: This is the ONLY source of odometry (no wheel encoders!)
         # Provides odom->base_link TF based on laser scan matching
@@ -218,16 +226,15 @@ def generate_launch_description():
             name='rf2o_laser_odometry',
             output='screen',
             parameters=[{
-                'laser_scan_topic': '/scan',
-                'odom_topic': '/odom',       # Main odometry topic
-                'publish_tf': True,          # MUST be True - only odom source!
+                'laser_scan_topic': '/scan_throttled',   # <--- שינוי: מקשיב לנתיב האיטי
+                'odom_topic': '/odom',
+                'publish_tf': True,
                 'base_frame_id': 'base_link',
                 'odom_frame_id': 'odom',
                 'init_pose_from_topic': '',
-                'freq': 20.0,
+                'freq': 5.0,                             # <--- שינוי: תדר נמוך שתואם ל-Throttle
             }],
         ),
-
         # ==================== SLAM Toolbox ====================
         Node(
             package='slam_toolbox',
