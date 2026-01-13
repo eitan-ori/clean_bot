@@ -48,7 +48,6 @@ from nav_msgs.msg import OccupancyGrid, Path, Odometry
 from geometry_msgs.msg import PoseStamped, Twist
 from std_msgs.msg import Bool, String
 from visualization_msgs.msg import Marker, MarkerArray
-from sensor_msgs.msg import LaserScan
 
 from scipy import ndimage
 from collections import deque
@@ -88,10 +87,9 @@ class AdaptiveCoveragePlanner(Node):
         # Direct movement parameters (turn-then-drive)
         self.declare_parameter('use_direct_drive', True)         # Use direct cmd_vel instead of Nav2
         self.declare_parameter('linear_speed', 0.12)             # Forward speed (m/s)
-        self.declare_parameter('angular_speed', 0.4)             # Max turn speed (rad/s)
-        self.declare_parameter('min_angular_speed', 0.15)        # Min turn speed (rad/s)
-        self.declare_parameter('angle_tolerance', 0.35)          # Radians (~20°) - tolerance for turning
-        self.declare_parameter('position_tolerance', 0.10)       # Meters (10cm)
+        self.declare_parameter('angular_speed', 0.15)            # Turn speed (rad/s) - SLOW for stability
+        self.declare_parameter('angle_tolerance', 0.35)          # Radians (~20°) - don't need precision
+        self.declare_parameter('position_tolerance', 0.08)       # Meters (8cm)
         
         self.coverage_width = self.get_parameter('coverage_width').value
         self.overlap_ratio = self.get_parameter('overlap_ratio').value
@@ -105,7 +103,6 @@ class AdaptiveCoveragePlanner(Node):
         self.use_direct_drive = self.get_parameter('use_direct_drive').value
         self.linear_speed = self.get_parameter('linear_speed').value
         self.angular_speed = self.get_parameter('angular_speed').value
-        self.min_angular_speed = self.get_parameter('min_angular_speed').value
         self.angle_tolerance = self.get_parameter('angle_tolerance').value
         self.position_tolerance = self.get_parameter('position_tolerance').value
         
@@ -137,18 +134,12 @@ class AdaptiveCoveragePlanner(Node):
         self.waypoint_markers_pub = self.create_publisher(MarkerArray, 'coverage_waypoints', 10)
         self.state_pub = self.create_publisher(String, 'coverage_state', 10)
         
-        # Direct movement publisher - use dedicated topic that goes through arduino_driver
-        self.cmd_vel_pub = self.create_publisher(Twist, 'cmd_vel_coverage', 10)
-        # Also publish to cmd_vel directly as backup
-        self.cmd_vel_direct_pub = self.create_publisher(Twist, 'cmd_vel', 10)
+        # Direct movement publisher (bypasses Nav2)
+        self.cmd_vel_pub = self.create_publisher(Twist, 'cmd_vel_nav', 10)
         
         # Odometry subscriber for position feedback
         self.odom_sub = self.create_subscription(
             Odometry, 'odom', self.odom_callback, 10)
-        
-        # Laser scan for wall detection (simple mode)
-        self.scan_sub = self.create_subscription(
-            LaserScan, 'scan', self.scan_callback, 10)
 
         # ===================== State =====================
         self.coverage_state = CoverageState.IDLE
@@ -174,36 +165,20 @@ class AdaptiveCoveragePlanner(Node):
         self.odom_received = False
         
         # Movement state for direct drive
-        self.movement_phase = 'idle'  # 'idle', 'turning', 'driving', 'side_step'
+        self.movement_phase = 'idle'  # 'idle', 'turning', 'driving'
         self.target_x = 0.0
         self.target_y = 0.0
         self.target_yaw = 0.0
         self.last_turn_direction = 1  # 1 = counter-clockwise (left), -1 = clockwise (right)
-        self.last_cmd_time = 0.0  # For rate limiting command publishing
-        self.control_rate = 20.0  # Hz - how often to send cmd_vel commands
-        self.drive_start_time = 0.0  # When driving phase started (for minimum drive time)
-        self.min_drive_time = 0.5  # Minimum seconds to drive before allowing re-turn
-        
-        # Simple boustrophedon (plowing) mode variables
-        self.front_distance = 10.0  # Distance to obstacle in front
-        self.wall_distance = 0.30   # Stop when wall is this close (meters)
-        self.side_step_distance = 0.12  # How far to move sideways (meters)
-        self.side_step_start_x = 0.0
-        self.side_step_start_y = 0.0
-        self.plow_direction = 1     # 1 = forward (+X), -1 = backward (-X)
-        self.row_count = 0
-        self.max_rows = 100         # Safety limit
         
         # Statistics
         self.successful_waypoints = 0
         self.failed_waypoints = 0
         self.start_time = None
         self.total_distance = 0.0
-        self.last_status_time = 0.0  # For periodic status logging
 
         # ===================== Timer =====================
         self.create_timer(1.0, self.publish_state)
-        self.create_timer(3.0, self.log_status)  # Log status every 3 seconds during operation
 
         self.get_logger().info('=' * 60)
         self.get_logger().info('🧹 Adaptive Coverage Planner Started')
@@ -308,7 +283,6 @@ class AdaptiveCoveragePlanner(Node):
         self.start_time = None
         self.movement_phase = 'idle'
         self.last_turn_direction = 1  # Reset to default (counter-clockwise)
-        self.drive_start_time = 0.0
 
     def cancel_current_goal(self):
         """Cancel the current navigation goal and stop robot."""
@@ -330,43 +304,9 @@ class AdaptiveCoveragePlanner(Node):
         """Send zero velocity to stop the robot."""
         stop_cmd = Twist()
         self.cmd_vel_pub.publish(stop_cmd)
-        self.cmd_vel_direct_pub.publish(stop_cmd)
-
-    def publish_cmd(self, cmd):
-        """Publish command to both topics."""
-        self.cmd_vel_pub.publish(cmd)
-        self.cmd_vel_direct_pub.publish(cmd)
-
-    def scan_callback(self, msg: LaserScan):
-        """Update front distance from laser scan for wall detection."""
-        num_readings = len(msg.ranges)
-        if num_readings == 0:
-            return
-        
-        # Front is at center of scan for 360° lidar
-        center = num_readings // 2
-        
-        # Check front 60° (30° each side)
-        angle_per_reading = (msg.angle_max - msg.angle_min) / num_readings
-        front_readings = int(math.radians(60) / angle_per_reading / 2)
-        
-        start_idx = max(0, center - front_readings)
-        end_idx = min(num_readings, center + front_readings)
-        
-        # Get minimum distance in front
-        front_ranges = []
-        for i in range(start_idx, end_idx):
-            r = msg.ranges[i]
-            if msg.range_min < r < msg.range_max:
-                front_ranges.append(r)
-        
-        if front_ranges:
-            self.front_distance = min(front_ranges)
-        else:
-            self.front_distance = 10.0
 
     def odom_callback(self, msg: Odometry):
-        """Update robot pose from odometry and run simple control loop."""
+        """Update robot pose from odometry."""
         self.robot_x = msg.pose.pose.position.x
         self.robot_y = msg.pose.pose.position.y
         
@@ -378,12 +318,9 @@ class AdaptiveCoveragePlanner(Node):
         
         self.odom_received = True
         
-        # Run simple boustrophedon control at 20Hz
-        if self.use_direct_drive and self.coverage_state == CoverageState.RUNNING:
-            current_time = self.get_clock().now().nanoseconds / 1e9
-            if current_time - self.last_cmd_time >= 1.0 / self.control_rate:
-                self.last_cmd_time = current_time
-                self.simple_control_loop()
+        # Simple control: if navigating, drive toward target
+        if self.use_direct_drive and self.coverage_state == CoverageState.RUNNING and self.is_navigating:
+            self.drive_to_target()
 
     def normalize_angle(self, angle):
         """Normalize angle to [-pi, pi]."""
@@ -393,137 +330,48 @@ class AdaptiveCoveragePlanner(Node):
             angle += 2.0 * math.pi
         return angle
 
-    # ==================== SIMPLE BOUSTROPHEDON CONTROL ====================
-    
-    def simple_control_loop(self):
+    def drive_to_target(self):
         """
-        Simple plowing/boustrophedon control:
-        1. DRIVING: Go forward until wall
-        2. SIDE_STEP: Move sideways one step
-        3. TURNING: Turn 180°
-        4. Repeat
+        SIMPLE: Drive toward target with steering.
+        No separate turn/drive phases - just go there.
         """
-        if self.movement_phase == 'idle':
-            # Start driving
-            self.movement_phase = 'driving'
-            self.target_yaw = 0.0 if self.plow_direction == 1 else math.pi
-            self.get_logger().info(f'🚜 Starting plow - direction={self.plow_direction}')
+        dx = self.target_x - self.robot_x
+        dy = self.target_y - self.robot_y
+        distance = math.sqrt(dx*dx + dy*dy)
         
-        elif self.movement_phase == 'driving':
-            self.do_driving()
-        
-        elif self.movement_phase == 'side_step':
-            self.do_side_step()
-        
-        elif self.movement_phase == 'turning':
-            self.do_turning()
-
-    def do_driving(self):
-        """Drive forward until hitting a wall."""
-        # Check if we hit a wall
-        if self.front_distance < self.wall_distance:
-            self.get_logger().info(f'🧱 Wall at {self.front_distance:.2f}m - side step')
+        # Reached target?
+        if distance < self.position_tolerance:
             self.stop_robot()
-            
-            # Check if we've done enough rows
-            if self.row_count >= self.max_rows:
-                self.complete_coverage()
-                return
-            
-            # Start side step
-            self.movement_phase = 'side_step'
-            self.side_step_start_x = self.robot_x
-            self.side_step_start_y = self.robot_y
+            self.get_logger().info(f'   ✅ Reached waypoint ({self.current_waypoint_idx + 1})')
+            self.successful_waypoints += 1
+            self.current_waypoint_idx += 1
+            self.is_navigating = False
+            self.send_next_goal()
             return
         
-        # Drive forward
+        # Calculate angle to target
+        target_angle = math.atan2(dy, dx)
+        angle_error = self.normalize_angle(target_angle - self.robot_yaw)
+        
         cmd = Twist()
-        cmd.linear.x = self.linear_speed
-        cmd.angular.z = 0.0
-        self.publish_cmd(cmd)
-
-    def do_side_step(self):
-        """Move sideways by side_step_distance."""
-        # Calculate how far we've moved from start of side step
-        dx = self.robot_x - self.side_step_start_x
-        dy = self.robot_y - self.side_step_start_y
-        distance_moved = math.sqrt(dx*dx + dy*dy)
         
-        if distance_moved >= self.side_step_distance:
-            # Side step complete - now turn 180°
-            self.get_logger().info(f'↔️ Side step done ({distance_moved:.2f}m) - turning 180°')
-            self.stop_robot()
-            
-            # Set target yaw (opposite direction)
-            if self.plow_direction == 1:
-                self.target_yaw = math.pi  # Face -X
-                self.plow_direction = -1
-            else:
-                self.target_yaw = 0.0  # Face +X
-                self.plow_direction = 1
-            
-            self.row_count += 1
-            self.movement_phase = 'turning'
-            return
-        
-        # Move in +Y direction (perpendicular to main travel)
-        cmd = Twist()
-        target_side = math.pi / 2  # +Y direction
-        angle_error = self.normalize_angle(target_side - self.robot_yaw)
-        
-        if abs(angle_error) > 0.15:
-            # Turn to face +Y
+        # If pointing very wrong direction (>90°), rotate in place first
+        if abs(angle_error) > 1.57:
             cmd.linear.x = 0.0
-            cmd.angular.z = 0.3 if angle_error > 0 else -0.3
+            cmd.angular.z = 0.4 if angle_error > 0 else -0.4
         else:
-            # Drive sideways
+            # Drive forward with steering
             cmd.linear.x = self.linear_speed
-            cmd.angular.z = 0.0
+            cmd.angular.z = angle_error * 1.0  # Proportional steering
+            cmd.angular.z = max(-0.5, min(0.5, cmd.angular.z))  # Limit
         
-        self.publish_cmd(cmd)
+        self.cmd_vel_pub.publish(cmd)
 
-    def do_turning(self):
-        """Turn to face the target direction (0 or 180°)."""
-        angle_error = self.normalize_angle(self.target_yaw - self.robot_yaw)
-        
-        if abs(angle_error) < 0.15:  # ~8 degrees tolerance
-            # Turn complete - start driving
-            self.get_logger().info(f'🔄 Turn done - row {self.row_count}, driving...')
-            self.stop_robot()
-            self.movement_phase = 'driving'
-            return
-        
-        # Turn towards target
-        cmd = Twist()
-        cmd.linear.x = 0.0
-        cmd.angular.z = self.angular_speed if angle_error > 0 else -self.angular_speed
-        self.publish_cmd(cmd)
-
-    def complete_coverage(self):
-        """Coverage mission complete."""
-        self.get_logger().info('=' * 50)
-        self.get_logger().info('✅ COVERAGE COMPLETE!')
-        self.get_logger().info(f'   Rows completed: {self.row_count}')
-        self.get_logger().info('=' * 50)
-        
-        self.coverage_state = CoverageState.COMPLETE
-        self.mission_complete = True
-        self.movement_phase = 'idle'
-        self.stop_robot()
-        
-        # Publish completion
-        msg = Bool()
-        msg.data = True
-        self.coverage_complete_pub.publish(msg)
-
-    # ==================== OLD WAYPOINT FUNCTIONS (kept for compatibility) ====================
-
+    # Keep old functions for compatibility but they're not used
     def execute_turn(self):
-        """Legacy turn function - now uses simple control."""
         pass
 
     def execute_drive(self):
-        """Legacy drive function - now uses simple control."""
         pass
 
     def publish_state(self):
@@ -531,30 +379,6 @@ class AdaptiveCoveragePlanner(Node):
         msg = String()
         msg.data = self.coverage_state
         self.state_pub.publish(msg)
-
-    def log_status(self):
-        """Log periodic status during operation - useful for debugging."""
-        if self.coverage_state != CoverageState.RUNNING:
-            return
-        
-        # Calculate distance to current target
-        if self.waypoints and self.current_waypoint_idx < len(self.waypoints):
-            dx = self.target_x - self.robot_x
-            dy = self.target_y - self.robot_y
-            dist_to_target = math.sqrt(dx*dx + dy*dy)
-            target_angle = math.atan2(dy, dx)
-            angle_error = self.normalize_angle(target_angle - self.robot_yaw)
-            
-            progress = (self.current_waypoint_idx + 1) / len(self.waypoints) * 100
-            
-            self.get_logger().info(
-                f'📊 Status: {self.movement_phase.upper()} | '
-                f'WP {self.current_waypoint_idx + 1}/{len(self.waypoints)} ({progress:.0f}%) | '
-                f'Pos: ({self.robot_x:.2f}, {self.robot_y:.2f}) | '
-                f'Target: ({self.target_x:.2f}, {self.target_y:.2f}) | '
-                f'Dist: {dist_to_target:.2f}m | '
-                f'Heading err: {math.degrees(angle_error):.0f}°'
-            )
 
     def map_callback(self, msg: OccupancyGrid):
         """Store latest map."""
@@ -569,34 +393,76 @@ class AdaptiveCoveragePlanner(Node):
             self.start_coverage_mission()
 
     def start_coverage_mission(self):
-        """Start simple boustrophedon coverage - no map needed!"""
+        """Generate coverage path and start executing it."""
+        # Wait for map with timeout and retry
+        max_wait_time = 10.0  # seconds
+        wait_interval = 0.5
+        waited = 0.0
+        
+        while self.map_array is None and waited < max_wait_time:
+            self.get_logger().info(f'⏳ Waiting for map... ({waited:.1f}s)')
+            import time
+            time.sleep(wait_interval)
+            waited += wait_interval
+            # Spin to process callbacks
+            rclpy.spin_once(self, timeout_sec=0.1)
+        
+        if self.map_array is None:
+            self.get_logger().error('❌ No map available after waiting! Make sure SLAM is running.')
+            self.get_logger().error('   Try running /scan first to build a map.')
+            return
+        
+        # Check map quality
+        height, width = self.map_array.shape
+        free_count = np.sum((self.map_array >= 0) & (self.map_array < FREE_THRESHOLD))
+        unknown_count = np.sum(self.map_array == -1)
+        occupied_count = np.sum(self.map_array >= OCCUPIED_THRESHOLD)
+        
+        self.get_logger().info(f'📊 Map stats: {width}x{height}, free={free_count}, unknown={unknown_count}, occupied={occupied_count}')
+        
+        if free_count < 50:
+            self.get_logger().error('❌ Map has very little free space! Run exploration first.')
+            return
+        
         if self.mission_started and self.coverage_state == CoverageState.RUNNING:
             self.get_logger().warn('⚠️ Mission already in progress')
             return
 
         self.get_logger().info('')
-        self.get_logger().info('=' * 60)
-        self.get_logger().info('🚜 STARTING SIMPLE BOUSTROPHEDON COVERAGE')
-        self.get_logger().info('=' * 60)
-        self.get_logger().info(f'   Mode: Drive → Wall → Side step → Turn → Repeat')
-        self.get_logger().info(f'   Speed: {self.linear_speed} m/s')
-        self.get_logger().info(f'   Wall distance: {self.wall_distance} m')
-        self.get_logger().info(f'   Row spacing: {self.side_step_distance} m')
-        self.get_logger().info('')
+        self.get_logger().info('🔧 Generating coverage path...')
         
-        # Reset state
+        # Step 1: Inflate obstacles for robot safety
+        self.inflate_obstacles()
+        
+        # Step 2: Generate adaptive coverage path
+        self.waypoints = self.generate_adaptive_coverage_path()
+        
+        # Fallback: If complex path generation failed, try simple zigzag
+        if not self.waypoints:
+            self.get_logger().warn('⚠️ Complex path generation failed, trying simple zigzag...')
+            self.waypoints = self.generate_simple_zigzag_path()
+        
+        if not self.waypoints:
+            self.get_logger().error('❌ Could not generate coverage path!')
+            self.get_logger().error('   Check that the map has sufficient free space.')
+            return
+        
+        # Step 3: Publish path for visualization
+        self.publish_coverage_path()
+        self.publish_waypoint_markers()
+        
+        # Step 4: Start mission
         self.mission_started = True
         self.coverage_state = CoverageState.RUNNING
         self.start_time = self.get_clock().now()
-        self.movement_phase = 'idle'  # Will start driving on first control loop
-        self.plow_direction = 1
-        self.row_count = 0
-        self.front_distance = 10.0
+        self.current_waypoint_idx = 0
         
-        self.get_logger().info('🚀 Coverage started! Robot will drive forward until wall.')
+        self.get_logger().info(f'✅ Generated {len(self.waypoints)} waypoints')
+        self.get_logger().info('')
+        self.get_logger().info('🚀 Starting coverage mission!')
         self.get_logger().info('-' * 60)
         
-        # Simple mode - no waypoints needed, control loop handles everything
+        self.send_next_goal()
 
     def inflate_obstacles(self):
         """Inflate obstacles by robot radius for safe navigation."""
@@ -1053,10 +919,9 @@ class AdaptiveCoveragePlanner(Node):
         return ordered_waypoints
 
     def send_next_goal(self):
-        """Send next waypoint - uses direct drive (turn-then-straight) or Nav2."""
+        """Send next waypoint - simple direct drive."""
         # Check if we should continue
         if self.coverage_state != CoverageState.RUNNING:
-            self.get_logger().warn(f'   send_next_goal called but state is {self.coverage_state}')
             return
             
         if self.current_waypoint_idx >= len(self.waypoints):
@@ -1070,27 +935,13 @@ class AdaptiveCoveragePlanner(Node):
             f'[{self.current_waypoint_idx + 1}/{len(self.waypoints)}] '
             f'({progress:.0f}%) → ({x:.2f}, {y:.2f})')
 
+        # Set target and start navigating
+        self.target_x = x
+        self.target_y = y
+        self.target_yaw = yaw
         self.is_navigating = True
         
-        if self.use_direct_drive:
-            # Direct drive mode: Turn to face target, then drive straight
-            self.target_x = x
-            self.target_y = y
-            self.target_yaw = yaw
-            
-            if not self.odom_received:
-                self.get_logger().warn('⚠️ No odometry received yet, waiting...')
-                # Create a one-shot timer to retry
-                self.create_timer(0.5, self._retry_send_goal_once)
-                return
-            
-            # Start the turn phase
-            self.get_logger().info(f'   🔄 Turning to face target...')
-            self.movement_phase = 'turning'
-            
-            # IMMEDIATELY send first turn command to start moving!
-            self.execute_turn()
-        else:
+        if not self.use_direct_drive:
             # Nav2 mode (fallback)
             self.send_goal_nav2(x, y, yaw)
 
