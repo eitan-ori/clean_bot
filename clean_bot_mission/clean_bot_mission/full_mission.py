@@ -186,6 +186,8 @@ class FullMissionController(Node):
             self.handle_stop_scan()
         elif command == 'start_clean':
             self.handle_start_clean()
+        elif command == 'start_clean_square':
+            self.handle_start_clean_square()
         elif command == 'stop_clean':
             self.handle_stop_clean()
         elif command == 'go_home':
@@ -198,7 +200,7 @@ class FullMissionController(Node):
             self.handle_resume()
         else:
             self.get_logger().warn(f'❓ Unknown command: "{command}"')
-            self.get_logger().info('   Valid commands: start_scan, stop_scan, start_clean, stop_clean, go_home, reset, pause, resume')
+            self.get_logger().info('   Valid commands: start_scan, stop_scan, start_clean, start_clean_square, stop_clean, go_home, reset, pause, resume')
 
     def handle_start_scan(self):
         """Handle start_scan command."""
@@ -241,6 +243,15 @@ class FullMissionController(Node):
             self.start_coverage()
         else:
             self.get_logger().warn(f'⚠️ Cannot start clean in state: {self.state}')
+
+    def handle_start_clean_square(self):
+        """Handle start_clean_square command (predefined square-room path)."""
+        if self.state in [MissionState.WAITING_FOR_CLEAN, MissionState.WAITING_FOR_SCAN]:
+            if self.state == MissionState.WAITING_FOR_SCAN:
+                self.get_logger().info('⚠️ Starting square cleaning without completing scan first')
+            self.start_coverage_square()
+        else:
+            self.get_logger().warn(f'⚠️ Cannot start square clean in state: {self.state}')
 
     def handle_stop_clean(self):
         """Handle stop_clean command."""
@@ -406,6 +417,29 @@ class FullMissionController(Node):
         # Also tell coverage to start explicitly
         ctrl_msg = String()
         ctrl_msg.data = 'start'
+        self.coverage_control_pub.publish(ctrl_msg)
+
+    def start_coverage_square(self):
+        """Trigger square-room predefined coverage path."""
+        self.get_logger().info('')
+        self.get_logger().info('🧹 Starting SQUARE predefined cleaning path...')
+
+        # ACTIVATE CLEANING VIA ARDUINO
+        self.get_logger().info('🔌 Activating cleaning switch...')
+        self.clean_trigger_pub.publish(Empty())  # Legacy topic
+        arduino_msg = String()
+        arduino_msg.data = 'start_clean'
+        self.arduino_clean_pub.publish(arduino_msg)
+
+        self.get_logger().info('   Robot will follow a fixed square-room pattern')
+        self.get_logger().info('   Send "stop_clean" to stop')
+        self.get_logger().info('')
+
+        self.state = MissionState.COVERAGE
+
+        # Tell coverage planner to start square mode
+        ctrl_msg = String()
+        ctrl_msg.data = 'start_square'
         self.coverage_control_pub.publish(ctrl_msg)
 
     def coverage_complete_callback(self, msg: Bool):

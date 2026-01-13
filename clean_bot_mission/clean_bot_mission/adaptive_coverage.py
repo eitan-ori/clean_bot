@@ -97,6 +97,14 @@ class AdaptiveCoveragePlanner(Node):
         # Frames (waypoints are generated in map frame)
         self.declare_parameter('global_frame', 'map')
         self.declare_parameter('base_frame', 'base_link')
+
+        # Predefined square-room path parameters (used by coverage_control: start_square)
+        # Assumes room axes are aligned with the map frame.
+        self.declare_parameter('square_room_side', 4.0)         # meters
+        self.declare_parameter('square_origin_x', 0.0)          # bottom-left corner in map frame
+        self.declare_parameter('square_origin_y', 0.0)          # bottom-left corner in map frame
+        self.declare_parameter('square_margin', 0.15)           # keep away from walls
+        self.declare_parameter('square_step', 0.0)              # 0 => use computed step_size
         
         self.coverage_width = self.get_parameter('coverage_width').value
         self.overlap_ratio = self.get_parameter('overlap_ratio').value
@@ -114,6 +122,13 @@ class AdaptiveCoveragePlanner(Node):
         self.position_tolerance = self.get_parameter('position_tolerance').value
         self.global_frame = self.get_parameter('global_frame').value
         self.base_frame = self.get_parameter('base_frame').value
+
+        # Square-room parameters
+        self.square_room_side = float(self.get_parameter('square_room_side').value)
+        self.square_origin_x = float(self.get_parameter('square_origin_x').value)
+        self.square_origin_y = float(self.get_parameter('square_origin_y').value)
+        self.square_margin = float(self.get_parameter('square_margin').value)
+        self.square_step = float(self.get_parameter('square_step').value)
         
         # Effective step between lines
         self.step_size = self.coverage_width * (1 - self.overlap_ratio)
@@ -221,6 +236,8 @@ class AdaptiveCoveragePlanner(Node):
         
         if command == 'start':
             self.handle_start()
+        elif command == 'start_square':
+            self.handle_start_square()
         elif command == 'stop':
             self.handle_stop()
         elif command == 'pause':
@@ -231,6 +248,90 @@ class AdaptiveCoveragePlanner(Node):
             self.handle_reset()
         else:
             self.get_logger().warn(f'❓ Unknown command: "{command}"')
+
+    def handle_start_square(self):
+        """Start predefined square-room coverage path (no map required)."""
+        if self.coverage_state in [CoverageState.RUNNING, CoverageState.PAUSED]:
+            self.get_logger().info(f'   Already in state: {self.coverage_state}')
+            return
+
+        if self.coverage_state == CoverageState.STOPPED:
+            # Resume from stopped: continue where we left off
+            self.get_logger().info('▶️ Resuming square coverage from stopped state...')
+            self.coverage_state = CoverageState.RUNNING
+            if self.waypoints and self.current_waypoint_idx < len(self.waypoints):
+                self.send_next_goal()
+            else:
+                self.start_square_coverage_mission()
+            return
+
+        if self.coverage_state == CoverageState.COMPLETE:
+            self.get_logger().info('▶️ Restarting square coverage from complete state...')
+            self.handle_reset()
+
+        self.get_logger().info('▶️ Starting square coverage...')
+        self.start_square_coverage_mission()
+
+    def start_square_coverage_mission(self):
+        """Generate a fixed lawnmower path inside a square room and execute it."""
+        side = float(self.square_room_side)
+        margin = max(0.0, float(self.square_margin))
+        if side <= 0.0:
+            self.get_logger().error('❌ square_room_side must be > 0')
+            return
+        if margin * 2.0 >= side:
+            self.get_logger().error('❌ square_margin too large for square_room_side')
+            return
+
+        step = float(self.square_step) if float(self.square_step) > 0.0 else float(self.step_size)
+        if step <= 0.01:
+            self.get_logger().error('❌ Invalid step size for square path')
+            return
+
+        x_min = self.square_origin_x + margin
+        x_max = self.square_origin_x + side - margin
+        y_min = self.square_origin_y + margin
+        y_max = self.square_origin_y + side - margin
+
+        waypoints = []
+        x = x_min
+        going_up = True
+        while x <= x_max + 1e-6:
+            if going_up:
+                waypoints.append((x, y_min, math.pi / 2))
+                waypoints.append((x, y_max, math.pi / 2))
+            else:
+                waypoints.append((x, y_max, -math.pi / 2))
+                waypoints.append((x, y_min, -math.pi / 2))
+
+            x += step
+            going_up = not going_up
+
+        if len(waypoints) < 2:
+            self.get_logger().error('❌ Could not generate square waypoints')
+            return
+
+        self.waypoints = waypoints
+        self.publish_coverage_path()
+        self.publish_waypoint_markers()
+
+        self.mission_started = True
+        self.mission_complete = False
+        self.coverage_state = CoverageState.RUNNING
+        self.start_time = self.get_clock().now()
+        self.current_waypoint_idx = 0
+        self.retry_count = 0
+        self.missed_waypoints = []
+        self.successful_waypoints = 0
+        self.failed_waypoints = 0
+
+        self.get_logger().info('')
+        self.get_logger().info('🧹 Square-room path ready')
+        self.get_logger().info(f'   Bounds: X[{x_min:.2f}, {x_max:.2f}] Y[{y_min:.2f}, {y_max:.2f}]')
+        self.get_logger().info(f'   Step: {step:.3f} m, Waypoints: {len(self.waypoints)}')
+        self.get_logger().info('')
+
+        self.send_next_goal()
 
     def handle_start(self):
         """Start coverage."""
