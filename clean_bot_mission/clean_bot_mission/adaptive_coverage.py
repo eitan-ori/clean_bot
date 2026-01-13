@@ -42,6 +42,9 @@ import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
+from rclpy.time import Time
+
+from tf2_ros import Buffer, TransformListener
 
 from nav2_msgs.action import NavigateToPose
 from nav_msgs.msg import OccupancyGrid, Path, Odometry
@@ -90,6 +93,10 @@ class AdaptiveCoveragePlanner(Node):
         self.declare_parameter('angular_speed', 0.15)            # Turn speed (rad/s) - SLOW for stability
         self.declare_parameter('angle_tolerance', 0.35)          # Radians (~20°) - don't need precision
         self.declare_parameter('position_tolerance', 0.08)       # Meters (8cm)
+
+        # Frames (waypoints are generated in map frame)
+        self.declare_parameter('global_frame', 'map')
+        self.declare_parameter('base_frame', 'base_link')
         
         self.coverage_width = self.get_parameter('coverage_width').value
         self.overlap_ratio = self.get_parameter('overlap_ratio').value
@@ -105,6 +112,8 @@ class AdaptiveCoveragePlanner(Node):
         self.angular_speed = self.get_parameter('angular_speed').value
         self.angle_tolerance = self.get_parameter('angle_tolerance').value
         self.position_tolerance = self.get_parameter('position_tolerance').value
+        self.global_frame = self.get_parameter('global_frame').value
+        self.base_frame = self.get_parameter('base_frame').value
         
         # Effective step between lines
         self.step_size = self.coverage_width * (1 - self.overlap_ratio)
@@ -163,6 +172,11 @@ class AdaptiveCoveragePlanner(Node):
         self.robot_y = 0.0
         self.robot_yaw = 0.0
         self.odom_received = False
+
+        # TF for map-frame pose (preferred for driving to map-frame waypoints)
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+        self._tf_pose_warned = False
         
         # Movement state for direct drive
         self.movement_phase = 'idle'  # 'idle', 'turning', 'driving'
@@ -172,8 +186,7 @@ class AdaptiveCoveragePlanner(Node):
         self.last_turn_direction = 1  # 1 = counter-clockwise (left), -1 = clockwise (right)
 
         # Command rate limiting + minimum straight-drive time.
-        # IMPORTANT: Arduino driver prioritizes rotation when abs(angular.z) > ~0.05.
-        # Therefore, during straight driving we must publish angular.z = 0.0.
+        # Hardware supports differential mixing; we can steer while moving.
         self.control_rate = 20.0  # Hz
         self.last_cmd_time = 0.0
         self.drive_start_time = 0.0
@@ -338,6 +351,32 @@ class AdaptiveCoveragePlanner(Node):
 
         self.drive_to_target(now)
 
+    def _get_robot_pose_map(self):
+        """Return (x, y, yaw) in map frame when TF is available.
+
+        Falls back to the latest odom-based pose if TF lookup fails.
+        """
+        try:
+            tf = self.tf_buffer.lookup_transform(
+                self.global_frame,
+                self.base_frame,
+                Time(),
+            )
+            x = tf.transform.translation.x
+            y = tf.transform.translation.y
+            q = tf.transform.rotation
+            siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
+            cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+            yaw = math.atan2(siny_cosp, cosy_cosp)
+            return x, y, yaw
+        except Exception as e:
+            if not self._tf_pose_warned:
+                self._tf_pose_warned = True
+                self.get_logger().warn(
+                    f'⚠️ TF pose lookup failed ({self.global_frame} <- {self.base_frame}); '
+                    f'falling back to odom pose. Error: {e}')
+            return self.robot_x, self.robot_y, self.robot_yaw
+
     def normalize_angle(self, angle):
         """Normalize angle to [-pi, pi]."""
         while angle > math.pi:
@@ -347,12 +386,10 @@ class AdaptiveCoveragePlanner(Node):
         return angle
 
     def drive_to_target(self, now: float):
-        """Turn to align, then drive straight toward target.
-
-        This matches the hardware driver behavior (it treats any angular.z as rotate-only).
-        """
-        dx = self.target_x - self.robot_x
-        dy = self.target_y - self.robot_y
+        """Drive toward target using simple steer-while-moving control."""
+        rx, ry, ryaw = self._get_robot_pose_map()
+        dx = self.target_x - rx
+        dy = self.target_y - ry
         distance = math.sqrt(dx*dx + dy*dy)
         
         # Reached target?
@@ -367,50 +404,31 @@ class AdaptiveCoveragePlanner(Node):
         
         # Calculate angle to target
         target_angle = math.atan2(dy, dx)
-        angle_error = self.normalize_angle(target_angle - self.robot_yaw)
-
-        # Initialize phase
-        if self.movement_phase not in ('turning', 'driving'):
-            self.movement_phase = 'turning'
+        angle_error = self.normalize_angle(target_angle - ryaw)
 
         cmd = Twist()
 
-        if self.movement_phase == 'turning':
-            # Rotate in place until aligned
-            if abs(angle_error) <= self.angle_tolerance:
-                self.movement_phase = 'driving'
-                self.drive_start_time = now
-
-                cmd.linear.x = self.linear_speed
-                cmd.angular.z = 0.0
-                self.cmd_vel_pub.publish(cmd)
-                return
-
-            cmd.linear.x = 0.0
-
-            # Proportional rotate with minimum speed for getting unstuck
-            turn = max(0.15, min(0.6, abs(angle_error) * 0.8))
-            cmd.angular.z = turn if angle_error > 0 else -turn
-            self.cmd_vel_pub.publish(cmd)
-            return
-
-        # driving
-        if (now - self.drive_start_time) < self.min_drive_time:
-            cmd.linear.x = self.linear_speed
-            cmd.angular.z = 0.0
-            self.cmd_vel_pub.publish(cmd)
-            return
-
-        # After minimum straight time, re-check heading; if drifted, re-align.
-        if abs(angle_error) > self.realign_angle:
+        # If we're very misaligned, rotate in place first.
+        # This avoids big arcs and helps in tight spaces.
+        turn_in_place_angle = max(self.realign_angle, 1.0)  # rad
+        if abs(angle_error) > turn_in_place_angle:
             self.movement_phase = 'turning'
             cmd.linear.x = 0.0
-            cmd.angular.z = 0.25 if angle_error > 0 else -0.25
+            cmd.angular.z = 0.6 if angle_error > 0 else -0.6
             self.cmd_vel_pub.publish(cmd)
             return
 
-        cmd.linear.x = self.linear_speed
-        cmd.angular.z = 0.0
+        # Otherwise: drive forward while steering.
+        self.movement_phase = 'driving'
+
+        # Reduce linear speed when we're more misaligned.
+        alignment_scale = max(0.25, 1.0 - (abs(angle_error) / max(turn_in_place_angle, 1e-3)))
+        cmd.linear.x = self.linear_speed * alignment_scale
+
+        # Proportional angular correction with minimum to overcome stiction.
+        ang = min(0.6, max(0.12, abs(angle_error) * 1.2))
+        cmd.angular.z = ang if angle_error > 0 else -ang
+
         self.cmd_vel_pub.publish(cmd)
 
     # Keep old functions for compatibility but they're not used
