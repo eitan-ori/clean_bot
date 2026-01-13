@@ -347,21 +347,22 @@ class AdaptiveCoveragePlanner(Node):
         return angle
 
     def execute_turn(self):
-        """Execute turning phase - rotate to face target.
-        Simple logic: turn the shortest way to face target.
+        """
+        NEW APPROACH: Always drive forward with steering correction.
+        Only do pure rotation if pointing completely wrong direction (>90°).
         """
         # Safety check
         if self.movement_phase != 'turning':
             return
             
-        # Calculate angle to target
+        # Calculate to target
         dx = self.target_x - self.robot_x
         dy = self.target_y - self.robot_y
         distance_to_target = math.sqrt(dx*dx + dy*dy)
         
-        # If we're already very close to target, skip turning and go directly
+        # If we're already very close to target, move to next
         if distance_to_target < self.position_tolerance:
-            self.get_logger().info(f'   ✅ Already at target, skipping turn')
+            self.get_logger().info(f'   ✅ Already at target')
             self.movement_phase = 'idle'
             self.successful_waypoints += 1
             self.current_waypoint_idx += 1
@@ -372,42 +373,40 @@ class AdaptiveCoveragePlanner(Node):
         target_angle = math.atan2(dy, dx)
         angle_error = self.normalize_angle(target_angle - self.robot_yaw)
         
-        if abs(angle_error) < self.angle_tolerance:
-            # Turn complete - IMMEDIATELY start driving forward (no stop!)
-            self.get_logger().info(f'   ➡️ Turn complete (err={math.degrees(angle_error):.0f}°), driving {distance_to_target:.2f}m...')
-            self.movement_phase = 'driving'
-            self.drive_start_time = self.get_clock().now().nanoseconds / 1e9
-            
-            # Send first drive command immediately to ensure forward motion
+        self.get_logger().info(f'   🎯 Target: ({self.target_x:.2f}, {self.target_y:.2f}), '
+                               f'Robot: ({self.robot_x:.2f}, {self.robot_y:.2f}), '
+                               f'Yaw: {math.degrees(self.robot_yaw):.0f}°, '
+                               f'Target angle: {math.degrees(target_angle):.0f}°, '
+                               f'Error: {math.degrees(angle_error):.0f}°')
+        
+        # If angle error is HUGE (>90°), do pure rotation first
+        if abs(angle_error) > 1.57:  # >90 degrees
             cmd = Twist()
-            cmd.linear.x = self.linear_speed
-            cmd.angular.z = 0.0
+            cmd.linear.x = 0.0
+            if angle_error > 0:
+                cmd.angular.z = self.angular_speed
+            else:
+                cmd.angular.z = -self.angular_speed
             self.cmd_vel_pub.publish(cmd)
-            self.get_logger().debug(f'   🚗 Sent drive cmd: linear={cmd.linear.x}, angular={cmd.angular.z}')
+            self.get_logger().info(f'   🔄 Big turn needed: {math.degrees(angle_error):.0f}°')
             return
         
-        # PROPORTIONAL turn speed - slow down as we approach target angle
-        # This prevents overshooting and oscillation
-        # Scale from min_angular_speed (at tolerance) to angular_speed (at 90°+)
-        abs_error = abs(angle_error)
-        if abs_error < 0.5:  # Less than ~30°
-            # Proportional speed: slower when closer to target
-            turn_speed = self.min_angular_speed + (self.angular_speed - self.min_angular_speed) * (abs_error / 0.5)
-        else:
-            turn_speed = self.angular_speed
+        # Otherwise: DRIVE FORWARD with steering correction!
+        # This is much more robust than turn-then-drive
+        self.get_logger().info(f'   ➡️ Driving with correction...')
+        self.movement_phase = 'driving'
+        self.drive_start_time = self.get_clock().now().nanoseconds / 1e9
         
-        # Turn in the direction that reduces angle_error (shortest path)
         cmd = Twist()
-        if angle_error > 0:
-            cmd.angular.z = turn_speed   # Turn left (counter-clockwise)
-        else:
-            cmd.angular.z = -turn_speed  # Turn right (clockwise)
-        
+        cmd.linear.x = self.linear_speed
+        # Proportional steering - stronger correction for bigger errors
+        cmd.angular.z = angle_error * 0.5  # P-controller for steering
+        # Limit steering
+        cmd.angular.z = max(-self.angular_speed, min(self.angular_speed, cmd.angular.z))
         self.cmd_vel_pub.publish(cmd)
-        self.get_logger().debug(f'   🔄 Turning: err={math.degrees(angle_error):.0f}° → cmd.angular.z={cmd.angular.z:.2f}')
 
     def execute_drive(self):
-        """Execute driving phase - move straight to target."""
+        """Execute driving phase - drive toward target with steering."""
         # Safety check
         if self.movement_phase != 'driving':
             return
@@ -429,37 +428,27 @@ class AdaptiveCoveragePlanner(Node):
             self.send_next_goal()
             return
         
-        # Check if we're still facing the right direction
+        # Calculate steering
         target_angle = math.atan2(dy, dx)
         angle_error = self.normalize_angle(target_angle - self.robot_yaw)
         
-        # Check how long we've been driving
-        current_time = self.get_clock().now().nanoseconds / 1e9
-        driving_time = current_time - self.drive_start_time
-        
-        # Only allow return to turning after minimum drive time AND if way off course
-        # This prevents immediate re-turning after turn completes
-        if driving_time > self.min_drive_time and abs(angle_error) > 0.7:  # ~40 degrees
-            self.stop_robot()
-            self.get_logger().info(f'   ↩️ Off course by {math.degrees(angle_error):.0f}° after {driving_time:.1f}s, re-aligning...')
+        # If we're pointing completely wrong way, go back to turning
+        if abs(angle_error) > 1.57:  # >90 degrees
+            self.get_logger().info(f'   ↩️ Way off course ({math.degrees(angle_error):.0f}°), need to turn')
             self.movement_phase = 'turning'
             return
         
-        # Drive forward with minimal angular correction
+        # ALWAYS drive forward with proportional steering
         cmd = Twist()
         cmd.linear.x = self.linear_speed
         
-        # Only apply angular correction if error is significant (> 15°)
-        # Keep correction very small to avoid zigzag behavior
-        if abs(angle_error) > 0.26:  # ~15 degrees
-            cmd.angular.z = angle_error * 0.15  # Very gentle correction
-        else:
-            cmd.angular.z = 0.0  # Go straight
-        
-        # Log every drive command for debugging
-        self.get_logger().debug(f'   🚗 Drive: dist={distance:.2f}m, err={math.degrees(angle_error):.0f}°, cmd=({cmd.linear.x:.2f}, {cmd.angular.z:.2f})')
+        # Steering: proportional to angle error
+        cmd.angular.z = angle_error * 0.5
+        # Limit steering speed
+        cmd.angular.z = max(-self.angular_speed, min(self.angular_speed, cmd.angular.z))
         
         self.cmd_vel_pub.publish(cmd)
+        self.get_logger().debug(f'   🚗 Drive: dist={distance:.2f}m, steer={math.degrees(angle_error):.0f}°')
 
     def publish_state(self):
         """Publish current coverage state."""
