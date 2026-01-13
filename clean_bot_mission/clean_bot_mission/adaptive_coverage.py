@@ -87,7 +87,7 @@ class AdaptiveCoveragePlanner(Node):
         # Direct movement parameters (turn-then-drive)
         self.declare_parameter('use_direct_drive', True)         # Use direct cmd_vel instead of Nav2
         self.declare_parameter('linear_speed', 0.12)             # Forward speed (m/s)
-        self.declare_parameter('angular_speed', 0.4)             # Turn speed (rad/s)
+        self.declare_parameter('angular_speed', 0.2)             # Turn speed (rad/s) - SLOW for stability
         self.declare_parameter('angle_tolerance', 0.1)           # Radians (~6 degrees)
         self.declare_parameter('position_tolerance', 0.08)       # Meters (8cm)
         
@@ -169,6 +169,7 @@ class AdaptiveCoveragePlanner(Node):
         self.target_x = 0.0
         self.target_y = 0.0
         self.target_yaw = 0.0
+        self.last_turn_direction = 1  # 1 = counter-clockwise (left), -1 = clockwise (right)
         
         # Statistics
         self.successful_waypoints = 0
@@ -281,6 +282,7 @@ class AdaptiveCoveragePlanner(Node):
         self.failed_waypoints = 0
         self.start_time = None
         self.movement_phase = 'idle'
+        self.last_turn_direction = 1  # Reset to default (counter-clockwise)
 
     def cancel_current_goal(self):
         """Cancel the current navigation goal and stop robot."""
@@ -332,7 +334,9 @@ class AdaptiveCoveragePlanner(Node):
         return angle
 
     def execute_turn(self):
-        """Execute turning phase - rotate to face target."""
+        """Execute turning phase - rotate to face target.
+        Always turns in a consistent direction to avoid oscillation.
+        """
         # Calculate angle to target
         dx = self.target_x - self.robot_x
         dy = self.target_y - self.robot_y
@@ -347,12 +351,23 @@ class AdaptiveCoveragePlanner(Node):
             self.movement_phase = 'driving'
             return
         
+        # Determine turn direction - MAINTAIN CONSISTENCY
+        # If angle_error is small (< 90°), use shortest path
+        # Otherwise, continue in the same direction as last turn
+        if abs(angle_error) < math.pi / 2:
+            # Small turn - use natural direction (shortest path)
+            turn_direction = 1 if angle_error > 0 else -1
+        else:
+            # Large turn - keep same direction as last turn to avoid reversing
+            # This means we might turn 270° instead of 90° but in same direction
+            turn_direction = self.last_turn_direction
+        
+        # Update last turn direction
+        self.last_turn_direction = turn_direction
+        
         # Turn towards target
         cmd = Twist()
-        if angle_error > 0:
-            cmd.angular.z = self.angular_speed
-        else:
-            cmd.angular.z = -self.angular_speed
+        cmd.angular.z = self.angular_speed * turn_direction
         
         self.cmd_vel_pub.publish(cmd)
 
