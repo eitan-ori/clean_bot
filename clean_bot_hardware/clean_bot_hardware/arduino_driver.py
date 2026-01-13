@@ -154,10 +154,13 @@ class ArduinoDriver(Node):
         MIN_PWM_ROTATE = 50   # Lower minimum for rotation (can be slower)
         MAX_PWM = 150         # Don't go too fast
         
+        left_pwm = 0
+        right_pwm = 0
+        
         # Simplified movement: either rotate OR move forward
         # This prevents weird combined movements that confuse SLAM
         
-        if abs(angular) > 0.05:  # Lower threshold for rotation
+        if abs(angular) > 0.05:  # Rotation takes priority
             # Pure rotation - spin in place
             # Positive angular = counter-clockwise = left backward, right forward
             rotation_pwm = int((abs(angular) / 1.0) * MAX_PWM)
@@ -185,10 +188,6 @@ class ArduinoDriver(Node):
                 # Backward
                 left_pwm = forward_pwm
                 right_pwm = forward_pwm
-        else:
-            # Stop
-            left_pwm = 0
-            right_pwm = 0
         
         # Publish debug info
         debug_msg = Twist()
