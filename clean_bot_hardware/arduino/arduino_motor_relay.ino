@@ -33,6 +33,87 @@ unsigned long lastCommandTime = 0;
 unsigned long lastSensorTime = 0;
 String inputBuffer = "";
 
+// ==================== AUTONOMOUS WALL-AVOID MODE (NO ENCODERS) ====================
+// Triggered via Serial commands:
+//   AUTO_START  -> autonomous wall avoidance (drive/backup/turn)
+//   AUTO_STOP   -> back to normal PWM control from ROS
+
+// Tuning constants (cm/ms/PWM)
+const float WALL_DIST_CM = 5.0;         // keep at least this distance
+const int DRIVE_SPEED = 160;            // base forward/back speed
+const int TURN_SPEED = 180;             // turn speed
+const float LEFT_BOOST = 1.3;           // left motor boost for straight driving
+const int BACKUP_TIME_MS = 600;         // reverse time after wall detection
+const float TURN_ANGLE_DEG = 30.0;      // nominal turn angle away from wall
+const unsigned long STOP_WALL_MS = 500; // pause after wall hit
+const unsigned long TURN_MIN_MS = 180;  // minimum turn time
+const unsigned long TURN_TIME_MS_90 = 900; // empirical: time to turn ~90deg at TURN_SPEED
+const unsigned long POST_TURN_PAUSE_MS = 500;
+
+enum MainMode { MODE_MANUAL = 0, MODE_AUTO = 1 };
+MainMode mainMode = MODE_MANUAL;
+
+enum AutoState { AUTO_DRIVE_FWD = 0, AUTO_STOP_WALL = 1, AUTO_DRIVE_BACK = 2, AUTO_TURN_AWAY = 3 };
+AutoState autoState = AUTO_DRIVE_FWD;
+
+unsigned long autoStateStartTime = 0;
+float lastDistanceCm = 400.0;
+
+unsigned long computeTurnTimeMs(float angleDeg) {
+  // Scale from 90deg reference
+  float scaled = (TURN_TIME_MS_90 * (angleDeg / 90.0));
+  if (scaled < (float)TURN_MIN_MS) scaled = (float)TURN_MIN_MS;
+  return (unsigned long)(scaled);
+}
+
+void setManualCommandTime() {
+  lastCommandTime = millis();
+}
+
+int clampPwm(int pwm) {
+  if (pwm > 255) return 255;
+  if (pwm < -255) return -255;
+  return pwm;
+}
+
+void driveForwardAuto(int baseSpeed) {
+  int leftSpeed = (int)(baseSpeed * LEFT_BOOST);
+  if (leftSpeed > 255) leftSpeed = 255;
+  setMotor(1, leftSpeed);
+  setMotor(2, baseSpeed);
+}
+
+void driveBackwardAuto(int baseSpeed) {
+  int leftSpeed = (int)(baseSpeed * LEFT_BOOST);
+  if (leftSpeed > 255) leftSpeed = 255;
+  setMotor(1, -leftSpeed);
+  setMotor(2, -baseSpeed);
+}
+
+void turnRightAuto(int speed) {
+  // Equal power during turns
+  setMotor(1, speed);
+  setMotor(2, -speed);
+}
+
+void stopMotorsAuto() {
+  setMotor(1, 0);
+  setMotor(2, 0);
+}
+
+void startAutoMode() {
+  mainMode = MODE_AUTO;
+  autoState = AUTO_DRIVE_FWD;
+  autoStateStartTime = millis();
+  Serial.println("AUTO_MODE_ON");
+}
+
+void stopAutoMode() {
+  mainMode = MODE_MANUAL;
+  stopMotorsAuto();
+  Serial.println("AUTO_MODE_OFF");
+}
+
 // Cleaning sequence state
 bool cleaningSequenceRunning = false;
 int cleaningStep = 0;
@@ -81,10 +162,62 @@ void loop() {
     }
   }
 
-  // 2. Safety Watchdog - Stop motors if no command for 1 second
-  if (currentMillis - lastCommandTime > 1000) {
-    setMotor(1, 0); 
-    setMotor(2, 0);
+  // 2. Safety Watchdog (manual mode only) - Stop motors if no command for 1 second
+  if (mainMode == MODE_MANUAL) {
+    if (currentMillis - lastCommandTime > 1000) {
+      setMotor(1, 0);
+      setMotor(2, 0);
+    }
+  }
+
+  // 2b. Autonomous wall avoidance loop
+  if (mainMode == MODE_AUTO) {
+    // Read ultrasonic frequently when driving forward
+    if (autoState == AUTO_DRIVE_FWD) {
+      lastDistanceCm = readUltrasonic();
+    }
+
+    switch (autoState) {
+      case AUTO_DRIVE_FWD:
+        driveForwardAuto(DRIVE_SPEED);
+        if (lastDistanceCm > 0 && lastDistanceCm < WALL_DIST_CM) {
+          stopMotorsAuto();
+          autoState = AUTO_STOP_WALL;
+          autoStateStartTime = currentMillis;
+        }
+        break;
+
+      case AUTO_STOP_WALL:
+        stopMotorsAuto();
+        if (currentMillis - autoStateStartTime >= STOP_WALL_MS) {
+          autoState = AUTO_DRIVE_BACK;
+          autoStateStartTime = currentMillis;
+        }
+        break;
+
+      case AUTO_DRIVE_BACK:
+        driveBackwardAuto(DRIVE_SPEED);
+        if (currentMillis - autoStateStartTime >= (unsigned long)BACKUP_TIME_MS) {
+          stopMotorsAuto();
+          autoState = AUTO_TURN_AWAY;
+          autoStateStartTime = currentMillis;
+        }
+        break;
+
+      case AUTO_TURN_AWAY: {
+        unsigned long turnMs = computeTurnTimeMs(TURN_ANGLE_DEG);
+        // Turn right for turnMs, then pause and go forward
+        if (currentMillis - autoStateStartTime < turnMs) {
+          turnRightAuto(TURN_SPEED);
+        } else if (currentMillis - autoStateStartTime < (turnMs + POST_TURN_PAUSE_MS)) {
+          stopMotorsAuto();
+        } else {
+          autoState = AUTO_DRIVE_FWD;
+          autoStateStartTime = currentMillis;
+        }
+        break;
+      }
+    }
   }
 
   // 3. Run cleaning sequence state machine (non-blocking)
@@ -166,6 +299,16 @@ void runCleaningSequence(unsigned long currentMillis) {
 // --- COMMAND PROCESSING ---
 void processCommand(String cmd) {
   cmd.trim();
+
+  // Mode commands
+  if (cmd == "AUTO_START") {
+    startAutoMode();
+    return;
+  }
+  if (cmd == "AUTO_STOP") {
+    stopAutoMode();
+    return;
+  }
   
   // Cleaning commands
   if (cmd == "CLEAN_START") {
@@ -188,10 +331,13 @@ void processCommand(String cmd) {
   if (commaIndex > 0) {
     int pwmLeft = cmd.substring(0, commaIndex).toInt();
     int pwmRight = cmd.substring(commaIndex + 1).toInt();
-    
-    setMotor(1, pwmLeft);
-    setMotor(2, pwmRight);
-    lastCommandTime = millis();
+
+    // Ignore manual PWM commands while in AUTO mode
+    if (mainMode == MODE_MANUAL) {
+      setMotor(1, clampPwm(pwmLeft));
+      setMotor(2, clampPwm(pwmRight));
+      setManualCommandTime();
+    }
   }
 }
 
