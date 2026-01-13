@@ -42,7 +42,7 @@ class ArduinoDriver(Node):
 
         # ===================== Parameters =====================
         # Serial connection
-        self.declare_parameter('serial_port', '/dev/ttyUSB0')
+        self.declare_parameter('serial_port', '/dev/ttyACM0')
         self.declare_parameter('baud_rate', 57600)
         
         # Velocity conversion (for cmd_vel -> PWM)
