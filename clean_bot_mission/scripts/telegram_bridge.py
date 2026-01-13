@@ -25,7 +25,8 @@ Telegram Commands:
     /start - Show available commands
     /scan - Start exploration/scanning
     /stopscan - Stop scanning
-    /clean - Start cleaning
+    /clean - Start cleaning (random)
+    /coverage - Start cleaning (map-based)
     /stopclean - Stop cleaning
     /home - Return to home position
     /reset - Reset mission to initial state
@@ -287,7 +288,8 @@ Available commands:
 /stopscan - Stop scanning
 
 *Cleaning (Coverage):*
-/clean - Start cleaning
+/clean - Start cleaning (random)
+/coverage - Start cleaning (map-based)
 /stopclean - Stop cleaning
 
 *Control:*
@@ -322,11 +324,19 @@ async def cmd_stopscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start cleaning/coverage."""
+    """Start cleaning (Plan B random)."""
     if not await check_auth(update):
         return
     ros_node.send_command('start_clean')
-    await update.message.reply_text('🧹 Starting cleaning...\nRobot will cover all free space.')
+    await update.message.reply_text('🧹 Starting cleaning (random)...\nRobot will random-walk: turn + drive repeatedly.')
+
+
+async def cmd_coverage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start original map-based coverage cleaning."""
+    if not await check_auth(update):
+        return
+    ros_node.send_command('start_clean_coverage')
+    await update.message.reply_text('🧹 Starting cleaning (map-based)...\nRobot will try to cover all free space from the map.')
 
 
 async def cmd_stopclean(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -460,7 +470,8 @@ async def post_init(application):
         BotCommand("start", "Show welcome and commands"),
         BotCommand("scan", "Start exploration"),
         BotCommand("stopscan", "Stop exploration"),
-        BotCommand("clean", "Start cleaning"),
+        BotCommand("clean", "Start cleaning (random)"),
+        BotCommand("coverage", "Start cleaning (map-based)"),
         BotCommand("stopclean", "Stop cleaning"),
         BotCommand("home", "Return to home"),
         BotCommand("reset", "Reset mission"),
@@ -505,6 +516,7 @@ def main():
     application.add_handler(CommandHandler('scan', cmd_scan))
     application.add_handler(CommandHandler('stopscan', cmd_stopscan))
     application.add_handler(CommandHandler('clean', cmd_clean))
+    application.add_handler(CommandHandler('coverage', cmd_coverage))
     application.add_handler(CommandHandler('stopclean', cmd_stopclean))
     application.add_handler(CommandHandler('home', cmd_home))
     application.add_handler(CommandHandler('reset', cmd_reset))
