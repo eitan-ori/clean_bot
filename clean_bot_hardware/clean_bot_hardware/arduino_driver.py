@@ -49,6 +49,13 @@ class ArduinoDriver(Node):
         # Velocity conversion (for cmd_vel -> PWM)
         self.declare_parameter('max_linear_speed', 0.3)      # m/s at PWM 255
         self.declare_parameter('max_pwm', 255)
+
+        # Differential drive geometry
+        self.declare_parameter('wheel_separation', 0.20)      # meters (distance between wheels)
+
+        # Motor wiring/inversion (kept configurable)
+        self.declare_parameter('invert_left_motor', True)
+        self.declare_parameter('invert_right_motor', True)
         
         # Frame IDs
         self.declare_parameter('ultrasonic_frame_id', 'ultrasonic_link')
@@ -61,6 +68,9 @@ class ArduinoDriver(Node):
         self.baud_rate = self.get_parameter('baud_rate').value
         self.max_linear_speed = self.get_parameter('max_linear_speed').value
         self.max_pwm = self.get_parameter('max_pwm').value
+        self.wheel_separation = self.get_parameter('wheel_separation').value
+        self.invert_left_motor = bool(self.get_parameter('invert_left_motor').value)
+        self.invert_right_motor = bool(self.get_parameter('invert_right_motor').value)
         self.ultrasonic_frame = self.get_parameter('ultrasonic_frame_id').value
         publish_rate = self.get_parameter('publish_rate').value
         
@@ -148,46 +158,27 @@ class ArduinoDriver(Node):
         """Convert Twist message to motor PWM commands and send to Arduino."""
         linear = msg.linear.x
         angular = msg.angular.z
-        
-        # PWM limits
-        MIN_PWM_FORWARD = 90  # Minimum for forward motion (overcome friction)
-        MIN_PWM_ROTATE = 50   # Lower minimum for rotation (can be slower)
-        MAX_PWM = 150         # Don't go too fast
-        
-        left_pwm = 0
-        right_pwm = 0
-        
-        # Simplified movement: either rotate OR move forward
-        # This prevents weird combined movements that confuse SLAM
-        
-        if abs(angular) > 0.05:  # Rotation takes priority
-            # Pure rotation - spin in place
-            # Positive angular = counter-clockwise = left backward, right forward
-            rotation_pwm = int((abs(angular) / 1.0) * MAX_PWM)
-            rotation_pwm = max(MIN_PWM_ROTATE, min(MAX_PWM, rotation_pwm))
-            
-            if angular > 0:
-                # Counter-clockwise: left back, right forward
-                left_pwm = rotation_pwm     # Left forward (will be negated = backward)
-                right_pwm = -rotation_pwm   # Right backward (will be negated = forward)
-            else:
-                # Clockwise: left forward, right back
-                left_pwm = -rotation_pwm
-                right_pwm = rotation_pwm
-                
-        elif abs(linear) > 0.01:
-            # Pure forward/backward motion - both wheels same speed
-            forward_pwm = int((abs(linear) / self.max_linear_speed) * MAX_PWM)
-            forward_pwm = max(MIN_PWM_FORWARD, min(MAX_PWM, forward_pwm))
-            
-            if linear > 0:
-                # Forward: NEGATE because motors are inverted!
-                left_pwm = -forward_pwm
-                right_pwm = -forward_pwm
-            else:
-                # Backward
-                left_pwm = forward_pwm
-                right_pwm = forward_pwm
+
+        # PWM limits (tuned for this robot)
+        MIN_PWM_FORWARD = 90  # Minimum to overcome friction
+        MIN_PWM_ROTATE = 50   # Rotation can be slower
+        MAX_PWM = 150         # Cap top speed
+
+        # Differential drive mixing:
+        # v_left  = v - w * (wheel_separation/2)
+        # v_right = v + w * (wheel_separation/2)
+        v_left = float(linear) - float(angular) * (self.wheel_separation / 2.0)
+        v_right = float(linear) + float(angular) * (self.wheel_separation / 2.0)
+
+        # Convert wheel speeds to PWM
+        left_pwm = self._wheel_speed_to_pwm(v_left, linear, angular, MIN_PWM_FORWARD, MIN_PWM_ROTATE, MAX_PWM)
+        right_pwm = self._wheel_speed_to_pwm(v_right, linear, angular, MIN_PWM_FORWARD, MIN_PWM_ROTATE, MAX_PWM)
+
+        # Apply inversion per wheel (matches wiring)
+        if self.invert_left_motor:
+            left_pwm = -left_pwm
+        if self.invert_right_motor:
+            right_pwm = -right_pwm
         
         # Publish debug info
         debug_msg = Twist()
@@ -208,6 +199,33 @@ class ArduinoDriver(Node):
             self.get_logger().warning(f'Serial write error: {e}')
         
         self.last_cmd_time = self.get_clock().now()
+
+    def _wheel_speed_to_pwm(
+        self,
+        wheel_speed_mps: float,
+        linear_mps: float,
+        angular_rps: float,
+        min_pwm_forward: int,
+        min_pwm_rotate: int,
+        max_pwm: int,
+    ) -> int:
+        """Map wheel linear speed (m/s) to PWM.
+
+        Uses a minimum PWM threshold so the motors actually move.
+        """
+        # Deadband
+        if abs(wheel_speed_mps) < 0.01:
+            return 0
+
+        pwm = int((abs(wheel_speed_mps) / float(self.max_linear_speed)) * max_pwm)
+        pwm = min(max_pwm, max(0, pwm))
+
+        # Choose minimum based on whether we are mostly translating or mostly rotating.
+        # If there is meaningful linear command, keep the stronger minimum.
+        min_pwm = min_pwm_forward if abs(linear_mps) > 0.03 else min_pwm_rotate
+        pwm = max(min_pwm, pwm)
+
+        return pwm if wheel_speed_mps > 0 else -pwm
 
     def _velocity_to_pwm(self, velocity: float) -> int:
         """Convert velocity (m/s) to PWM value (-255 to 255)."""

@@ -87,20 +87,5 @@ def generate_launch_description():
             }]
         ),
 
-        # Adaptive Coverage Planner - handles the actual cleaning movement
-        Node(
-            package='clean_bot_mission',
-            executable='adaptive_coverage',
-            name='adaptive_coverage_planner',
-            output='screen',
-            arguments=['--ros-args', '--log-level', log_level],
-            parameters=[{
-                'coverage_width': coverage_width,
-                'use_direct_drive': True,  # Simple drive, no Nav2
-                'linear_speed': 0.12,
-                'angular_speed': 0.4,
-            }]
-        ),
-
 
     ])

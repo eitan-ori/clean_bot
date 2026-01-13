@@ -170,6 +170,15 @@ class AdaptiveCoveragePlanner(Node):
         self.target_y = 0.0
         self.target_yaw = 0.0
         self.last_turn_direction = 1  # 1 = counter-clockwise (left), -1 = clockwise (right)
+
+        # Command rate limiting + minimum straight-drive time.
+        # IMPORTANT: Arduino driver prioritizes rotation when abs(angular.z) > ~0.05.
+        # Therefore, during straight driving we must publish angular.z = 0.0.
+        self.control_rate = 20.0  # Hz
+        self.last_cmd_time = 0.0
+        self.drive_start_time = 0.0
+        self.min_drive_time = 0.8  # seconds (drive straight a bit before re-aligning)
+        self.realign_angle = max(self.angle_tolerance * 2.0, 0.35)  # radians
         
         # Statistics
         self.successful_waypoints = 0
@@ -317,10 +326,17 @@ class AdaptiveCoveragePlanner(Node):
         self.robot_yaw = math.atan2(siny_cosp, cosy_cosp)
         
         self.odom_received = True
-        
-        # Simple control: if navigating, drive toward target
-        if self.use_direct_drive and self.coverage_state == CoverageState.RUNNING and self.is_navigating:
-            self.drive_to_target()
+
+        # Run direct-drive control loop (rate-limited)
+        if not (self.use_direct_drive and self.coverage_state == CoverageState.RUNNING and self.is_navigating):
+            return
+
+        now = self.get_clock().now().nanoseconds / 1e9
+        if now - self.last_cmd_time < 1.0 / self.control_rate:
+            return
+        self.last_cmd_time = now
+
+        self.drive_to_target(now)
 
     def normalize_angle(self, angle):
         """Normalize angle to [-pi, pi]."""
@@ -330,10 +346,10 @@ class AdaptiveCoveragePlanner(Node):
             angle += 2.0 * math.pi
         return angle
 
-    def drive_to_target(self):
-        """
-        SIMPLE: Drive toward target with steering.
-        No separate turn/drive phases - just go there.
+    def drive_to_target(self, now: float):
+        """Turn to align, then drive straight toward target.
+
+        This matches the hardware driver behavior (it treats any angular.z as rotate-only).
         """
         dx = self.target_x - self.robot_x
         dy = self.target_y - self.robot_y
@@ -352,19 +368,49 @@ class AdaptiveCoveragePlanner(Node):
         # Calculate angle to target
         target_angle = math.atan2(dy, dx)
         angle_error = self.normalize_angle(target_angle - self.robot_yaw)
-        
+
+        # Initialize phase
+        if self.movement_phase not in ('turning', 'driving'):
+            self.movement_phase = 'turning'
+
         cmd = Twist()
-        
-        # If pointing very wrong direction (>90°), rotate in place first
-        if abs(angle_error) > 1.57:
+
+        if self.movement_phase == 'turning':
+            # Rotate in place until aligned
+            if abs(angle_error) <= self.angle_tolerance:
+                self.movement_phase = 'driving'
+                self.drive_start_time = now
+
+                cmd.linear.x = self.linear_speed
+                cmd.angular.z = 0.0
+                self.cmd_vel_pub.publish(cmd)
+                return
+
             cmd.linear.x = 0.0
-            cmd.angular.z = 0.4 if angle_error > 0 else -0.4
-        else:
-            # Drive forward with steering
+
+            # Proportional rotate with minimum speed for getting unstuck
+            turn = max(0.15, min(0.6, abs(angle_error) * 0.8))
+            cmd.angular.z = turn if angle_error > 0 else -turn
+            self.cmd_vel_pub.publish(cmd)
+            return
+
+        # driving
+        if (now - self.drive_start_time) < self.min_drive_time:
             cmd.linear.x = self.linear_speed
-            cmd.angular.z = angle_error * 1.0  # Proportional steering
-            cmd.angular.z = max(-0.5, min(0.5, cmd.angular.z))  # Limit
-        
+            cmd.angular.z = 0.0
+            self.cmd_vel_pub.publish(cmd)
+            return
+
+        # After minimum straight time, re-check heading; if drifted, re-align.
+        if abs(angle_error) > self.realign_angle:
+            self.movement_phase = 'turning'
+            cmd.linear.x = 0.0
+            cmd.angular.z = 0.25 if angle_error > 0 else -0.25
+            self.cmd_vel_pub.publish(cmd)
+            return
+
+        cmd.linear.x = self.linear_speed
+        cmd.angular.z = 0.0
         self.cmd_vel_pub.publish(cmd)
 
     # Keep old functions for compatibility but they're not used
@@ -940,6 +986,10 @@ class AdaptiveCoveragePlanner(Node):
         self.target_y = y
         self.target_yaw = yaw
         self.is_navigating = True
+
+        # Start by aligning to the segment direction
+        self.movement_phase = 'turning'
+        self.drive_start_time = 0.0
         
         if not self.use_direct_drive:
             # Nav2 mode (fallback)
