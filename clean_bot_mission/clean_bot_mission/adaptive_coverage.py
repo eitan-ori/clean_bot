@@ -81,7 +81,7 @@ class AdaptiveCoveragePlanner(Node):
         
         self.declare_parameter('timeout_per_waypoint', 90)       # Seconds per goal
         self.declare_parameter('start_on_exploration_complete', False)  # Wait for explicit start command
-        self.declare_parameter('min_region_area', 0.1)           # Min area to cover (m²)
+        self.declare_parameter('min_region_area', 0.02)          # Min area to cover (m²) - lowered for small spaces
         self.declare_parameter('max_retries', 1)                 # Number of times to retry missed areas
         
         self.coverage_width = self.get_parameter('coverage_width').value
@@ -292,6 +292,18 @@ class AdaptiveCoveragePlanner(Node):
             self.get_logger().error('   Try running /scan first to build a map.')
             return
         
+        # Check map quality
+        height, width = self.map_array.shape
+        free_count = np.sum((self.map_array >= 0) & (self.map_array < FREE_THRESHOLD))
+        unknown_count = np.sum(self.map_array == -1)
+        occupied_count = np.sum(self.map_array >= OCCUPIED_THRESHOLD)
+        
+        self.get_logger().info(f'📊 Map stats: {width}x{height}, free={free_count}, unknown={unknown_count}, occupied={occupied_count}')
+        
+        if free_count < 50:
+            self.get_logger().error('❌ Map has very little free space! Run exploration first.')
+            return
+        
         if self.mission_started and self.coverage_state == CoverageState.RUNNING:
             self.get_logger().warn('⚠️ Mission already in progress')
             return
@@ -305,8 +317,14 @@ class AdaptiveCoveragePlanner(Node):
         # Step 2: Generate adaptive coverage path
         self.waypoints = self.generate_adaptive_coverage_path()
         
+        # Fallback: If complex path generation failed, try simple zigzag
+        if not self.waypoints:
+            self.get_logger().warn('⚠️ Complex path generation failed, trying simple zigzag...')
+            self.waypoints = self.generate_simple_zigzag_path()
+        
         if not self.waypoints:
             self.get_logger().error('❌ Could not generate coverage path!')
+            self.get_logger().error('   Check that the map has sufficient free space.')
             return
         
         # Step 3: Publish path for visualization
@@ -359,7 +377,19 @@ class AdaptiveCoveragePlanner(Node):
         origin_x = self.map_info.origin.position.x
         origin_y = self.map_info.origin.position.y
         
+        self.get_logger().info(f'Map size: {width}x{height} cells, resolution: {resolution}m')
+        self.get_logger().info(f'Map origin: ({origin_x}, {origin_y})')
+        
         step_cells = max(1, int(self.step_size / resolution))
+        self.get_logger().info(f'Step size: {self.step_size}m = {step_cells} cells')
+        
+        # Count free cells for debugging
+        free_count = np.sum((self.inflated_map >= 0) & (self.inflated_map < FREE_THRESHOLD))
+        self.get_logger().info(f'Free cells in inflated map: {free_count} ({100*free_count/(height*width):.1f}%)')
+        
+        if free_count < 10:
+            self.get_logger().error('Not enough free space in map!')
+            return []
         
         # --- 1. Decompose Space into Cells ---
         # Cells structure: key=cell_id, value={'segments': [], 'connections': set(), 'center': (x,y)}
@@ -369,9 +399,11 @@ class AdaptiveCoveragePlanner(Node):
         # To track connectivity
         prev_segments = []
         cell_counter = 0
+        total_segments_found = 0
 
         for col in range(0, width, step_cells):
             curr_segments_raw = self.find_free_segments_in_column(col)
+            total_segments_found += len(curr_segments_raw)
             # Add x, y_start, y_end info
             curr_segments = []
             x = origin_x + (col + 0.5) * resolution
@@ -449,28 +481,56 @@ class AdaptiveCoveragePlanner(Node):
 
             # Store segments in cells
             for i, c_seg in enumerate(curr_segments):
-                cid = curr_to_cell_map[i]
-                cells[cid]['segments'].append(c_seg['vals'])
+                if i in curr_to_cell_map:
+                    cid = curr_to_cell_map[i]
+                    cells[cid]['segments'].append(c_seg['vals'])
+                else:
+                    # Orphan segment - create new cell for it
+                    cell_counter += 1
+                    cid = cell_counter
+                    cells[cid] = {'segments': [c_seg['vals']], 'connections': set(), 'visited': False}
+                    curr_to_cell_map[i] = cid
             
             # Prepare for next iteration
             prev_segments = curr_segments
             active_cell_indices = curr_to_cell_map
 
+        # Debug: Check for empty cells
+        empty_cells = [cid for cid, data in cells.items() if not data['segments']]
+        if empty_cells:
+            self.get_logger().warn(f'Found {len(empty_cells)} cells with no segments')
+            # Remove empty cells
+            for cid in empty_cells:
+                del cells[cid]
+
+        self.get_logger().info(f'Total segments found across all columns: {total_segments_found}')
         self.get_logger().info(f'Detected {len(cells)} distinct cells/regions.')
+        
+        if not cells:
+            self.get_logger().error('No cells were created! Check that map has navigable free space.')
+            return []
         
         # --- 2. Filter Tiny Cells ---
         valid_cells = {}
         for cid, data in cells.items():
-            # Calculate area approx (num segments * step_size * avg_height)
-            # Actually easier: just ensure it has minimal segments
-            if len(data['segments']) * resolution * self.step_size > self.min_region_area:
+            # Calculate actual area: sum of (segment_height * step_size) for each segment
+            # Each segment is (x, y_start, y_end, col, r1, r2)
+            cell_area = 0.0
+            for seg in data['segments']:
+                segment_height = abs(seg[2] - seg[1])  # y_end - y_start
+                cell_area += segment_height * self.step_size
+            
+            if cell_area > self.min_region_area:
                 valid_cells[cid] = data
+                self.get_logger().debug(f'   Cell {cid}: area={cell_area:.3f}m², segments={len(data["segments"])}')
             else:
-                # If deleted, remove from neighbors? (Optional, skipping for simplicity)
-                pass
+                self.get_logger().debug(f'   Cell {cid}: FILTERED (area={cell_area:.3f}m² < {self.min_region_area}m²)')
+        
+        self.get_logger().info(f'After filtering: {len(valid_cells)} valid cells (min area: {self.min_region_area}m²)')
         
         cells = valid_cells
         if not cells:
+            self.get_logger().error('All cells were filtered out! Try reducing min_region_area parameter.')
             return []
 
         # --- 3. Order Cells (TSP / Nearest Neighbor) ---
@@ -508,35 +568,42 @@ class AdaptiveCoveragePlanner(Node):
             remaining_ids.remove(best_id)
             curr_pos = cells[best_id]['centroid']
 
-        # --- 4. Generate Paths per Cell (Boundary + Zigzag) ---
+        # --- 4. Generate Paths per Cell (Zigzag only - simpler and more reliable) ---
         final_waypoints = []
+        
+        self.get_logger().info(f'Generating waypoints for {len(ordered_cell_ids)} cells...')
         
         for cid in ordered_cell_ids:
             cell_segments = cells[cid]['segments']
             
-            # 4.1. Boundary Pass (Contour Following)
-            # Create a path that follows the outer edge of the cell.
-            # Direction: Clockwise (keeps wall on Left) - for the Left Side Brush
-            boundary_waypoints = self.generate_cell_boundary(cell_segments)
-            final_waypoints.extend(boundary_waypoints)
+            if not cell_segments:
+                self.get_logger().warn(f'Cell {cid} has no segments, skipping')
+                continue
             
-            # 4.2. Zigzag Interior
-            # Direction: Alternating Up/Down
+            # Sort segments by x coordinate to ensure proper order
+            cell_segments = sorted(cell_segments, key=lambda s: s[0])
+            
+            # Generate Zigzag pattern - alternating up/down passes
             going_up = True
             
-            # If we ended boundary pass near the bottom, maybe start zigzag Up?
-            # Or if near top, start down?
-            # For simplicity, we stick to standard zigzag but verify entry point.
-            
             for x, y_start, y_end, col, r1, r2 in cell_segments:
+                # Skip very short segments
+                if abs(y_end - y_start) < 0.05:  # Less than 5cm
+                    continue
+                    
                 if going_up:
-                    final_waypoints.append((x, y_start, math.pi / 2))
-                    final_waypoints.append((x, y_end, math.pi / 2))
+                    final_waypoints.append((x, y_start, math.pi / 2))   # Face up
+                    final_waypoints.append((x, y_end, math.pi / 2))     # Face up
                 else:
-                    final_waypoints.append((x, y_end, -math.pi / 2))
-                    final_waypoints.append((x, y_start, -math.pi / 2))
+                    final_waypoints.append((x, y_end, -math.pi / 2))    # Face down
+                    final_waypoints.append((x, y_start, -math.pi / 2))  # Face down
                 going_up = not going_up
-                
+        
+        self.get_logger().info(f'Generated {len(final_waypoints)} total waypoints')
+        
+        if not final_waypoints:
+            self.get_logger().error('No waypoints generated! Check map quality and parameters.')
+            
         return final_waypoints
 
     def generate_cell_boundary(self, segments) -> list:
@@ -609,19 +676,70 @@ class AdaptiveCoveragePlanner(Node):
                 in_segment = False
                 seg_end = row - 1
                 
-                # Only add if segment is long enough
+                # Only add if segment is long enough (at least 10cm)
                 segment_length = (seg_end - seg_start) * self.map_info.resolution
-                if segment_length >= self.step_size * 2:  # At least 2 steps
+                if segment_length >= 0.10:  # At least 10cm
                     segments.append((seg_start, seg_end))
         
         # Handle segment that goes to end of column
         if in_segment:
             seg_end = height - 1
             segment_length = (seg_end - seg_start) * self.map_info.resolution
-            if segment_length >= self.step_size * 2:
+            if segment_length >= 0.10:  # At least 10cm
                 segments.append((seg_start, seg_end))
         
         return segments
+
+    def generate_simple_zigzag_path(self) -> list:
+        """
+        Fallback: Generate a simple zigzag coverage path over the entire free space.
+        This is simpler and more robust than cell decomposition.
+        """
+        self.get_logger().info('Generating simple zigzag path...')
+        
+        height, width = self.inflated_map.shape
+        resolution = self.map_info.resolution
+        origin_x = self.map_info.origin.position.x
+        origin_y = self.map_info.origin.position.y
+        
+        step_cells = max(1, int(self.step_size / resolution))
+        waypoints = []
+        
+        going_up = True
+        
+        # Scan through columns at step_size intervals
+        for col in range(0, width, step_cells):
+            # Find all free segments in this column
+            segments = self.find_free_segments_in_column(col)
+            
+            if not segments:
+                continue
+            
+            x = origin_x + (col + 0.5) * resolution
+            
+            # Process segments in order (or reverse order if going down)
+            if not going_up:
+                segments = segments[::-1]
+            
+            for seg_start, seg_end in segments:
+                y_start = origin_y + (seg_start + 0.5) * resolution
+                y_end = origin_y + (seg_end + 0.5) * resolution
+                
+                # Skip very short segments
+                if abs(y_end - y_start) < 0.05:
+                    continue
+                
+                if going_up:
+                    waypoints.append((x, y_start, math.pi / 2))   # Face up
+                    waypoints.append((x, y_end, math.pi / 2))     # Face up
+                else:
+                    waypoints.append((x, y_end, -math.pi / 2))    # Face down
+                    waypoints.append((x, y_start, -math.pi / 2))  # Face down
+            
+            going_up = not going_up
+        
+        self.get_logger().info(f'Simple zigzag generated {len(waypoints)} waypoints')
+        return waypoints
 
     def optimize_path_order(self, waypoints: list) -> list:
         """
