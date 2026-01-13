@@ -26,9 +26,9 @@
     <joint name="laser_joint" type="fixed">
         <parent link="chassis"/>
         <child link="laser"/>
-        <!-- RPLIDAR A1 mounted with USB port facing BACK -->
-        <!-- Fixed: LiDAR is now mounted facing forward -->
-        <origin xyz="0.15 0 0.175" rpy="0 0 0"/>
+        <!-- RPLIDAR A1 mounted with USB port facing BACK (physically rotated 180°) -->
+        <!-- The TF must match physical orientation! -->
+        <origin xyz="0.15 0 0.175" rpy="0 0 3.14159"/>
     </joint>
 
     <link name="laser">

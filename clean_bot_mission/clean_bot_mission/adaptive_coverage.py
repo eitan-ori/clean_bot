@@ -384,21 +384,15 @@ class AdaptiveCoveragePlanner(Node):
         target_angle = math.atan2(dy, dx)
         angle_error = self.normalize_angle(target_angle - self.robot_yaw)
         
-        # Build command
+        # ALWAYS drive forward with steering - no pure rotation!
+        # The robot will correct direction while moving
         cmd = Twist()
+        cmd.linear.x = 0.12  # ALWAYS go forward
+        cmd.angular.z = max(-0.4, min(0.4, angle_error * 0.8))  # Steering
         
-        # If angle error is HUGE (>90°), do pure rotation
-        if abs(angle_error) > 1.57:
-            cmd.linear.x = 0.0
-            cmd.angular.z = 0.3 if angle_error > 0 else -0.3
-            self.get_logger().info(f'   🔄 ROTATE: err={math.degrees(angle_error):.0f}°')
-        else:
-            # DRIVE forward with steering
-            cmd.linear.x = 0.12  # Fixed speed
-            cmd.angular.z = max(-0.3, min(0.3, angle_error * 0.5))
-            self.get_logger().info(f'   🚗 DRIVE: err={math.degrees(angle_error):.0f}°')
-            self.movement_phase = 'driving'
-            self.drive_start_time = self.get_clock().now().nanoseconds / 1e9
+        self.get_logger().info(f'   🚗 DRIVE: lin=0.12, ang={cmd.angular.z:.2f} (err={math.degrees(angle_error):.0f}°)')
+        self.movement_phase = 'driving'
+        self.drive_start_time = self.get_clock().now().nanoseconds / 1e9
         
         # PUBLISH THE COMMAND to both topics
         self.publish_cmd(cmd)
@@ -430,21 +424,14 @@ class AdaptiveCoveragePlanner(Node):
         target_angle = math.atan2(dy, dx)
         angle_error = self.normalize_angle(target_angle - self.robot_yaw)
         
-        # If we're pointing completely wrong way, go back to turning
-        if abs(angle_error) > 1.57:  # >90 degrees
-            self.get_logger().info(f'   ↩️ Way off course ({math.degrees(angle_error):.0f}°), need to turn')
-            self.movement_phase = 'turning'
-            return
-        
-        # ALWAYS drive forward with proportional steering
+        # ALWAYS drive forward with proportional steering - NO going back to turning!
         cmd = Twist()
-        cmd.linear.x = self.linear_speed
+        cmd.linear.x = 0.12  # ALWAYS forward
         
-        # Steering: proportional to angle error
-        cmd.angular.z = angle_error * 0.5
-        # Limit steering speed
-        cmd.angular.z = max(-self.angular_speed, min(self.angular_speed, cmd.angular.z))
+        # Steering: proportional to angle error (capped)
+        cmd.angular.z = max(-0.4, min(0.4, angle_error * 0.8))
         
+        self.get_logger().info(f'   🚗 DRIVING: lin=0.12, ang={cmd.angular.z:.2f} (dist={distance:.2f}m)')
         self.publish_cmd(cmd)
 
     def publish_state(self):
