@@ -87,9 +87,9 @@ class AdaptiveCoveragePlanner(Node):
         # Direct movement parameters (turn-then-drive)
         self.declare_parameter('use_direct_drive', True)         # Use direct cmd_vel instead of Nav2
         self.declare_parameter('linear_speed', 0.12)             # Forward speed (m/s)
-        self.declare_parameter('angular_speed', 0.25)            # Turn speed (rad/s)
-        self.declare_parameter('angle_tolerance', 0.15)          # Radians (~8.6°) - precise turning
-        self.declare_parameter('position_tolerance', 0.08)       # Meters (8cm)
+        self.declare_parameter('angular_speed', 0.3)             # Turn speed (rad/s)
+        self.declare_parameter('angle_tolerance', 0.25)          # Radians (~15°) - tolerance for turning
+        self.declare_parameter('position_tolerance', 0.10)       # Meters (10cm)
         
         self.coverage_width = self.get_parameter('coverage_width').value
         self.overlap_ratio = self.get_parameter('overlap_ratio').value
@@ -171,18 +171,20 @@ class AdaptiveCoveragePlanner(Node):
         self.target_yaw = 0.0
         self.last_turn_direction = 1  # 1 = counter-clockwise (left), -1 = clockwise (right)
         self.last_cmd_time = 0.0  # For rate limiting command publishing
-        self.control_rate = 10.0  # Hz - how often to send cmd_vel commands
+        self.control_rate = 20.0  # Hz - how often to send cmd_vel commands
         self.drive_start_time = 0.0  # When driving phase started (for minimum drive time)
-        self.min_drive_time = 0.3  # Minimum seconds to drive before allowing re-turn
+        self.min_drive_time = 0.5  # Minimum seconds to drive before allowing re-turn
         
         # Statistics
         self.successful_waypoints = 0
         self.failed_waypoints = 0
         self.start_time = None
         self.total_distance = 0.0
+        self.last_status_time = 0.0  # For periodic status logging
 
         # ===================== Timer =====================
         self.create_timer(1.0, self.publish_state)
+        self.create_timer(3.0, self.log_status)  # Log status every 3 seconds during operation
 
         self.get_logger().info('=' * 60)
         self.get_logger().info('🧹 Adaptive Coverage Planner Started')
@@ -346,6 +348,10 @@ class AdaptiveCoveragePlanner(Node):
         """Execute turning phase - rotate to face target.
         Simple logic: turn the shortest way to face target.
         """
+        # Safety check
+        if self.movement_phase != 'turning':
+            return
+            
         # Calculate angle to target
         dx = self.target_x - self.robot_x
         dy = self.target_y - self.robot_y
@@ -364,12 +370,9 @@ class AdaptiveCoveragePlanner(Node):
         target_angle = math.atan2(dy, dx)
         angle_error = self.normalize_angle(target_angle - self.robot_yaw)
         
-        # Debug log (less verbose)
-        self.get_logger().debug(f'Turn: error={math.degrees(angle_error):.1f}°, dist={distance_to_target:.2f}m')
-        
         if abs(angle_error) < self.angle_tolerance:
             # Turn complete - IMMEDIATELY start driving forward (no stop!)
-            self.get_logger().info(f'   ➡️ Turn complete, driving straight ({distance_to_target:.2f}m)...')
+            self.get_logger().info(f'   ➡️ Turn complete (err={math.degrees(angle_error):.0f}°), driving {distance_to_target:.2f}m...')
             self.movement_phase = 'driving'
             self.drive_start_time = self.get_clock().now().nanoseconds / 1e9
             
@@ -378,20 +381,25 @@ class AdaptiveCoveragePlanner(Node):
             cmd.linear.x = self.linear_speed
             cmd.angular.z = 0.0
             self.cmd_vel_pub.publish(cmd)
+            self.get_logger().debug(f'   🚗 Sent drive cmd: linear={cmd.linear.x}, angular={cmd.angular.z}')
             return
         
-        # Simple: turn in the direction that reduces angle_error (shortest path)
+        # Turn in the direction that reduces angle_error (shortest path)
         cmd = Twist()
-        # Use constant turn speed for predictable behavior
         if angle_error > 0:
             cmd.angular.z = self.angular_speed   # Turn left (counter-clockwise)
         else:
             cmd.angular.z = -self.angular_speed  # Turn right (clockwise)
         
         self.cmd_vel_pub.publish(cmd)
+        self.get_logger().debug(f'   🔄 Turning: err={math.degrees(angle_error):.0f}° → cmd.angular.z={cmd.angular.z:.2f}')
 
     def execute_drive(self):
         """Execute driving phase - move straight to target."""
+        # Safety check
+        if self.movement_phase != 'driving':
+            return
+            
         dx = self.target_x - self.robot_x
         dy = self.target_y - self.robot_y
         distance = math.sqrt(dx*dx + dy*dy)
@@ -419,7 +427,7 @@ class AdaptiveCoveragePlanner(Node):
         
         # Only allow return to turning after minimum drive time AND if way off course
         # This prevents immediate re-turning after turn completes
-        if driving_time > self.min_drive_time and abs(angle_error) > 0.52:  # ~30 degrees
+        if driving_time > self.min_drive_time and abs(angle_error) > 0.7:  # ~40 degrees
             self.stop_robot()
             self.get_logger().info(f'   ↩️ Off course by {math.degrees(angle_error):.0f}° after {driving_time:.1f}s, re-aligning...')
             self.movement_phase = 'turning'
@@ -429,16 +437,15 @@ class AdaptiveCoveragePlanner(Node):
         cmd = Twist()
         cmd.linear.x = self.linear_speed
         
-        # Only apply angular correction if error is significant (> 10°)
+        # Only apply angular correction if error is significant (> 15°)
         # Keep correction very small to avoid zigzag behavior
-        if abs(angle_error) > 0.17:  # ~10 degrees
-            cmd.angular.z = angle_error * 0.2  # Very gentle correction
+        if abs(angle_error) > 0.26:  # ~15 degrees
+            cmd.angular.z = angle_error * 0.15  # Very gentle correction
         else:
             cmd.angular.z = 0.0  # Go straight
         
-        # Log progress periodically (every ~1 second)
-        if int(driving_time) != int(driving_time - 0.1):
-            self.get_logger().info(f'   🚗 Driving: {distance:.2f}m to go, heading err={math.degrees(angle_error):.0f}°')
+        # Log every drive command for debugging
+        self.get_logger().debug(f'   🚗 Drive: dist={distance:.2f}m, err={math.degrees(angle_error):.0f}°, cmd=({cmd.linear.x:.2f}, {cmd.angular.z:.2f})')
         
         self.cmd_vel_pub.publish(cmd)
 
@@ -447,6 +454,30 @@ class AdaptiveCoveragePlanner(Node):
         msg = String()
         msg.data = self.coverage_state
         self.state_pub.publish(msg)
+
+    def log_status(self):
+        """Log periodic status during operation - useful for debugging."""
+        if self.coverage_state != CoverageState.RUNNING:
+            return
+        
+        # Calculate distance to current target
+        if self.waypoints and self.current_waypoint_idx < len(self.waypoints):
+            dx = self.target_x - self.robot_x
+            dy = self.target_y - self.robot_y
+            dist_to_target = math.sqrt(dx*dx + dy*dy)
+            target_angle = math.atan2(dy, dx)
+            angle_error = self.normalize_angle(target_angle - self.robot_yaw)
+            
+            progress = (self.current_waypoint_idx + 1) / len(self.waypoints) * 100
+            
+            self.get_logger().info(
+                f'📊 Status: {self.movement_phase.upper()} | '
+                f'WP {self.current_waypoint_idx + 1}/{len(self.waypoints)} ({progress:.0f}%) | '
+                f'Pos: ({self.robot_x:.2f}, {self.robot_y:.2f}) | '
+                f'Target: ({self.target_x:.2f}, {self.target_y:.2f}) | '
+                f'Dist: {dist_to_target:.2f}m | '
+                f'Heading err: {math.degrees(angle_error):.0f}°'
+            )
 
     def map_callback(self, msg: OccupancyGrid):
         """Store latest map."""
@@ -990,6 +1021,7 @@ class AdaptiveCoveragePlanner(Node):
         """Send next waypoint - uses direct drive (turn-then-straight) or Nav2."""
         # Check if we should continue
         if self.coverage_state != CoverageState.RUNNING:
+            self.get_logger().warn(f'   send_next_goal called but state is {self.coverage_state}')
             return
             
         if self.current_waypoint_idx >= len(self.waypoints):
@@ -1020,6 +1052,9 @@ class AdaptiveCoveragePlanner(Node):
             # Start the turn phase
             self.get_logger().info(f'   🔄 Turning to face target...')
             self.movement_phase = 'turning'
+            
+            # IMMEDIATELY send first turn command to start moving!
+            self.execute_turn()
         else:
             # Nav2 mode (fallback)
             self.send_goal_nav2(x, y, yaw)

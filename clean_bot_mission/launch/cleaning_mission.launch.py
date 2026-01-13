@@ -37,6 +37,7 @@ def generate_launch_description():
     coverage_width = LaunchConfiguration('coverage_width', default='0.14')
     skip_exploration = LaunchConfiguration('skip_exploration', default='false')
     use_rviz = LaunchConfiguration('use_rviz', default='false')
+    log_level = LaunchConfiguration('log_level', default='info')
     
     # Hardware arguments (pass through to hardware launch)
     arduino_port = LaunchConfiguration('arduino_port', default='/dev/ttyACM0')
@@ -50,6 +51,8 @@ def generate_launch_description():
                               description='Skip exploration and use existing map'),
         DeclareLaunchArgument('use_rviz', default_value='false',
                               description='Launch RViz for visualization'),
+        DeclareLaunchArgument('log_level', default_value='info',
+                              description='Log level: debug, info, warn, error'),
         DeclareLaunchArgument('arduino_port', default_value='/dev/ttyACM0',
                               description='Arduino serial port'),
         DeclareLaunchArgument('lidar_port', default_value='/dev/ttyUSB0',
@@ -81,6 +84,7 @@ def generate_launch_description():
             executable='full_mission',
             name='full_mission_controller',
             output='screen',
+            arguments=['--ros-args', '--log-level', log_level],
             parameters=[{
                 'coverage_width': coverage_width,
                 'auto_start': False,  # Wait for Telegram command
