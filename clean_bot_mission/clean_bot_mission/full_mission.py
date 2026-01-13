@@ -154,9 +154,7 @@ class FullMissionController(Node):
 
         # ===================== Publishers =====================
         self.state_pub = self.create_publisher(String, 'mission_state', 10)
-        # Publish to cmd_vel_nav so the emergency_stop node can act as the single
-        # safety/mux layer that outputs to cmd_vel.
-        self.cmd_vel_pub = self.create_publisher(Twist, 'cmd_vel_nav', 10)
+        self.cmd_vel_pub = self.create_publisher(Twist, 'cmd_vel', 10)
         
         # Control publishers for sub-nodes
         self.exploration_control_pub = self.create_publisher(String, 'exploration_control', 10)
@@ -291,32 +289,12 @@ class FullMissionController(Node):
             self.get_logger().warn(f'⚠️ Not currently scanning (state: {self.state})')
 
     def handle_start_clean(self):
-        """Handle start_clean command (Arduino autonomous wall-avoid; no scan required)."""
+        """Handle start_clean command (Plan B random)."""
         if self.state in [MissionState.WAITING_FOR_CLEAN, MissionState.WAITING_FOR_SCAN]:
             if self.state == MissionState.WAITING_FOR_SCAN:
                 self.get_logger().info('⚠️ Starting cleaning without completing scan first')
-
-            # Stop any ROS-side motion loops (safety)
-            with self._square_lock:
-                if self._square_active:
-                    self._square_stop_internal(deactivate_cleaning=False)
-                if self._random_active:
-                    self._random_stop_internal(deactivate_cleaning=False)
-            self.stop_robot()
-
-            self.get_logger().info('🧹 Starting CLEAN (Arduino autonomous wall-avoid)...')
-
-            # Activate cleaning hardware via Arduino
-            arduino_msg = String()
-            arduino_msg.data = 'start_clean'
-            self.arduino_clean_pub.publish(arduino_msg)
-
-            # Enable Arduino autonomous driving
-            auto_msg = String()
-            auto_msg.data = 'auto_start'
-            self.arduino_clean_pub.publish(auto_msg)
-
-            self.state = MissionState.COVERAGE
+            # Default cleaning is random loop (no scan/map required)
+            self.start_random_cleaning_loop()
         else:
             self.get_logger().warn(f'⚠️ Cannot start clean in state: {self.state}')
 
@@ -367,11 +345,6 @@ class FullMissionController(Node):
             self.stop_clean_trigger_pub.publish(Empty())  # Legacy topic
             # Send to arduino_driver via arduino_command topic
             arduino_msg = String()
-            # First stop Arduino autonomous driving, then stop cleaning hardware
-            auto_msg = String()
-            auto_msg.data = 'auto_stop'
-            self.arduino_clean_pub.publish(auto_msg)
-
             arduino_msg.data = 'stop_clean'
             self.arduino_clean_pub.publish(arduino_msg)
 
@@ -699,13 +672,11 @@ class FullMissionController(Node):
         self._random_phase = 'turn'
         self._random_phase_end_monotonic = time.monotonic() + max(0.0, turn_duration)
         self._random_phase_remaining = 0.0
-        self.get_logger().debug(f'🎲 Random: turn {angle:+.2f}rad for {turn_duration:.2f}s')
 
     def _random_start_drive(self):
         self._random_phase = 'drive'
         self._random_phase_end_monotonic = time.monotonic() + max(0.0, float(self.random_drive_time))
         self._random_phase_remaining = 0.0
-        self.get_logger().debug(f'🎲 Random: drive for {self.random_drive_time:.1f}s')
 
     def _random_stop_internal(self, deactivate_cleaning: bool):
         self._random_active = False

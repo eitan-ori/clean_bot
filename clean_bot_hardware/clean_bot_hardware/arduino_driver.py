@@ -113,10 +113,6 @@ class ArduinoDriver(Node):
         # ===================== State Variables =====================
         # Last command time (for watchdog)
         self.last_cmd_time = self.get_clock().now()
-
-        # When True, Arduino runs its own autonomous wall-avoid logic.
-        # In this mode we must not stream PWM commands from /cmd_vel.
-        self.arduino_autonomous_active = False
         
         # ===================== Timer =====================
         timer_period = 1.0 / publish_rate
@@ -145,14 +141,6 @@ class ArduinoDriver(Node):
         elif command == 'stop_clean':
             self.get_logger().info('🧹 Sending CLEAN_STOP to Arduino')
             self.send_command('CLEAN_STOP')
-        elif command == 'auto_start':
-            self.get_logger().info('🤖 Sending AUTO_START to Arduino')
-            self.arduino_autonomous_active = True
-            self.send_command('AUTO_START')
-        elif command == 'auto_stop':
-            self.get_logger().info('🤖 Sending AUTO_STOP to Arduino')
-            self.arduino_autonomous_active = False
-            self.send_command('AUTO_STOP')
 
     def arduino_command_callback(self, msg: String):
         """Handle arduino commands from full_mission controller."""
@@ -165,21 +153,9 @@ class ArduinoDriver(Node):
         elif command == 'stop_clean':
             self.get_logger().info('🧹 Sending CLEAN_STOP to Arduino')
             self.send_command('CLEAN_STOP')
-        elif command == 'auto_start':
-            self.get_logger().info('🤖 Sending AUTO_START to Arduino')
-            self.arduino_autonomous_active = True
-            self.send_command('AUTO_START')
-        elif command == 'auto_stop':
-            self.get_logger().info('🤖 Sending AUTO_STOP to Arduino')
-            self.arduino_autonomous_active = False
-            self.send_command('AUTO_STOP')
 
     def cmd_vel_callback(self, msg: Twist):
         """Convert Twist message to motor PWM commands and send to Arduino."""
-        if self.arduino_autonomous_active:
-            # Arduino is driving itself (wall-avoid). Do not override.
-            return
-
         linear = msg.linear.x
         angular = msg.angular.z
 

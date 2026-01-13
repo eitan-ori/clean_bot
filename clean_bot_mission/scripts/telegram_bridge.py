@@ -25,10 +25,9 @@ Telegram Commands:
     /start - Show available commands
     /scan - Start exploration/scanning
     /stopscan - Stop scanning
-    /clean - Start cleaning (Arduino wall-avoid)
+    /clean - Start cleaning (random)
     /coverage - Start cleaning (map-based)
     /stopclean - Stop cleaning
-    /clean_stop - Stop cleaning (alias)
     /home - Return to home position
     /reset - Reset mission to initial state
     /pause - Pause current operation
@@ -289,7 +288,7 @@ Available commands:
 /stopscan - Stop scanning
 
 *Cleaning (Coverage):*
-/clean - Start cleaning (Arduino wall-avoid)
+/clean - Start cleaning (random)
 /coverage - Start cleaning (map-based)
 /stopclean - Stop cleaning
 
@@ -325,14 +324,11 @@ async def cmd_stopscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start cleaning (Arduino autonomous wall-avoid)."""
+    """Start cleaning (Plan B random)."""
     if not await check_auth(update):
         return
     ros_node.send_command('start_clean')
-    await update.message.reply_text(
-        '🧹 Starting cleaning (Arduino autonomous)...\n'
-        'Arduino will drive and avoid walls using the ultrasonic sensor.'
-    )
+    await update.message.reply_text('🧹 Starting cleaning (random)...\nRobot will random-walk: turn + drive repeatedly.')
 
 
 async def cmd_coverage(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -349,11 +345,6 @@ async def cmd_stopclean(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     ros_node.send_command('stop_clean')
     await update.message.reply_text('🛑 Stopping cleaning...')
-
-
-async def cmd_clean_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Stop cleaning (alias for stop_clean)."""
-    await cmd_stopclean(update, context)
 
 
 async def cmd_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -479,10 +470,9 @@ async def post_init(application):
         BotCommand("start", "Show welcome and commands"),
         BotCommand("scan", "Start exploration"),
         BotCommand("stopscan", "Stop exploration"),
-        BotCommand("clean", "Start cleaning (Arduino wall-avoid)"),
+        BotCommand("clean", "Start cleaning (random)"),
         BotCommand("coverage", "Start cleaning (map-based)"),
         BotCommand("stopclean", "Stop cleaning"),
-        BotCommand("clean_stop", "Stop cleaning (alias)"),
         BotCommand("home", "Return to home"),
         BotCommand("reset", "Reset mission"),
         BotCommand("pause", "Pause operation"),
@@ -528,7 +518,6 @@ def main():
     application.add_handler(CommandHandler('clean', cmd_clean))
     application.add_handler(CommandHandler('coverage', cmd_coverage))
     application.add_handler(CommandHandler('stopclean', cmd_stopclean))
-    application.add_handler(CommandHandler('clean_stop', cmd_clean_stop))
     application.add_handler(CommandHandler('home', cmd_home))
     application.add_handler(CommandHandler('reset', cmd_reset))
     application.add_handler(CommandHandler('pause', cmd_pause))
