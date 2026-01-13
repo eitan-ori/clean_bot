@@ -136,8 +136,8 @@ class AdaptiveCoveragePlanner(Node):
         self.waypoint_markers_pub = self.create_publisher(MarkerArray, 'coverage_waypoints', 10)
         self.state_pub = self.create_publisher(String, 'coverage_state', 10)
         
-        # Direct movement publisher (bypasses Nav2)
-        self.cmd_vel_pub = self.create_publisher(Twist, 'cmd_vel_nav', 10)
+        # Direct movement publisher - send directly to cmd_vel
+        self.cmd_vel_pub = self.create_publisher(Twist, 'cmd_vel', 10)
         
         # Odometry subscriber for position feedback
         self.odom_sub = self.create_subscription(
@@ -348,11 +348,11 @@ class AdaptiveCoveragePlanner(Node):
 
     def execute_turn(self):
         """
-        NEW APPROACH: Always drive forward with steering correction.
-        Only do pure rotation if pointing completely wrong direction (>90°).
+        Drive toward target with steering. Pure rotation only if >90° off.
         """
         # Safety check
         if self.movement_phase != 'turning':
+            self.get_logger().warn(f'execute_turn called but phase={self.movement_phase}')
             return
             
         # Calculate to target
@@ -360,9 +360,11 @@ class AdaptiveCoveragePlanner(Node):
         dy = self.target_y - self.robot_y
         distance_to_target = math.sqrt(dx*dx + dy*dy)
         
+        self.get_logger().info(f'   📍 pos=({self.robot_x:.2f},{self.robot_y:.2f}) → target=({self.target_x:.2f},{self.target_y:.2f}) dist={distance_to_target:.2f}m')
+        
         # If we're already very close to target, move to next
         if distance_to_target < self.position_tolerance:
-            self.get_logger().info(f'   ✅ Already at target')
+            self.get_logger().info(f'   ✅ At target, next waypoint')
             self.movement_phase = 'idle'
             self.successful_waypoints += 1
             self.current_waypoint_idx += 1
@@ -373,37 +375,25 @@ class AdaptiveCoveragePlanner(Node):
         target_angle = math.atan2(dy, dx)
         angle_error = self.normalize_angle(target_angle - self.robot_yaw)
         
-        self.get_logger().info(f'   🎯 Target: ({self.target_x:.2f}, {self.target_y:.2f}), '
-                               f'Robot: ({self.robot_x:.2f}, {self.robot_y:.2f}), '
-                               f'Yaw: {math.degrees(self.robot_yaw):.0f}°, '
-                               f'Target angle: {math.degrees(target_angle):.0f}°, '
-                               f'Error: {math.degrees(angle_error):.0f}°')
-        
-        # If angle error is HUGE (>90°), do pure rotation first
-        if abs(angle_error) > 1.57:  # >90 degrees
-            cmd = Twist()
-            cmd.linear.x = 0.0
-            if angle_error > 0:
-                cmd.angular.z = self.angular_speed
-            else:
-                cmd.angular.z = -self.angular_speed
-            self.cmd_vel_pub.publish(cmd)
-            self.get_logger().info(f'   🔄 Big turn needed: {math.degrees(angle_error):.0f}°')
-            return
-        
-        # Otherwise: DRIVE FORWARD with steering correction!
-        # This is much more robust than turn-then-drive
-        self.get_logger().info(f'   ➡️ Driving with correction...')
-        self.movement_phase = 'driving'
-        self.drive_start_time = self.get_clock().now().nanoseconds / 1e9
-        
+        # Build command
         cmd = Twist()
-        cmd.linear.x = self.linear_speed
-        # Proportional steering - stronger correction for bigger errors
-        cmd.angular.z = angle_error * 0.5  # P-controller for steering
-        # Limit steering
-        cmd.angular.z = max(-self.angular_speed, min(self.angular_speed, cmd.angular.z))
+        
+        # If angle error is HUGE (>90°), do pure rotation
+        if abs(angle_error) > 1.57:
+            cmd.linear.x = 0.0
+            cmd.angular.z = 0.3 if angle_error > 0 else -0.3
+            self.get_logger().info(f'   🔄 ROTATE: err={math.degrees(angle_error):.0f}° cmd=({cmd.linear.x},{cmd.angular.z:.2f})')
+        else:
+            # DRIVE forward with steering
+            cmd.linear.x = 0.12  # Fixed speed
+            cmd.angular.z = max(-0.3, min(0.3, angle_error * 0.5))
+            self.get_logger().info(f'   🚗 DRIVE: err={math.degrees(angle_error):.0f}° cmd=({cmd.linear.x},{cmd.angular.z:.2f})')
+            self.movement_phase = 'driving'
+            self.drive_start_time = self.get_clock().now().nanoseconds / 1e9
+        
+        # PUBLISH THE COMMAND
         self.cmd_vel_pub.publish(cmd)
+        self.get_logger().info(f'   ✉️ SENT to cmd_vel')
 
     def execute_drive(self):
         """Execute driving phase - drive toward target with steering."""
