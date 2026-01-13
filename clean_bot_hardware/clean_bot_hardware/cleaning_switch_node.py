@@ -37,7 +37,7 @@ class CleaningSwitchNode(Node):
         # ===================== Parameters =====================
         self.declare_parameter('servo_pin', 18)
         self.declare_parameter('relay_pin', 17)
-        self.declare_parameter('relay_active_high', False) # Set to True if relay turns ON with 3.3V
+        self.declare_parameter('relay_active_high', True) # Set to True if relay turns ON with 3.3V
         
         servo_pin = self.get_parameter('servo_pin').value
         relay_pin = self.get_parameter('relay_pin').value
