@@ -87,8 +87,8 @@ class AdaptiveCoveragePlanner(Node):
         # Direct movement parameters (turn-then-drive)
         self.declare_parameter('use_direct_drive', True)         # Use direct cmd_vel instead of Nav2
         self.declare_parameter('linear_speed', 0.12)             # Forward speed (m/s)
-        self.declare_parameter('angular_speed', 0.10)            # Turn speed (rad/s) - VERY SLOW
-        self.declare_parameter('angle_tolerance', 0.5)           # Radians (~30°) - approximate is fine
+        self.declare_parameter('angular_speed', 0.25)            # Turn speed (rad/s)
+        self.declare_parameter('angle_tolerance', 0.15)          # Radians (~8.6°) - precise turning
         self.declare_parameter('position_tolerance', 0.08)       # Meters (8cm)
         
         self.coverage_width = self.get_parameter('coverage_width').value
@@ -170,6 +170,8 @@ class AdaptiveCoveragePlanner(Node):
         self.target_y = 0.0
         self.target_yaw = 0.0
         self.last_turn_direction = 1  # 1 = counter-clockwise (left), -1 = clockwise (right)
+        self.last_cmd_time = 0.0  # For rate limiting command publishing
+        self.control_rate = 10.0  # Hz - how often to send cmd_vel commands
         
         # Statistics
         self.successful_waypoints = 0
@@ -319,11 +321,15 @@ class AdaptiveCoveragePlanner(Node):
         self.odom_received = True
         
         # If we're in direct drive mode and actively moving, run the control loop
+        # Rate limit to avoid flooding cmd_vel
         if self.use_direct_drive and self.coverage_state == CoverageState.RUNNING:
-            if self.movement_phase == 'turning':
-                self.execute_turn()
-            elif self.movement_phase == 'driving':
-                self.execute_drive()
+            current_time = self.get_clock().now().nanoseconds / 1e9
+            if current_time - self.last_cmd_time >= 1.0 / self.control_rate:
+                self.last_cmd_time = current_time
+                if self.movement_phase == 'turning':
+                    self.execute_turn()
+                elif self.movement_phase == 'driving':
+                    self.execute_drive()
 
     def normalize_angle(self, angle):
         """Normalize angle to [-pi, pi]."""
@@ -340,22 +346,34 @@ class AdaptiveCoveragePlanner(Node):
         # Calculate angle to target
         dx = self.target_x - self.robot_x
         dy = self.target_y - self.robot_y
-        target_angle = math.atan2(dy, dx)
+        distance_to_target = math.sqrt(dx*dx + dy*dy)
         
+        # If we're already very close to target, skip turning and go directly
+        if distance_to_target < self.position_tolerance:
+            self.get_logger().info(f'   ✅ Already at target, skipping turn')
+            self.movement_phase = 'idle'
+            self.successful_waypoints += 1
+            self.current_waypoint_idx += 1
+            self.is_navigating = False
+            self.send_next_goal()
+            return
+        
+        target_angle = math.atan2(dy, dx)
         angle_error = self.normalize_angle(target_angle - self.robot_yaw)
         
-        # Debug log
-        self.get_logger().debug(f'Turn: error={math.degrees(angle_error):.1f}° tol={math.degrees(self.angle_tolerance):.1f}°')
+        # Debug log (less verbose)
+        self.get_logger().debug(f'Turn: error={math.degrees(angle_error):.1f}°, dist={distance_to_target:.2f}m')
         
         if abs(angle_error) < self.angle_tolerance:
             # Turn complete, start driving
             self.stop_robot()
-            self.get_logger().info(f'   🔄 Turn complete (err={math.degrees(angle_error):.0f}°), driving straight...')
+            self.get_logger().info(f'   ➡️ Turn complete, driving straight ({distance_to_target:.2f}m)...')
             self.movement_phase = 'driving'
             return
         
         # Simple: turn in the direction that reduces angle_error (shortest path)
         cmd = Twist()
+        # Use constant turn speed for predictable behavior
         if angle_error > 0:
             cmd.angular.z = self.angular_speed   # Turn left (counter-clockwise)
         else:
@@ -372,7 +390,7 @@ class AdaptiveCoveragePlanner(Node):
         if distance < self.position_tolerance:
             # Waypoint reached!
             self.stop_robot()
-            self.get_logger().info(f'   ✅ Reached waypoint')
+            self.get_logger().info(f'   ✅ Reached waypoint (dist={distance:.3f}m)')
             self.movement_phase = 'idle'
             self.successful_waypoints += 1
             self.current_waypoint_idx += 1
@@ -386,17 +404,27 @@ class AdaptiveCoveragePlanner(Node):
         target_angle = math.atan2(dy, dx)
         angle_error = self.normalize_angle(target_angle - self.robot_yaw)
         
-        # If we've drifted too much, go back to turning
-        if abs(angle_error) > self.angle_tolerance * 3:
-            self.get_logger().info(f'   ↩️ Correcting heading...')
+        # If we've drifted too much (more than 25°), go back to turning
+        # This ensures we stay on course and don't spiral
+        if abs(angle_error) > 0.44:  # ~25 degrees
+            self.stop_robot()
+            self.get_logger().info(f'   ↩️ Off course by {math.degrees(angle_error):.0f}°, re-aligning...')
             self.movement_phase = 'turning'
             return
         
-        # Drive forward with slight angular correction
+        # Drive forward with minimal angular correction
         cmd = Twist()
         cmd.linear.x = self.linear_speed
-        # Small proportional correction to stay on course
-        cmd.angular.z = angle_error * 0.5  # Gentle correction
+        
+        # Only apply angular correction if error is significant (> 5°)
+        # Keep correction very small to avoid zigzag behavior
+        if abs(angle_error) > 0.087:  # ~5 degrees
+            cmd.angular.z = angle_error * 0.3  # Very gentle correction
+        else:
+            cmd.angular.z = 0.0  # Go straight
+        
+        # Log progress periodically
+        self.get_logger().debug(f'   ➡️ Driving: dist={distance:.2f}m, err={math.degrees(angle_error):.1f}°')
         
         self.cmd_vel_pub.publish(cmd)
 
