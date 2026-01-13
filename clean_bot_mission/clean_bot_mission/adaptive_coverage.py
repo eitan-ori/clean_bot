@@ -44,8 +44,8 @@ from rclpy.action import ActionClient
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 
 from nav2_msgs.action import NavigateToPose
-from nav_msgs.msg import OccupancyGrid, Path
-from geometry_msgs.msg import PoseStamped
+from nav_msgs.msg import OccupancyGrid, Path, Odometry
+from geometry_msgs.msg import PoseStamped, Twist
 from std_msgs.msg import Bool, String
 from visualization_msgs.msg import Marker, MarkerArray
 
@@ -84,6 +84,13 @@ class AdaptiveCoveragePlanner(Node):
         self.declare_parameter('min_region_area', 0.02)          # Min area to cover (m²) - lowered for small spaces
         self.declare_parameter('max_retries', 1)                 # Number of times to retry missed areas
         
+        # Direct movement parameters (turn-then-drive)
+        self.declare_parameter('use_direct_drive', True)         # Use direct cmd_vel instead of Nav2
+        self.declare_parameter('linear_speed', 0.12)             # Forward speed (m/s)
+        self.declare_parameter('angular_speed', 0.4)             # Turn speed (rad/s)
+        self.declare_parameter('angle_tolerance', 0.1)           # Radians (~6 degrees)
+        self.declare_parameter('position_tolerance', 0.08)       # Meters (8cm)
+        
         self.coverage_width = self.get_parameter('coverage_width').value
         self.overlap_ratio = self.get_parameter('overlap_ratio').value
         self.robot_radius = self.get_parameter('robot_radius').value
@@ -92,10 +99,17 @@ class AdaptiveCoveragePlanner(Node):
         self.min_region_area = self.get_parameter('min_region_area').value
         self.max_retries = self.get_parameter('max_retries').value
         
+        # Direct movement parameters
+        self.use_direct_drive = self.get_parameter('use_direct_drive').value
+        self.linear_speed = self.get_parameter('linear_speed').value
+        self.angular_speed = self.get_parameter('angular_speed').value
+        self.angle_tolerance = self.get_parameter('angle_tolerance').value
+        self.position_tolerance = self.get_parameter('position_tolerance').value
+        
         # Effective step between lines
         self.step_size = self.coverage_width * (1 - self.overlap_ratio)
 
-        # ===================== Action Client =====================
+        # ===================== Action Client (fallback) =====================
         self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
 
         # ===================== Subscribers =====================
@@ -119,6 +133,13 @@ class AdaptiveCoveragePlanner(Node):
         self.coverage_path_pub = self.create_publisher(Path, 'coverage_path', 10)
         self.waypoint_markers_pub = self.create_publisher(MarkerArray, 'coverage_waypoints', 10)
         self.state_pub = self.create_publisher(String, 'coverage_state', 10)
+        
+        # Direct movement publisher (bypasses Nav2)
+        self.cmd_vel_pub = self.create_publisher(Twist, 'cmd_vel_nav', 10)
+        
+        # Odometry subscriber for position feedback
+        self.odom_sub = self.create_subscription(
+            Odometry, 'odom', self.odom_callback, 10)
 
         # ===================== State =====================
         self.coverage_state = CoverageState.IDLE
@@ -136,6 +157,18 @@ class AdaptiveCoveragePlanner(Node):
         
         # For pause/resume
         self.current_goal_handle = None
+        
+        # Robot pose (from odometry)
+        self.robot_x = 0.0
+        self.robot_y = 0.0
+        self.robot_yaw = 0.0
+        self.odom_received = False
+        
+        # Movement state for direct drive
+        self.movement_phase = 'idle'  # 'idle', 'turning', 'driving'
+        self.target_x = 0.0
+        self.target_y = 0.0
+        self.target_yaw = 0.0
         
         # Statistics
         self.successful_waypoints = 0
@@ -244,7 +277,12 @@ class AdaptiveCoveragePlanner(Node):
         self.start_time = None
 
     def cancel_current_goal(self):
-        """Cancel the current navigation goal."""
+        """Cancel the current navigation goal and stop robot."""
+        # Stop direct movement
+        self.movement_phase = 'idle'
+        self.stop_robot()
+        
+        # Cancel Nav2 goal if active
         if self.current_goal_handle is not None:
             self.get_logger().info('   🛑 Canceling current goal...')
             try:
@@ -253,6 +291,101 @@ class AdaptiveCoveragePlanner(Node):
             except Exception as e:
                 self.get_logger().warn(f'   Could not cancel goal: {e}')
             self.current_goal_handle = None
+
+    def stop_robot(self):
+        """Send zero velocity to stop the robot."""
+        stop_cmd = Twist()
+        self.cmd_vel_pub.publish(stop_cmd)
+
+    def odom_callback(self, msg: Odometry):
+        \"\"\"Update robot pose from odometry.\"\"\"
+        self.robot_x = msg.pose.pose.position.x
+        self.robot_y = msg.pose.pose.position.y
+        
+        # Extract yaw from quaternion
+        q = msg.pose.pose.orientation
+        siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
+        cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+        self.robot_yaw = math.atan2(siny_cosp, cosy_cosp)
+        
+        self.odom_received = True
+        
+        # If we're in direct drive mode and actively moving, run the control loop
+        if self.use_direct_drive and self.coverage_state == CoverageState.RUNNING:
+            if self.movement_phase == 'turning':
+                self.execute_turn()
+            elif self.movement_phase == 'driving':
+                self.execute_drive()
+
+    def normalize_angle(self, angle):
+        \"\"\"Normalize angle to [-pi, pi].\"\"\"
+        while angle > math.pi:
+            angle -= 2.0 * math.pi
+        while angle < -math.pi:
+            angle += 2.0 * math.pi
+        return angle
+
+    def execute_turn(self):
+        \"\"\"Execute turning phase - rotate to face target.\"\"\"
+        # Calculate angle to target
+        dx = self.target_x - self.robot_x
+        dy = self.target_y - self.robot_y
+        target_angle = math.atan2(dy, dx)
+        
+        angle_error = self.normalize_angle(target_angle - self.robot_yaw)
+        
+        if abs(angle_error) < self.angle_tolerance:
+            # Turn complete, start driving
+            self.stop_robot()
+            self.get_logger().info(f'   🔄 Turn complete, driving straight...')
+            self.movement_phase = 'driving'
+            return
+        
+        # Turn towards target
+        cmd = Twist()
+        if angle_error > 0:
+            cmd.angular.z = self.angular_speed
+        else:
+            cmd.angular.z = -self.angular_speed
+        
+        self.cmd_vel_pub.publish(cmd)
+
+    def execute_drive(self):
+        \"\"\"Execute driving phase - move straight to target.\"\"\"
+        dx = self.target_x - self.robot_x
+        dy = self.target_y - self.robot_y
+        distance = math.sqrt(dx*dx + dy*dy)
+        
+        if distance < self.position_tolerance:
+            # Waypoint reached!
+            self.stop_robot()
+            self.get_logger().info(f'   ✅ Reached waypoint')
+            self.movement_phase = 'idle'
+            self.successful_waypoints += 1
+            self.current_waypoint_idx += 1
+            self.is_navigating = False
+            
+            # Move to next waypoint
+            self.send_next_goal()
+            return
+        
+        # Check if we're still facing the right direction
+        target_angle = math.atan2(dy, dx)
+        angle_error = self.normalize_angle(target_angle - self.robot_yaw)
+        
+        # If we've drifted too much, go back to turning
+        if abs(angle_error) > self.angle_tolerance * 3:
+            self.get_logger().info(f'   ↩️ Correcting heading...')
+            self.movement_phase = 'turning'
+            return
+        
+        # Drive forward with slight angular correction
+        cmd = Twist()
+        cmd.linear.x = self.linear_speed
+        # Small proportional correction to stay on course
+        cmd.angular.z = angle_error * 0.5  # Gentle correction
+        
+        self.cmd_vel_pub.publish(cmd)
 
     def publish_state(self):
         """Publish current coverage state."""
