@@ -38,6 +38,9 @@ slam_toolbox:
     base_frame: base_link
     scan_topic: /scan
     mode: mapping # localization
+    
+    # TF Publishing - CRITICAL! Without this, map frame doesn't exist
+    transform_publish_period: 0.02  # Publish map->odom TF at 50 Hz
 
     # Mapping / SLAM Params
     map_update_interval: 1.0
