@@ -70,7 +70,7 @@ except ImportError:
     sys.exit(1)
 
 # ==================== USER SETTINGS ====================
-TELEGRAM_TOKEN = '7926323441:AAEBdGLAdAkr1KZbVOrx10Aw_pjOTSFZa3o'  # Your bot token from BotFather
+TELEGRAM_TOKEN = '8604621353:AAG323rLiMZrc0A1vcyCepDalC_h3o7Fb0Q'  # Your bot token from BotFather
 ALLOWED_USER_IDS = None  # Set to [123456789] to restrict access, or None for all users
 # =======================================================
 
