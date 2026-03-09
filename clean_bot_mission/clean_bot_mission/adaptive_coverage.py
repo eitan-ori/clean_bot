@@ -467,7 +467,7 @@ class AdaptiveCoveragePlanner(Node):
         """
         # YAW OFFSET: Robot's physical forward direction is 90° off from expected
         # Positive = counterclockwise correction
-        YAW_OFFSET = math.pi / 2  # 90 degrees
+        YAW_OFFSET = -math.pi / 2  # 90 degrees
         
         try:
             tf = self.tf_buffer.lookup_transform(
