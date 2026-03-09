@@ -154,8 +154,15 @@ class AdaptiveCoveragePlanner(Node):
 
         # ===================== Publishers =====================
         self.coverage_complete_pub = self.create_publisher(Bool, 'coverage_complete', 10)
-        self.coverage_path_pub = self.create_publisher(Path, 'coverage_path', 10)
-        self.waypoint_markers_pub = self.create_publisher(MarkerArray, 'coverage_waypoints', 10)
+        
+        # Use TRANSIENT_LOCAL so RViz can receive even if it subscribes late
+        latching_qos = QoSProfile(
+            depth=1,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            reliability=ReliabilityPolicy.RELIABLE
+        )
+        self.coverage_path_pub = self.create_publisher(Path, 'coverage_path', latching_qos)
+        self.waypoint_markers_pub = self.create_publisher(MarkerArray, 'coverage_waypoints', latching_qos)
         self.state_pub = self.create_publisher(String, 'coverage_state', 10)
         
         # Direct movement publisher (bypasses Nav2)
@@ -216,6 +223,7 @@ class AdaptiveCoveragePlanner(Node):
 
         # ===================== Timer =====================
         self.create_timer(1.0, self.publish_state)
+        self.create_timer(2.0, self.republish_visualization)  # Keep path visible in RViz
 
         self.get_logger().info('=' * 60)
         self.get_logger().info('🧹 Adaptive Coverage Planner Started')
@@ -544,6 +552,12 @@ class AdaptiveCoveragePlanner(Node):
         msg = String()
         msg.data = self.coverage_state
         self.state_pub.publish(msg)
+
+    def republish_visualization(self):
+        """Periodically republish path for RViz (in case of reconnection)."""
+        if self.waypoints and self.coverage_state == CoverageState.RUNNING:
+            self.publish_coverage_path()
+            self.publish_waypoint_markers()
 
     def map_callback(self, msg: OccupancyGrid):
         """Store latest map."""

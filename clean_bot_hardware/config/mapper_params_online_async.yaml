@@ -38,9 +38,6 @@ slam_toolbox:
     base_frame: base_link
     scan_topic: /scan
     mode: mapping # localization
-    
-    # TF Publishing - CRITICAL! Without this, map frame doesn't exist
-    transform_publish_period: 0.02  # Publish map->odom TF at 50 Hz
 
     # Mapping / SLAM Params
     map_update_interval: 1.0
@@ -69,6 +66,10 @@ slam_toolbox:
     loop_match_maximum_variance_coarse: 5.0     # More tolerant
     loop_match_minimum_response_coarse: 0.25    # Lower threshold
     loop_match_minimum_response_fine: 0.35
+
+    # Transform Publishing - CRITICAL for navigation!
+    # Without this, SLAM won't publish map→odom TF and coverage will fail
+    transform_publish_period: 0.05
 
     # Probability / Clearing Params
     laserscan_adaptive_vals: false
