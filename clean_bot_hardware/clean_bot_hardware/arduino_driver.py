@@ -54,10 +54,8 @@ class ArduinoDriver(Node):
         self.declare_parameter('wheel_separation', 0.20)      # meters (distance between wheels)
 
         # Motor wiring/inversion (kept configurable)
-        # For differential drive, typically only ONE motor needs inversion
-        # because motors are mounted as mirror images of each other
         self.declare_parameter('invert_left_motor', True)
-        self.declare_parameter('invert_right_motor', False)  # Changed: try opposite
+        self.declare_parameter('invert_right_motor', True)
         
         # Frame IDs
         self.declare_parameter('ultrasonic_frame_id', 'ultrasonic_link')
@@ -161,18 +159,18 @@ class ArduinoDriver(Node):
         linear = msg.linear.x
         angular = msg.angular.z
 
+        # CRITICAL FIX: Negate angular to match robot's physical wiring
+        # The robot turns opposite to ROS convention without this
+        angular = -angular
+
         # PWM limits (tuned for this robot)
         MIN_PWM_FORWARD = 90  # Minimum to overcome friction
         MIN_PWM_ROTATE = 90   # Rotation - increased for more power
         MAX_PWM = 180         # Cap top speed - increased for more power
 
-        # Differential drive mixing:
-        # NOTE: Angular sign is NEGATED to match physical robot wiring
-        # Positive angular.z = turn left (counterclockwise) in ROS convention
-        # v_left  = v + w * (wheel_separation/2)  <- swapped sign
-        # v_right = v - w * (wheel_separation/2)  <- swapped sign
-        v_left = float(linear) + float(angular) * (self.wheel_separation / 2.0)
-        v_right = float(linear) - float(angular) * (self.wheel_separation / 2.0)
+        # Standard differential drive mixing:
+        v_left = float(linear) - float(angular) * (self.wheel_separation / 2.0)
+        v_right = float(linear) + float(angular) * (self.wheel_separation / 2.0)
 
         # Convert wheel speeds to PWM
         left_pwm = self._wheel_speed_to_pwm(v_left, linear, angular, MIN_PWM_FORWARD, MIN_PWM_ROTATE, MAX_PWM)
