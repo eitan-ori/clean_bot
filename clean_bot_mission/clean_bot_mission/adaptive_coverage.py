@@ -646,7 +646,7 @@ class AdaptiveCoveragePlanner(Node):
             return
         
         # Step 2.5: Densify waypoints - add intermediate points on each segment
-        self.waypoints = self.densify_waypoints(self.waypoints, max_segment_length=0.4)
+        self.waypoints = self.densify_waypoints(self.waypoints, max_segment_length=0.1)
         
         # Step 2.6: Orient waypoints - each waypoint yaw points toward the NEXT waypoint
         self.waypoints = self.orient_waypoints(self.waypoints)
