@@ -639,9 +639,12 @@ class AdaptiveCoveragePlanner(Node):
         self.mission_started = True
         self.coverage_state = CoverageState.RUNNING
         self.start_time = self.get_clock().now()
-        self.current_waypoint_idx = 0
+        
+        # Find nearest waypoint to robot's current position (converge to track)
+        self.current_waypoint_idx = self.find_nearest_waypoint_index()
         
         self.get_logger().info(f'✅ Generated {len(self.waypoints)} waypoints')
+        self.get_logger().info(f'📍 Starting from waypoint {self.current_waypoint_idx + 1} (nearest to robot)')
         self.get_logger().info('')
         self.get_logger().info('🚀 Starting coverage mission!')
         self.get_logger().info('-' * 60)
@@ -678,6 +681,30 @@ class AdaptiveCoveragePlanner(Node):
         
         self.get_logger().info(f'📐 Oriented {len(oriented)} waypoints toward next waypoint')
         return oriented
+
+    def find_nearest_waypoint_index(self) -> int:
+        """
+        Find the index of the waypoint nearest to robot's current position.
+        This allows the robot to converge to the coverage track from anywhere.
+        """
+        if not self.waypoints:
+            return 0
+        
+        # Get robot's current position in map frame
+        rx, ry, ryaw = self._get_robot_pose_map()
+        
+        min_dist = float('inf')
+        nearest_idx = 0
+        
+        for i, (wx, wy, wyaw) in enumerate(self.waypoints):
+            dist = math.sqrt((wx - rx)**2 + (wy - ry)**2)
+            if dist < min_dist:
+                min_dist = dist
+                nearest_idx = i
+        
+        self.get_logger().info(f'🎯 Robot at ({rx:.2f}, {ry:.2f}), nearest waypoint {nearest_idx + 1} at ({self.waypoints[nearest_idx][0]:.2f}, {self.waypoints[nearest_idx][1]:.2f}), distance: {min_dist:.2f}m')
+        
+        return nearest_idx
 
     def inflate_obstacles(self):
         """Inflate obstacles by robot radius for safe navigation."""
