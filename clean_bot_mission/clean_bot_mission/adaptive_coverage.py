@@ -78,9 +78,9 @@ class AdaptiveCoveragePlanner(Node):
         # ===================== Parameters =====================
         self.declare_parameter('coverage_width', 0.14)           # 14cm cleaning width (main suction)
         self.declare_parameter('overlap_ratio', 0.1)            # 15% overlap for safety
-        self.declare_parameter('robot_radius', 0.18)             # 18cm Main body radius
+        self.declare_parameter('robot_radius', 0.20)             # 20cm Main body radius
         # NOTE: Robot has a side brush (4cm radius) at front-left that extends reach.
-        # This allows cleaning edges even with 18cm radius body.
+        # This allows cleaning edges even with 20cm radius body.
         
         self.declare_parameter('timeout_per_waypoint', 90)       # Seconds per goal
         self.declare_parameter('start_on_exploration_complete', False)  # Wait for explicit start command
