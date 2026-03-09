@@ -465,6 +465,10 @@ class AdaptiveCoveragePlanner(Node):
 
         Falls back to the latest odom-based pose if TF lookup fails.
         """
+        # YAW OFFSET: Robot's physical forward direction is 90° off from expected
+        # Positive = counterclockwise correction
+        YAW_OFFSET = math.pi / 2  # 90 degrees
+        
         try:
             tf = self.tf_buffer.lookup_transform(
                 self.global_frame,
@@ -477,6 +481,7 @@ class AdaptiveCoveragePlanner(Node):
             siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
             cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
             yaw = math.atan2(siny_cosp, cosy_cosp)
+            yaw = self.normalize_angle(yaw + YAW_OFFSET)
             return x, y, yaw
         except Exception as e:
             if not self._tf_pose_warned:
@@ -484,7 +489,8 @@ class AdaptiveCoveragePlanner(Node):
                 self.get_logger().warn(
                     f'⚠️ TF pose lookup failed ({self.global_frame} <- {self.base_frame}); '
                     f'falling back to odom pose. Error: {e}')
-            return self.robot_x, self.robot_y, self.robot_yaw
+            yaw = self.normalize_angle(self.robot_yaw + YAW_OFFSET)
+            return self.robot_x, self.robot_y, yaw
 
     def normalize_angle(self, angle):
         """Normalize angle to [-pi, pi]."""
