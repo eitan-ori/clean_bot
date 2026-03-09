@@ -167,10 +167,12 @@ class ArduinoDriver(Node):
         MAX_PWM = 180         # Cap top speed - increased for more power
 
         # Differential drive mixing:
-        # v_left  = v - w * (wheel_separation/2)
-        # v_right = v + w * (wheel_separation/2)
-        v_left = float(linear) - float(angular) * (self.wheel_separation / 2.0)
-        v_right = float(linear) + float(angular) * (self.wheel_separation / 2.0)
+        # NOTE: Angular sign is NEGATED to match physical robot wiring
+        # Positive angular.z = turn left (counterclockwise) in ROS convention
+        # v_left  = v + w * (wheel_separation/2)  <- swapped sign
+        # v_right = v - w * (wheel_separation/2)  <- swapped sign
+        v_left = float(linear) + float(angular) * (self.wheel_separation / 2.0)
+        v_right = float(linear) - float(angular) * (self.wheel_separation / 2.0)
 
         # Convert wheel speeds to PWM
         left_pwm = self._wheel_speed_to_pwm(v_left, linear, angular, MIN_PWM_FORWARD, MIN_PWM_ROTATE, MAX_PWM)
