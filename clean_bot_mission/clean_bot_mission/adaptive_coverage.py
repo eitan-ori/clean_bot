@@ -89,8 +89,8 @@ class AdaptiveCoveragePlanner(Node):
         
         # Direct movement parameters (turn-then-drive)
         self.declare_parameter('use_direct_drive', True)         # Use direct cmd_vel instead of Nav2
-        self.declare_parameter('linear_speed', 0.12)             # Forward speed (m/s)
-        self.declare_parameter('angular_speed', 0.15)            # Turn speed (rad/s) - SLOW for stability
+        self.declare_parameter('linear_speed', 0.18)             # Forward speed (m/s) - increased for more power
+        self.declare_parameter('angular_speed', 0.25)            # Turn speed (rad/s) - increased for more power
         self.declare_parameter('angle_tolerance', 0.35)          # Radians (~20°) - don't need precision
         self.declare_parameter('position_tolerance', 0.08)       # Meters (8cm)
 
@@ -523,7 +523,7 @@ class AdaptiveCoveragePlanner(Node):
         if abs(angle_error) > turn_in_place_angle:
             self.movement_phase = 'turning'
             cmd.linear.x = 0.0
-            cmd.angular.z = 0.6 if angle_error > 0 else -0.6
+            cmd.angular.z = 0.8 if angle_error > 0 else -0.8  # Increased turn power
             self.cmd_vel_pub.publish(cmd)
             return
 
@@ -535,7 +535,7 @@ class AdaptiveCoveragePlanner(Node):
         cmd.linear.x = self.linear_speed * alignment_scale
 
         # Proportional angular correction with minimum to overcome stiction.
-        ang = min(0.6, max(0.12, abs(angle_error) * 1.2))
+        ang = min(0.8, max(0.15, abs(angle_error) * 1.5))  # Increased for more power
         cmd.angular.z = ang if angle_error > 0 else -ang
 
         self.cmd_vel_pub.publish(cmd)
