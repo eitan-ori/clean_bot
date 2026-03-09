@@ -517,13 +517,15 @@ class AdaptiveCoveragePlanner(Node):
 
         cmd = Twist()
 
-        # If we're very misaligned, rotate in place first.
-        # This avoids big arcs and helps in tight spaces.
-        turn_in_place_angle = max(self.realign_angle, 1.0)  # rad
+        # If we're misaligned more than ~25 degrees, rotate in place first.
+        # This ensures robot faces the waypoint before driving.
+        turn_in_place_angle = 0.45  # radians (~25 degrees)
         if abs(angle_error) > turn_in_place_angle:
             self.movement_phase = 'turning'
             cmd.linear.x = 0.0
-            cmd.angular.z = 0.8 if angle_error > 0 else -0.8  # Increased turn power
+            # Proportional turn speed with minimum
+            turn_speed = min(0.8, max(0.3, abs(angle_error) * 0.8))
+            cmd.angular.z = turn_speed if angle_error > 0 else -turn_speed
             self.cmd_vel_pub.publish(cmd)
             return
 
@@ -626,6 +628,9 @@ class AdaptiveCoveragePlanner(Node):
             self.get_logger().error('   Check that the map has sufficient free space.')
             return
         
+        # Step 2.5: Orient waypoints - each waypoint yaw points toward the NEXT waypoint
+        self.waypoints = self.orient_waypoints(self.waypoints)
+        
         # Step 3: Publish path for visualization
         self.publish_coverage_path()
         self.publish_waypoint_markers()
@@ -642,6 +647,37 @@ class AdaptiveCoveragePlanner(Node):
         self.get_logger().info('-' * 60)
         
         self.send_next_goal()
+
+    def orient_waypoints(self, waypoints: list) -> list:
+        """
+        Orient waypoints so each waypoint's yaw points toward the NEXT waypoint.
+        This makes the path directional - the robot always knows which way to go.
+        """
+        if len(waypoints) < 2:
+            return waypoints
+        
+        oriented = []
+        for i in range(len(waypoints) - 1):
+            x, y, _ = waypoints[i]
+            next_x, next_y, _ = waypoints[i + 1]
+            
+            # Calculate yaw pointing toward next waypoint
+            dx = next_x - x
+            dy = next_y - y
+            yaw = math.atan2(dy, dx)
+            
+            oriented.append((x, y, yaw))
+        
+        # Last waypoint keeps same orientation as second-to-last
+        last_x, last_y, _ = waypoints[-1]
+        if len(oriented) > 0:
+            _, _, last_yaw = oriented[-1]
+        else:
+            last_yaw = 0.0
+        oriented.append((last_x, last_y, last_yaw))
+        
+        self.get_logger().info(f'📐 Oriented {len(oriented)} waypoints toward next waypoint')
+        return oriented
 
     def inflate_obstacles(self):
         """Inflate obstacles by robot radius for safe navigation."""
