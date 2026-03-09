@@ -501,6 +501,21 @@ class AdaptiveCoveragePlanner(Node):
         dy = self.target_y - ry
         distance = math.sqrt(dx*dx + dy*dy)
         
+        # Calculate angle to target
+        target_angle = math.atan2(dy, dx)
+        angle_error = self.normalize_angle(target_angle - ryaw)
+        
+        # DEBUG: Log every few seconds to understand what's happening
+        if not hasattr(self, '_last_debug_time'):
+            self._last_debug_time = 0.0
+        if now - self._last_debug_time > 2.0:
+            self._last_debug_time = now
+            self.get_logger().info(
+                f'🔍 DEBUG: robot=({rx:.2f},{ry:.2f}) yaw={math.degrees(ryaw):.1f}° | '
+                f'target=({self.target_x:.2f},{self.target_y:.2f}) | '
+                f'target_angle={math.degrees(target_angle):.1f}° | '
+                f'error={math.degrees(angle_error):.1f}° | dist={distance:.2f}m')
+        
         # Reached target?
         if distance < self.position_tolerance:
             self.stop_robot()
@@ -510,10 +525,6 @@ class AdaptiveCoveragePlanner(Node):
             self.is_navigating = False
             self.send_next_goal()
             return
-        
-        # Calculate angle to target
-        target_angle = math.atan2(dy, dx)
-        angle_error = self.normalize_angle(target_angle - ryaw)
 
         cmd = Twist()
 

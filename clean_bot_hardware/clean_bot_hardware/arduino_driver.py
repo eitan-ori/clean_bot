@@ -54,8 +54,10 @@ class ArduinoDriver(Node):
         self.declare_parameter('wheel_separation', 0.20)      # meters (distance between wheels)
 
         # Motor wiring/inversion (kept configurable)
+        # For differential drive, typically only ONE motor needs inversion
+        # because motors are mounted as mirror images of each other
         self.declare_parameter('invert_left_motor', True)
-        self.declare_parameter('invert_right_motor', True)
+        self.declare_parameter('invert_right_motor', False)  # Changed: try opposite
         
         # Frame IDs
         self.declare_parameter('ultrasonic_frame_id', 'ultrasonic_link')
