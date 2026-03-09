@@ -91,7 +91,7 @@ class AdaptiveCoveragePlanner(Node):
         self.declare_parameter('use_direct_drive', True)         # Use direct cmd_vel instead of Nav2
         self.declare_parameter('linear_speed', 0.18)             # Forward speed (m/s) - increased for more power
         self.declare_parameter('angular_speed', 0.25)            # Turn speed (rad/s) - increased for more power
-        self.declare_parameter('angle_tolerance', 0.35)          # Radians (~20°) - don't need precision
+        self.declare_parameter('angle_tolerance', 0.18)          # Radians (~20°) - don't need precision
         self.declare_parameter('position_tolerance', 0.08)       # Meters (8cm)
 
         # Frames (waypoints are generated in map frame)
@@ -213,7 +213,7 @@ class AdaptiveCoveragePlanner(Node):
         self.last_cmd_time = 0.0
         self.drive_start_time = 0.0
         self.min_drive_time = 0.8  # seconds (drive straight a bit before re-aligning)
-        self.realign_angle = max(self.angle_tolerance * 2.0, 0.35)  # radians
+        self.realign_angle = max(self.angle_tolerance * 2.0, 0.18)  # radians
         
         # Statistics
         self.successful_waypoints = 0
