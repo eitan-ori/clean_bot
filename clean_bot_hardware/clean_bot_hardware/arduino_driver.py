@@ -161,8 +161,8 @@ class ArduinoDriver(Node):
 
         # PWM limits (tuned for this robot)
         MIN_PWM_FORWARD = 90  # Minimum to overcome friction
-        MIN_PWM_ROTATE = 50   # Rotation can be slower
-        MAX_PWM = 150         # Cap top speed
+        MIN_PWM_ROTATE = 90   # Rotation - increased for more power
+        MAX_PWM = 180         # Cap top speed - increased for more power
 
         # Differential drive mixing:
         # v_left  = v - w * (wheel_separation/2)
