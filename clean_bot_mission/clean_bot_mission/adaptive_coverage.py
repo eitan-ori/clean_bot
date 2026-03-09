@@ -645,7 +645,10 @@ class AdaptiveCoveragePlanner(Node):
             self.get_logger().error('   Check that the map has sufficient free space.')
             return
         
-        # Step 2.5: Orient waypoints - each waypoint yaw points toward the NEXT waypoint
+        # Step 2.5: Densify waypoints - add intermediate points on each segment
+        self.waypoints = self.densify_waypoints(self.waypoints, max_segment_length=0.4)
+        
+        # Step 2.6: Orient waypoints - each waypoint yaw points toward the NEXT waypoint
         self.waypoints = self.orient_waypoints(self.waypoints)
         
         # Step 3: Publish path for visualization
@@ -667,6 +670,53 @@ class AdaptiveCoveragePlanner(Node):
         self.get_logger().info('-' * 60)
         
         self.send_next_goal()
+
+    def densify_waypoints(self, waypoints: list, max_segment_length: float = 0.15) -> list:
+        """
+        Add intermediate waypoints along each segment so no segment is longer than max_segment_length.
+        This helps the robot stay on track by providing more frequent correction points.
+        
+        Args:
+            waypoints: List of (x, y, yaw) tuples
+            max_segment_length: Maximum distance between consecutive waypoints (meters)
+        
+        Returns:
+            Densified list of waypoints
+        """
+        if len(waypoints) < 2:
+            return waypoints
+        
+        densified = []
+        original_count = len(waypoints)
+        
+        for i in range(len(waypoints) - 1):
+            x1, y1, yaw1 = waypoints[i]
+            x2, y2, yaw2 = waypoints[i + 1]
+            
+            # Always add the start point of this segment
+            densified.append((x1, y1, yaw1))
+            
+            # Calculate segment length
+            dx = x2 - x1
+            dy = y2 - y1
+            segment_length = math.sqrt(dx*dx + dy*dy)
+            
+            # If segment is longer than max, add intermediate points
+            if segment_length > max_segment_length:
+                num_subdivisions = int(math.ceil(segment_length / max_segment_length))
+                for j in range(1, num_subdivisions):
+                    t = j / num_subdivisions
+                    interp_x = x1 + t * dx
+                    interp_y = y1 + t * dy
+                    # Interpolate yaw as well (simple linear for now)
+                    interp_yaw = yaw1  # Use start yaw, will be recomputed by orient_waypoints
+                    densified.append((interp_x, interp_y, interp_yaw))
+        
+        # Add the final waypoint
+        densified.append(waypoints[-1])
+        
+        self.get_logger().info(f'📏 Densified path: {original_count} → {len(densified)} waypoints (max segment: {max_segment_length}m)')
+        return densified
 
     def orient_waypoints(self, waypoints: list) -> list:
         """
