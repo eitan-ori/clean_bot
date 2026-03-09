@@ -789,7 +789,7 @@ class AdaptiveCoveragePlanner(Node):
         obstacle_mask = self.map_array >= OCCUPIED_THRESHOLD
         
         # Calculate inflation in cells
-        inflation_cells = int(self.robot_radius / self.map_info.resolution) + 1
+        inflation_cells = int(self.robot_radius / self.map_info.resolution) + 3
         
         # Create circular kernel
         kernel_size = 2 * inflation_cells + 1
