@@ -437,7 +437,7 @@ class AdaptiveCoveragePlanner(Node):
         self.cmd_vel_pub.publish(stop_cmd)
 
     def odom_callback(self, msg: Odometry):
-        """Update robot pose from odometry."""
+        """Update robot pose from odometry and drive to next waypoint."""
         self.robot_x = msg.pose.pose.position.x
         self.robot_y = msg.pose.pose.position.y
         
@@ -449,16 +449,23 @@ class AdaptiveCoveragePlanner(Node):
         
         self.odom_received = True
 
-        # Run direct-drive control loop (rate-limited)
-        if not (self.use_direct_drive and self.coverage_state == CoverageState.RUNNING and self.is_navigating):
+        # Simple control: if running coverage, drive to the current waypoint
+        if self.coverage_state != CoverageState.RUNNING:
+            return
+        if not self.waypoints or self.current_waypoint_idx >= len(self.waypoints):
             return
 
+        # Rate limit
         now = self.get_clock().now().nanoseconds / 1e9
         if now - self.last_cmd_time < 1.0 / self.control_rate:
             return
         self.last_cmd_time = now
 
-        self.drive_to_target(now)
+        # Get current target from the ordered waypoint list
+        target_x, target_y, _ = self.waypoints[self.current_waypoint_idx]
+        
+        # Drive toward it
+        self.drive_to_waypoint(target_x, target_y, now)
 
     def _get_robot_pose_map(self):
         """Return (x, y, yaw) in map frame when TF is available.
@@ -500,64 +507,66 @@ class AdaptiveCoveragePlanner(Node):
             angle += 2.0 * math.pi
         return angle
 
-    def drive_to_target(self, now: float):
-        """Drive toward target using simple steer-while-moving control."""
+    def drive_to_waypoint(self, target_x: float, target_y: float, now: float):
+        """
+        Simple waypoint following: drive toward (target_x, target_y).
+        When reached, advance to next waypoint in the ordered list.
+        """
         rx, ry, ryaw = self._get_robot_pose_map()
-        dx = self.target_x - rx
-        dy = self.target_y - ry
+        dx = target_x - rx
+        dy = target_y - ry
         distance = math.sqrt(dx*dx + dy*dy)
         
         # Calculate angle to target
         target_angle = math.atan2(dy, dx)
         angle_error = self.normalize_angle(target_angle - ryaw)
         
-        # DEBUG: Log every few seconds to understand what's happening
+        # Debug log every 2 seconds
         if not hasattr(self, '_last_debug_time'):
             self._last_debug_time = 0.0
         if now - self._last_debug_time > 2.0:
             self._last_debug_time = now
             self.get_logger().info(
-                f'🔍 DEBUG: robot=({rx:.2f},{ry:.2f}) yaw={math.degrees(ryaw):.1f}° | '
-                f'target=({self.target_x:.2f},{self.target_y:.2f}) | '
-                f'target_angle={math.degrees(target_angle):.1f}° | '
-                f'error={math.degrees(angle_error):.1f}° | dist={distance:.2f}m')
+                f'[{self.current_waypoint_idx + 1}/{len(self.waypoints)}] '
+                f'dist={distance:.2f}m err={math.degrees(angle_error):.0f}°')
         
-        # Reached target?
+        # Check if we reached the current waypoint
         if distance < self.position_tolerance:
             self.stop_robot()
-            self.get_logger().info(f'   ✅ Reached waypoint ({self.current_waypoint_idx + 1})')
+            self.get_logger().info(f'✅ Reached waypoint {self.current_waypoint_idx + 1}/{len(self.waypoints)}')
             self.successful_waypoints += 1
+            
+            # ADVANCE TO NEXT WAYPOINT
             self.current_waypoint_idx += 1
-            self.is_navigating = False
-            self.send_next_goal()
+            
+            # Check if we finished all waypoints
+            if self.current_waypoint_idx >= len(self.waypoints):
+                self.finish_mission()
             return
 
+        # Send movement command
         cmd = Twist()
-
-        # If we're misaligned more than ~25 degrees, rotate in place first.
-        # This ensures robot faces the waypoint before driving.
-        turn_in_place_angle = 0.45  # radians (~25 degrees)
-        if abs(angle_error) > turn_in_place_angle:
-            self.movement_phase = 'turning'
+        
+        # If misaligned > 25°, rotate in place first
+        if abs(angle_error) > 0.45:
             cmd.linear.x = 0.0
-            # Proportional turn speed with minimum
             turn_speed = min(0.8, max(0.3, abs(angle_error) * 0.8))
             cmd.angular.z = turn_speed if angle_error > 0 else -turn_speed
-            self.cmd_vel_pub.publish(cmd)
-            return
-
-        # Otherwise: drive forward while steering.
-        self.movement_phase = 'driving'
-
-        # Reduce linear speed when we're more misaligned.
-        alignment_scale = max(0.25, 1.0 - (abs(angle_error) / max(turn_in_place_angle, 1e-3)))
-        cmd.linear.x = self.linear_speed * alignment_scale
-
-        # Proportional angular correction with minimum to overcome stiction.
-        ang = min(0.8, max(0.15, abs(angle_error) * 1.5))  # Increased for more power
-        cmd.angular.z = ang if angle_error > 0 else -ang
+        else:
+            # Drive forward with steering correction
+            alignment_scale = max(0.25, 1.0 - abs(angle_error) / 0.45)
+            cmd.linear.x = self.linear_speed * alignment_scale
+            ang = min(0.8, max(0.15, abs(angle_error) * 1.5))
+            cmd.angular.z = ang if angle_error > 0 else -ang
 
         self.cmd_vel_pub.publish(cmd)
+
+    # Legacy function - kept for compatibility
+    def drive_to_target(self, now: float):
+        """Legacy: redirects to drive_to_waypoint."""
+        if self.current_waypoint_idx < len(self.waypoints):
+            x, y, _ = self.waypoints[self.current_waypoint_idx]
+            self.drive_to_waypoint(x, y, now)
 
     # Keep old functions for compatibility but they're not used
     def execute_turn(self):
@@ -655,21 +664,22 @@ class AdaptiveCoveragePlanner(Node):
         self.publish_coverage_path()
         self.publish_waypoint_markers()
         
-        # Step 4: Start mission
+        # Step 4: Initialize ordered waypoint traversal
         self.mission_started = True
         self.coverage_state = CoverageState.RUNNING
         self.start_time = self.get_clock().now()
         
-        # Find nearest waypoint to robot's current position (converge to track)
+        # Start from nearest waypoint to robot's current position
         self.current_waypoint_idx = self.find_nearest_waypoint_index()
         
-        self.get_logger().info(f'✅ Generated {len(self.waypoints)} waypoints')
-        self.get_logger().info(f'📍 Starting from waypoint {self.current_waypoint_idx + 1} (nearest to robot)')
         self.get_logger().info('')
-        self.get_logger().info('🚀 Starting coverage mission!')
-        self.get_logger().info('-' * 60)
-        
-        self.send_next_goal()
+        self.get_logger().info('=' * 50)
+        self.get_logger().info(f'🚀 COVERAGE STARTED')
+        self.get_logger().info(f'   Waypoints: {len(self.waypoints)} (ordered list)')
+        self.get_logger().info(f'   Starting from: #{self.current_waypoint_idx + 1}')
+        self.get_logger().info(f'   Control: odom_callback → drive_to_waypoint')
+        self.get_logger().info('=' * 50)
+        # Note: No need to call send_next_goal() - odom_callback handles everything
 
     def densify_waypoints(self, waypoints: list, max_segment_length: float = 0.15) -> list:
         """
@@ -1228,35 +1238,14 @@ class AdaptiveCoveragePlanner(Node):
         return ordered_waypoints
 
     def send_next_goal(self):
-        """Send next waypoint - simple direct drive."""
-        # Check if we should continue
-        if self.coverage_state != CoverageState.RUNNING:
-            return
-            
+        """
+        SIMPLIFIED: This function is now mostly a no-op.
+        The odom_callback directly reads from self.waypoints[current_waypoint_idx]
+        and calls drive_to_waypoint(). No need for separate target variables.
+        """
+        # Just check if mission should finish
         if self.current_waypoint_idx >= len(self.waypoints):
             self.finish_mission()
-            return
-
-        x, y, yaw = self.waypoints[self.current_waypoint_idx]
-        
-        progress = (self.current_waypoint_idx + 1) / len(self.waypoints) * 100
-        self.get_logger().info(
-            f'[{self.current_waypoint_idx + 1}/{len(self.waypoints)}] '
-            f'({progress:.0f}%) → ({x:.2f}, {y:.2f})')
-
-        # Set target and start navigating
-        self.target_x = x
-        self.target_y = y
-        self.target_yaw = yaw
-        self.is_navigating = True
-
-        # Start by aligning to the segment direction
-        self.movement_phase = 'turning'
-        self.drive_start_time = 0.0
-        
-        if not self.use_direct_drive:
-            # Nav2 mode (fallback)
-            self.send_goal_nav2(x, y, yaw)
 
     def _retry_send_goal_once(self):
         """Retry sending goal after waiting for odom."""
