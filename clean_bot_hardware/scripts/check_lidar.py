@@ -48,7 +48,7 @@ def check_port(port, baudrate):
         try:
             ser.write(b'\xA5\x50')
             ser.flush()
-        except:
+        except Exception:
             pass
             
         # Try to read some bytes
@@ -78,7 +78,7 @@ def main():
         print("\n--- Kernel Log (Last 5 lines for ttyUSB) ---")
         subprocess.run("dmesg | grep ttyUSB | tail -n 5", shell=True)
         print("--------------------------------------------\n")
-    except:
+    except Exception:
         pass
 
     ports = glob.glob('/dev/ttyUSB*') + glob.glob('/dev/ttyACM*')

@@ -146,3 +146,18 @@
 - **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py`
 - **Problem:** The `overlap_ratio` parameter was set to `0.1` (10%) but the inline comment said "15% overlap for safety". This could mislead developers into thinking the overlap is larger than it actually is.
 - **Fix:** Corrected the comment to "10% overlap for safety".
+
+### Bug 30: Missing rclpy.ok() guard in rplidar_test and test_helper
+- **Files:** `clean_bot_hardware/clean_bot_hardware/rplidar_test.py`, `clean_bot_mission/scripts/test_helper.py`
+- **Problem:** `rclpy.shutdown()` called unconditionally in `finally`/timer callbacks. If rclpy was already shut down (e.g., by KeyboardInterrupt handler or another node), this would raise `RuntimeError`. Same pattern as Bug 24.
+- **Fix:** Added `if rclpy.ok():` guard before all `rclpy.shutdown()` calls.
+
+### Bug 31: Division by zero in rplidar_test diagnostics
+- **File:** `clean_bot_hardware/clean_bot_hardware/rplidar_test.py` (`display_diagnostics`)
+- **Problem:** `100*valid_count/len(msg.ranges)` would crash with `ZeroDivisionError` if a LiDAR scan message arrived with an empty `ranges` array (e.g., during sensor startup or disconnection).
+- **Fix:** Changed to `100*valid_count/max(len(msg.ranges),1)` to avoid division by zero.
+
+### Bug 32: Bare except clauses in check_lidar diagnostic script
+- **File:** `clean_bot_hardware/scripts/check_lidar.py`
+- **Problem:** Two bare `except:` clauses that would catch `KeyboardInterrupt` and `SystemExit`, preventing clean script termination. Same pattern as Bug 23.
+- **Fix:** Changed to `except Exception:` in both locations.

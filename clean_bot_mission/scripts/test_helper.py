@@ -109,7 +109,8 @@ Coverage State: {self.coverage_state}
 Mission State: {self.mission_state}
 ========================================
 ''')
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
         
     def send_clean_command(self):
         msg = String()
