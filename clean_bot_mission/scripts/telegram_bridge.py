@@ -526,10 +526,12 @@ async def _check_mission_complete(context: ContextTypes.DEFAULT_TYPE):
     
     for chat_id in list(ros_node._notify_chat_ids):
         try:
-            img_bytes, info = ros_node.create_map_image()
-            if img_bytes:
-                bio = io.BytesIO(img_bytes)
+            image, info = ros_node.create_map_image()
+            if image is not None:
+                bio = io.BytesIO()
                 bio.name = 'final_map.png'
+                image.save(bio, 'PNG')
+                bio.seek(0)
                 caption = f"🎉 *Mission Complete!*\n🗺️ Final map:\n{info}"
                 await context.bot.send_photo(
                     chat_id=chat_id, photo=bio,

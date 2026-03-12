@@ -71,13 +71,13 @@ def generate_launch_description():
     return LaunchDescription([
         # ==================== Declare Arguments ====================
         DeclareLaunchArgument('use_sim_time', default_value='false'),
-        DeclareLaunchArgument('arduino_port', default_value='/dev/ttyUSB0',
+        DeclareLaunchArgument('arduino_port', default_value='/dev/ttyACM0',
                               description='Serial port for Arduino'),
-        DeclareLaunchArgument('lidar_port', default_value='/dev/ttyUSB1',
+        DeclareLaunchArgument('lidar_port', default_value='/dev/ttyUSB0',
                               description='Serial port for RPLidar'),
         DeclareLaunchArgument('i2c_bus', default_value='1',
                               description='I2C bus number for IMU'),
-        DeclareLaunchArgument('wheel_radius', default_value='0.034',
+        DeclareLaunchArgument('wheel_radius', default_value='0.0335',
                               description='Wheel radius in meters'),
         DeclareLaunchArgument('wheel_separation', default_value='0.20',
                               description='Distance between wheels in meters'),

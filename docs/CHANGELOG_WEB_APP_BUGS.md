@@ -101,3 +101,28 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`_check_schedules`)
 - **Problem:** The schedule checker runs every 60 seconds. If the timer fires twice within the same minute (e.g., at 08:30:05 and 08:30:50), the same schedule would match both times, sending `start_clean` twice. The robot might not have transitioned out of WAITING state yet between the two triggers.
 - **Fix:** Added `_last_triggered` tracking per schedule. Each schedule stores a `day_time` key of its last trigger, and won't fire again if the key matches the current minute.
+
+### Bug 21: Launch file port defaults mismatch
+- **File:** `clean_bot_hardware/launch/robot_bringup.launch.py`
+- **Problem:** The `LaunchConfiguration` defaults didn't match the `DeclareLaunchArgument` defaults. `arduino_port` defaulted to `/dev/ttyACM0` in LaunchConfiguration but `/dev/ttyUSB0` in DeclareLaunchArgument. `lidar_port` was `/dev/ttyUSB0` vs `/dev/ttyUSB1`. `wheel_radius` was `0.0335` vs `0.034`. Since `DeclareLaunchArgument` takes priority, the `LaunchConfiguration` defaults were misleading.
+- **Fix:** Made all defaults consistent: `arduino_port=/dev/ttyACM0`, `lidar_port=/dev/ttyUSB0`, `wheel_radius=0.0335`.
+
+### Bug 22: Telegram bridge mission-complete notification crashes
+- **File:** `clean_bot_mission/scripts/telegram_bridge.py` (`_check_mission_complete`)
+- **Problem:** `create_map_image()` returns a PIL `Image` object and an info string. The auto-notification handler passed the Image object to `io.BytesIO(img_bytes)`, treating it as raw bytes. This would crash with `TypeError` when a mission completed, preventing the user from receiving the final map.
+- **Fix:** Changed to the correct pattern: create a BytesIO, call `image.save(bio, 'PNG')`, then `bio.seek(0)`.
+
+### Bug 23: Bare except clause in IMU magnetometer read
+- **File:** `clean_bot_hardware/clean_bot_hardware/simple_imu_driver.py` (`get_mag_data`)
+- **Problem:** A bare `except:` clause caught ALL exceptions (including `KeyboardInterrupt`, `SystemExit`) silently, returning (0,0,0). This made it impossible to cleanly stop the driver and hid real errors like I2C bus failures.
+- **Fix:** Changed to `except Exception as e:` with a descriptive error message.
+
+### Bug 24: Missing rclpy.ok() check before shutdown in IMU broadcaster
+- **File:** `clean_bot_hardware/clean_bot_hardware/imu_odom_broadcaster.py` (`main`)
+- **Problem:** The `finally` block called `rclpy.shutdown()` unconditionally. If another node or a signal handler had already called `rclpy.shutdown()`, this would raise `RuntimeError: rclpy is already shutdown`.
+- **Fix:** Added `if rclpy.ok():` guard before `rclpy.shutdown()`, consistent with all other nodes.
+
+### Bug 25: Simple coverage bypasses emergency stop
+- **File:** `clean_bot_mission/clean_bot_mission/simple_coverage.py`
+- **Problem:** The simple coverage planner published velocity commands to `cmd_vel` directly, bypassing the emergency stop safety filter which subscribes to `cmd_vel_nav`. The adaptive coverage planner correctly uses `cmd_vel_nav`. This meant the robot could drive into obstacles during simple coverage.
+- **Fix:** Changed publisher topic from `cmd_vel` to `cmd_vel_nav`.

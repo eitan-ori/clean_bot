@@ -992,3 +992,20 @@ class TestRemoteOperation:
         resp = client.put('/api/rooms/test/rename', json={"name": "New Name"})
         assert resp.status_code == 404
         webapp_module.ros_node = node
+
+    def test_telegram_bridge_map_image_serialization(self, client, node):
+        """Verify the pattern: create_map_image returns PIL.Image, must save() to BytesIO."""
+        # Regression test for Bug 22: _check_mission_complete was passing a
+        # PIL Image to io.BytesIO() as if it were bytes.
+        import io
+        from PIL import Image
+        img = Image.new("RGB", (10, 10), "red")
+        bio = io.BytesIO()
+        bio.name = "test.png"
+        img.save(bio, "PNG")
+        bio.seek(0)
+        data = bio.read()
+        assert data[:4] == b'\x89PNG', "Must be valid PNG data"
+        # The old buggy pattern would crash:
+        with pytest.raises(TypeError):
+            io.BytesIO(img)

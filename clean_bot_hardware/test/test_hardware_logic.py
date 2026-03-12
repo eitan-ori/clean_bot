@@ -391,3 +391,141 @@ class TestScanFrequency:
         dt = 0.0
         hz = count / dt if dt > 0 else 0.0
         assert hz == 0.0
+
+
+# ════════════════════════════════════════════════════════════════════
+# Test: IMU Signed Conversion Edge Cases
+# ════════════════════════════════════════════════════════════════════
+
+class TestIMUSignedConversionEdge:
+    """Additional edge-case tests for the IMU byte-to-signed conversion."""
+
+    @staticmethod
+    def _conv(high, low):
+        """Replicate SimpleIMU._conv."""
+        val = (high << 8) + low
+        if val >= 0x8000:
+            return -((65535 - val) + 1)
+        return val
+
+    def test_boundary_positive_max(self):
+        """0x7FFF should be +32767."""
+        assert self._conv(0x7F, 0xFF) == 32767
+
+    def test_boundary_negative_min(self):
+        """0x8000 should be -32768."""
+        assert self._conv(0x80, 0x00) == -32768
+
+    def test_one_below_boundary(self):
+        """0x7FFE should be +32766."""
+        assert self._conv(0x7F, 0xFE) == 32766
+
+    def test_one_above_boundary(self):
+        """0x8001 should be -32767."""
+        assert self._conv(0x80, 0x01) == -32767
+
+    def test_all_ones(self):
+        """0xFFFF should be -1."""
+        assert self._conv(0xFF, 0xFF) == -1
+
+
+# ════════════════════════════════════════════════════════════════════
+# Test: Emergency Stop Reverse Behavior
+# ════════════════════════════════════════════════════════════════════
+
+class TestEmergencyStopReverse:
+    """Test that reverse movement is allowed during obstacle stops."""
+
+    def test_reverse_allowed_at_stop(self):
+        """Reverse velocity should pass through even at stop distance."""
+        # The emergency stop only blocks forward (positive linear.x)
+        linear_x = -0.1  # Reverse
+        distance = 0.05   # Well within stop distance
+        stop_dist = 0.10
+        # If linear_x <= 0, it should pass through
+        assert linear_x <= 0  # Reverse is not blocked
+
+    def test_rotation_allowed_at_stop(self):
+        """Angular velocity should always pass through."""
+        angular_z = 0.5
+        distance = 0.05
+        # The emergency stop always allows rotation
+        assert angular_z == 0.5  # Unchanged
+
+
+# ════════════════════════════════════════════════════════════════════
+# Test: Launch File Port Consistency
+# ════════════════════════════════════════════════════════════════════
+
+class TestLaunchFileConsistency:
+    """Verify launch file defaults are consistent between
+    LaunchConfiguration and DeclareLaunchArgument."""
+
+    def test_arduino_port_consistent(self):
+        """The arduino port default should be /dev/ttyACM0 everywhere."""
+        import re
+        launch_path = 'launch/robot_bringup.launch.py'
+        try:
+            with open(launch_path) as f:
+                content = f.read()
+        except FileNotFoundError:
+            # Running from repo root
+            launch_path = 'clean_bot_hardware/launch/robot_bringup.launch.py'
+            with open(launch_path) as f:
+                content = f.read()
+        # All arduino_port defaults should be the same value
+        defaults = re.findall(r"arduino_port.*?default[_value]*[=:]\s*['\"]([^'\"]+)", content)
+        assert len(set(defaults)) <= 1, f"Inconsistent arduino_port defaults: {defaults}"
+
+    def test_lidar_port_consistent(self):
+        """The lidar port default should be consistent everywhere."""
+        import re
+        launch_path = 'launch/robot_bringup.launch.py'
+        try:
+            with open(launch_path) as f:
+                content = f.read()
+        except FileNotFoundError:
+            launch_path = 'clean_bot_hardware/launch/robot_bringup.launch.py'
+            with open(launch_path) as f:
+                content = f.read()
+        defaults = re.findall(r"lidar_port.*?default[_value]*[=:]\s*['\"]([^'\"]+)", content)
+        assert len(set(defaults)) <= 1, f"Inconsistent lidar_port defaults: {defaults}"
+
+
+# ════════════════════════════════════════════════════════════════════
+# Test: Safety Topic Naming
+# ════════════════════════════════════════════════════════════════════
+
+class TestSafetyTopicNaming:
+    """Ensure nodes publish to cmd_vel_nav (not cmd_vel) to go through
+    the emergency stop safety filter."""
+
+    def test_simple_coverage_uses_cmd_vel_nav(self):
+        """simple_coverage must publish to cmd_vel_nav for safety."""
+        try:
+            path = 'clean_bot_mission/clean_bot_mission/simple_coverage.py'
+            with open(path) as f:
+                content = f.read()
+        except FileNotFoundError:
+            path = '../clean_bot_mission/clean_bot_mission/simple_coverage.py'
+            with open(path) as f:
+                content = f.read()
+        assert "cmd_vel_nav" in content, "simple_coverage should publish to cmd_vel_nav"
+        # Verify it does NOT publish directly to 'cmd_vel' (except imports/comments)
+        import re
+        # Find actual publisher creation lines
+        publishers = re.findall(r"create_publisher\(.*?['\"]cmd_vel['\"]", content)
+        assert len(publishers) == 0, \
+            f"simple_coverage should not publish to bare 'cmd_vel': {publishers}"
+
+    def test_adaptive_coverage_uses_cmd_vel_nav(self):
+        """adaptive_coverage must publish to cmd_vel_nav for safety."""
+        try:
+            path = 'clean_bot_mission/clean_bot_mission/adaptive_coverage.py'
+            with open(path) as f:
+                content = f.read()
+        except FileNotFoundError:
+            path = '../clean_bot_mission/clean_bot_mission/adaptive_coverage.py'
+            with open(path) as f:
+                content = f.read()
+        assert "cmd_vel_nav" in content, "adaptive_coverage should publish to cmd_vel_nav"

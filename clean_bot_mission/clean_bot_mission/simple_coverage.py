@@ -48,7 +48,7 @@ class SimpleCoverage(Node):
         self.side_step_distance = self.get_parameter('side_step_distance').value
         
         # === Publishers ===
-        self.cmd_vel_pub = self.create_publisher(Twist, 'cmd_vel', 10)
+        self.cmd_vel_pub = self.create_publisher(Twist, 'cmd_vel_nav', 10)
         self.state_pub = self.create_publisher(String, 'coverage_state', 10)
         self.complete_pub = self.create_publisher(Bool, 'coverage_complete', 10)
         
