@@ -208,7 +208,7 @@ def generate_launch_description():
             ]
         ),
         # ==================== Scan Throttler ====================
-        # מוריד את קצב הלייזר מ-10/15 הרץ ל-5 הרץ כדי להקל על המעבד
+        # Throttle lidar scan rate from 10Hz to 5Hz to reduce CPU load
         Node(
             package='topic_tools',
             executable='throttle',
@@ -225,13 +225,13 @@ def generate_launch_description():
             name='rf2o_laser_odometry',
             output='screen',
             parameters=[{
-                'laser_scan_topic': '/scan_throttled',   # <--- שינוי: מקשיב לנתיב האיטי
+                'laser_scan_topic': '/scan_throttled',   # Use throttled scan (5Hz) for odometry
                 'odom_topic': '/odom',
                 'publish_tf': True,
                 'base_frame_id': 'base_link',
                 'odom_frame_id': 'odom',
                 'init_pose_from_topic': '',
-                'freq': 5.0,                             # <--- שינוי: תדר נמוך שתואם ל-Throttle
+                'freq': 5.0,                             # Match throttled scan rate
             }],
         ),
         # ==================== SLAM Toolbox ====================

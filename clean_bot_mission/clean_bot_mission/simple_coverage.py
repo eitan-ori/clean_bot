@@ -2,12 +2,12 @@
 """
 Simple Boustrophedon (Plowing) Coverage - Ultra Simple Version
 ==============================================================
-מתנועע בצורת חרישה פשוטה - קדימה, סיבוב, קדימה, סיבוב...
+Moves in a simple plowing pattern - forward, turn, forward, turn...
 
-הנחות:
-- החדר בערך ריבועי או L-shape
-- הרובוט מתחיל מנקודת התחלה (0,0)
-- פשוט הולך קדימה עד שפוגע במכשול, מסתובב, וממשיך
+Assumptions:
+- Room is roughly rectangular or L-shaped
+- Robot starts from origin (0,0)
+- Drives forward until hitting an obstacle, turns, and continues
 """
 
 import math
@@ -23,23 +23,23 @@ from sensor_msgs.msg import LaserScan
 
 class SimpleCoverage(Node):
     """
-    תנועת חרישה פשוטה:
-    1. נסע קדימה
-    2. כשמגיע לקיר - עצור
-    3. זוז הצידה (צעד אחד)
-    4. סובב 180°
-    5. חזור ל-1
+    Simple plowing coverage:
+    1. Drive forward
+    2. Stop at wall
+    3. Side-step one row width
+    4. Turn 180°
+    5. Repeat from 1
     """
     
     def __init__(self):
         super().__init__('simple_coverage')
         
-        # === פרמטרים ===
-        self.declare_parameter('linear_speed', 0.12)      # מהירות נסיעה (m/s)
-        self.declare_parameter('angular_speed', 0.3)      # מהירות סיבוב (rad/s)
-        self.declare_parameter('row_spacing', 0.12)       # רוחב בין שורות (מטר)
-        self.declare_parameter('wall_distance', 0.25)     # מרחק עצירה מקיר (מטר)
-        self.declare_parameter('side_step_distance', 0.12) # צעד הצידה (מטר)
+        # === Parameters ===
+        self.declare_parameter('linear_speed', 0.12)      # Drive speed (m/s)
+        self.declare_parameter('angular_speed', 0.3)      # Turn speed (rad/s)
+        self.declare_parameter('row_spacing', 0.12)       # Row width (meters)
+        self.declare_parameter('wall_distance', 0.25)     # Wall stop distance (meters)
+        self.declare_parameter('side_step_distance', 0.12) # Side step distance (meters)
         
         self.linear_speed = self.get_parameter('linear_speed').value
         self.angular_speed = self.get_parameter('angular_speed').value

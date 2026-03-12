@@ -41,12 +41,14 @@ class EmergencyStopController(Node):
         super().__init__('emergency_stop_controller')
 
         # ===================== Parameters =====================
+        self.declare_parameter('enabled', True)                  # Enable/disable safety filter
         self.declare_parameter('emergency_stop_distance', 0.10)  # 10cm - full stop
         self.declare_parameter('slow_down_distance', 0.30)       # 30cm - reduce speed
         self.declare_parameter('slow_down_factor', 0.3)          # 30% of original speed
         self.declare_parameter('reverse_allowed', True)          # Allow backing up
         self.declare_parameter('timeout_sec', 0.5)               # Sensor timeout
         
+        self.enabled = self.get_parameter('enabled').value
         self.stop_dist = self.get_parameter('emergency_stop_distance').value
         self.slow_dist = self.get_parameter('slow_down_distance').value
         self.slow_factor = self.get_parameter('slow_down_factor').value
@@ -88,12 +90,10 @@ class EmergencyStopController(Node):
         Filter velocity commands based on obstacle proximity.
         Passes through commands but limits forward motion when obstacle detected.
         """
-        # TEMPORARILY DISABLED EMERGENCY STOP
-        # Just pass through the command
-        self.cmd_vel_pub.publish(msg)
-        return
+        if not self.enabled:
+            self.cmd_vel_pub.publish(msg)
+            return
 
-        # Original Logic (Disabled)
         output = Twist()
         output.angular.z = msg.angular.z  # Always allow rotation
         

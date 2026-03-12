@@ -9,13 +9,13 @@ def generate_launch_description():
             name='rf2o_laser_odometry',
             output='screen',
             parameters=[{
-                'laser_scan_topic': '/scan',     # וודא שזה הטופיק של הלידאר שלך
-                'odom_topic': '/odom',           # הטופיק שייווצר
-                'publish_tf': True,              # חשוב! זה מה שיוצר את החיבור החסר
-                'base_frame_id': 'base_link',    # גוף הרובוט
-                'odom_frame_id': 'odom',         # מערכת הצירים העולמית
+                'laser_scan_topic': '/scan',
+                'odom_topic': '/odom',
+                'publish_tf': True,              # Publishes odom→base_link TF
+                'base_frame_id': 'base_link',
+                'odom_frame_id': 'odom',
                 'init_pose_from_topic': '',
-                'freq': 20.0                     # קצב עדכון
+                'freq': 20.0
             }],
         ),
     ])
