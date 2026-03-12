@@ -105,7 +105,7 @@ class AdaptiveCoveragePlanner(Node):
 
         # ===================== Parameters =====================
         self.declare_parameter('coverage_width', 0.14)           # 14cm cleaning width (main suction)
-        self.declare_parameter('overlap_ratio', 0.1)            # 15% overlap for safety
+        self.declare_parameter('overlap_ratio', 0.1)            # 10% overlap for safety
         self.declare_parameter('robot_radius', 0.20)             # 20cm Main body radius
         # NOTE: Robot has a side brush (4cm radius) at front-left that extends reach.
         # This allows cleaning edges even with 20cm radius body.
@@ -619,8 +619,11 @@ class AdaptiveCoveragePlanner(Node):
         self.coverage_state = CoverageState.RUNNING
         self.start_time = self.get_clock().now()
         
-        # Start from nearest waypoint to robot's current position
-        self.current_waypoint_idx = self.find_nearest_waypoint_index()
+        # Rotate waypoints so the nearest one is first — ensures full coverage
+        nearest = self.find_nearest_waypoint_index()
+        if nearest > 0:
+            self.waypoints = self.waypoints[nearest:] + self.waypoints[:nearest]
+        self.current_waypoint_idx = 0
         
         self.get_logger().info('')
         self.get_logger().info('=' * 50)
@@ -932,8 +935,9 @@ class AdaptiveCoveragePlanner(Node):
             ys = [s[1] for s in data['segments']] # use starty approx
             data['centroid'] = (sum(xs)/len(xs), sum(ys)/len(ys))
         
-        # Start with closest to robot (assumed 0,0 for now or first waypoints)
-        curr_pos = (0.0, 0.0)
+        # Start with closest cell to robot's actual position
+        rx, ry, _ = self._get_robot_pose_map()
+        curr_pos = (rx, ry)
         
         remaining_ids = set(cells.keys())
         

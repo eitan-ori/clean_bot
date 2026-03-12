@@ -529,3 +529,19 @@ class TestSafetyTopicNaming:
             with open(path) as f:
                 content = f.read()
         assert "cmd_vel_nav" in content, "adaptive_coverage should publish to cmd_vel_nav"
+
+    def test_nav2_robot_radius_consistent(self):
+        """Bug 28: Nav2 local and global costmap robot_radius must match actual (0.20m)."""
+        import yaml
+        try:
+            path = 'clean_bot_hardware/config/nav2_params.yaml'
+            with open(path) as f:
+                params = yaml.safe_load(f)
+        except FileNotFoundError:
+            path = 'config/nav2_params.yaml'
+            with open(path) as f:
+                params = yaml.safe_load(f)
+        local_r = params['local_costmap']['local_costmap']['ros__parameters']['robot_radius']
+        global_r = params['global_costmap']['global_costmap']['ros__parameters']['robot_radius']
+        assert local_r == global_r, f"Costmap robot_radius mismatch: local={local_r}, global={global_r}"
+        assert local_r >= 0.20, f"robot_radius {local_r} is smaller than actual robot (0.20m)"

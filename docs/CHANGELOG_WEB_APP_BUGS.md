@@ -126,3 +126,23 @@
 - **File:** `clean_bot_mission/clean_bot_mission/simple_coverage.py`
 - **Problem:** The simple coverage planner published velocity commands to `cmd_vel` directly, bypassing the emergency stop safety filter which subscribes to `cmd_vel_nav`. The adaptive coverage planner correctly uses `cmd_vel_nav`. This meant the robot could drive into obstacles during simple coverage.
 - **Fix:** Changed publisher topic from `cmd_vel` to `cmd_vel_nav`.
+
+### Bug 26: Coverage path skips waypoints before starting index
+- **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py` (`start_coverage_mission`)
+- **Problem:** Coverage starts from the nearest waypoint to the robot (`find_nearest_waypoint_index`), then increments the index sequentially until it reaches the end. All waypoints before the starting index (0..nearest-1) were never visited, meaning potentially large areas of the room were left uncleaned.
+- **Fix:** Rotated the waypoint list so the nearest waypoint becomes index 0: `waypoints[nearest:] + waypoints[:nearest]`. The robot now starts from the nearest waypoint and covers all of them.
+
+### Bug 27: TSP cell ordering starts from (0,0) instead of robot position
+- **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py` (`generate_adaptive_coverage_path`)
+- **Problem:** The nearest-neighbor TSP algorithm for ordering cells hardcoded `curr_pos = (0.0, 0.0)` as the starting position. After exploration, the robot is typically far from the origin, so the first cell visited could be across the room, wasting time on unnecessary travel.
+- **Fix:** Changed to use the robot's actual position from TF/odometry: `rx, ry, _ = self._get_robot_pose_map()`.
+
+### Bug 28: Nav2 costmap robot_radius inconsistent with actual robot
+- **File:** `clean_bot_hardware/config/nav2_params.yaml`
+- **Problem:** The local costmap used `robot_radius: 0.18` and the global costmap used `robot_radius: 0.12`, but the actual robot body radius is `0.20m`. The global costmap's 12cm radius was dangerously small — Nav2 would plan paths where the 20cm robot could collide with obstacles.
+- **Fix:** Set both costmap `robot_radius` values to `0.20` to match the actual robot dimensions.
+
+### Bug 29: Overlap ratio comment/code mismatch
+- **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py`
+- **Problem:** The `overlap_ratio` parameter was set to `0.1` (10%) but the inline comment said "15% overlap for safety". This could mislead developers into thinking the overlap is larger than it actually is.
+- **Fix:** Corrected the comment to "10% overlap for safety".

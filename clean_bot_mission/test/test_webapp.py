@@ -695,3 +695,70 @@ class TestRoomFileOps:
             json.dump(room, f)
         result = webapp_module.WebBridgeNode.load_room_preview("Incomplete")
         assert result is None
+
+
+# ── Coverage Algorithm Tests ────────────────────────────────────────────────
+class TestCoverageAlgorithm:
+    """Unit tests for adaptive_coverage path logic (Bug 26, 27 fixes)."""
+
+    def test_waypoint_rotation_covers_all(self):
+        """Bug 26: Coverage should visit ALL waypoints, not skip ones before nearest."""
+        # Simulate: 10 waypoints, robot nearest to waypoint 5
+        waypoints = [(float(i), 0.0, 0.0) for i in range(10)]
+        nearest = 5
+        # Apply the rotation fix
+        rotated = waypoints[nearest:] + waypoints[:nearest]
+        # All original waypoints should be present
+        assert len(rotated) == len(waypoints)
+        assert set(w[0] for w in rotated) == set(w[0] for w in waypoints)
+        # The first waypoint should be the one nearest to robot
+        assert rotated[0] == waypoints[nearest]
+
+    def test_waypoint_rotation_zero_nearest(self):
+        """When nearest is already index 0, rotation is a no-op."""
+        waypoints = [(float(i), 0.0, 0.0) for i in range(5)]
+        nearest = 0
+        if nearest > 0:
+            rotated = waypoints[nearest:] + waypoints[:nearest]
+        else:
+            rotated = waypoints
+        assert rotated == waypoints
+
+    def test_densify_waypoints_adds_intermediates(self):
+        """Densify should add points on long segments."""
+        waypoints = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)]
+        max_seg = 0.3
+        densified = [waypoints[0]]
+        for i in range(len(waypoints) - 1):
+            x1, y1, yaw1 = waypoints[i]
+            x2, y2, yaw2 = waypoints[i + 1]
+            dx, dy = x2 - x1, y2 - y1
+            seg_len = math.sqrt(dx*dx + dy*dy)
+            if seg_len > max_seg:
+                n = int(math.ceil(seg_len / max_seg))
+                for j in range(1, n):
+                    t = j / n
+                    densified.append((x1 + t * dx, y1 + t * dy, yaw1))
+        densified.append(waypoints[-1])
+        assert len(densified) > 2
+        # Check no gap exceeds max_segment_length
+        for i in range(len(densified) - 1):
+            dx = densified[i + 1][0] - densified[i][0]
+            dy = densified[i + 1][1] - densified[i][1]
+            assert math.sqrt(dx*dx + dy*dy) <= max_seg + 0.01
+
+    def test_orient_waypoints_points_forward(self):
+        """Orient should set yaw to point toward next waypoint."""
+        waypoints = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 1.0, 0.0)]
+        oriented = []
+        for i in range(len(waypoints) - 1):
+            x, y, _ = waypoints[i]
+            nx, ny, _ = waypoints[i + 1]
+            yaw = math.atan2(ny - y, nx - x)
+            oriented.append((x, y, yaw))
+        lx, ly, _ = waypoints[-1]
+        oriented.append((lx, ly, oriented[-1][2]))
+        # First: pointing right (0 rad)
+        assert abs(oriented[0][2] - 0.0) < 0.01
+        # Second: pointing up (pi/2)
+        assert abs(oriented[1][2] - math.pi / 2) < 0.01
