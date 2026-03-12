@@ -584,3 +584,114 @@ class TestConfiguration:
     def test_entry_points(self):
         """Verify main() function exists and is callable."""
         assert callable(webapp_module.main)
+
+
+# ════════════════════════════════════════════════════════════════════
+# Test: VALID_COMMANDS constant
+# ════════════════════════════════════════════════════════════════════
+
+class TestValidCommands:
+    """Verify the command whitelist matches full_mission's accepted commands."""
+
+    def test_valid_commands_exists(self):
+        assert hasattr(webapp_module, 'VALID_COMMANDS')
+        assert isinstance(webapp_module.VALID_COMMANDS, set)
+
+    def test_all_eight_commands(self):
+        expected = {"start_scan", "stop_scan", "start_clean", "stop_clean",
+                    "go_home", "reset", "pause", "resume"}
+        assert webapp_module.VALID_COMMANDS == expected
+
+    def test_invalid_command_rejected(self, flask_client):
+        client, _ = flask_client
+        for cmd in ["", "hack", "shutdown", "sudo rm -rf", "START_SCAN"]:
+            resp = client.post('/api/command', json={"command": cmd})
+            assert resp.status_code == 400, f"Command '{cmd}' should be rejected"
+
+
+# ════════════════════════════════════════════════════════════════════
+# Test: Room file operations (realistic)
+# ════════════════════════════════════════════════════════════════════
+
+class TestRoomFileOps:
+    """Test room CRUD with real file operations."""
+
+    def test_list_rooms_with_files(self, temp_rooms_dir):
+        webapp_module.SAVED_ROOMS_DIR = temp_rooms_dir
+        # Create a room file
+        room = {"name": "Kitchen", "saved_at": "2024-01-01T12:00:00",
+                "width": 100, "height": 100, "resolution": 0.05, "data": [0]*10000}
+        import json
+        with open(temp_rooms_dir / "Kitchen.json", "w") as f:
+            json.dump(room, f)
+        rooms = webapp_module.WebBridgeNode.list_rooms()
+        assert len(rooms) == 1
+        assert rooms[0]["name"] == "Kitchen"
+        assert rooms[0]["width"] == 100
+
+    def test_delete_room_real(self, temp_rooms_dir):
+        webapp_module.SAVED_ROOMS_DIR = temp_rooms_dir
+        import json
+        room = {"name": "Test", "data": [0]}
+        with open(temp_rooms_dir / "Test.json", "w") as f:
+            json.dump(room, f)
+        assert webapp_module.WebBridgeNode.delete_room("Test") is True
+        assert not (temp_rooms_dir / "Test.json").exists()
+
+    def test_delete_nonexistent(self, temp_rooms_dir):
+        webapp_module.SAVED_ROOMS_DIR = temp_rooms_dir
+        assert webapp_module.WebBridgeNode.delete_room("nonexistent") is False
+
+    def test_safe_room_path_valid(self, temp_rooms_dir):
+        webapp_module.SAVED_ROOMS_DIR = temp_rooms_dir
+        result = webapp_module.WebBridgeNode._safe_room_path("my-room_1")
+        assert result is not None
+        assert str(temp_rooms_dir) in str(result)
+
+    def test_safe_room_path_traversal(self, temp_rooms_dir):
+        webapp_module.SAVED_ROOMS_DIR = temp_rooms_dir
+        assert webapp_module.WebBridgeNode._safe_room_path("../etc/passwd") is None
+        assert webapp_module.WebBridgeNode._safe_room_path("room name") is None
+        assert webapp_module.WebBridgeNode._safe_room_path("room.json") is None
+        assert webapp_module.WebBridgeNode._safe_room_path("") is None
+
+    def test_rename_room_real(self, temp_rooms_dir):
+        webapp_module.SAVED_ROOMS_DIR = temp_rooms_dir
+        import json
+        room = {"name": "Old Name", "data": [0]}
+        with open(temp_rooms_dir / "OldName.json", "w") as f:
+            json.dump(room, f)
+        ok, new_fn = webapp_module.WebBridgeNode.rename_room("OldName", "New Name")
+        assert ok is True
+        assert new_fn == "New_Name"
+        assert (temp_rooms_dir / "New_Name.json").exists()
+        assert not (temp_rooms_dir / "OldName.json").exists()
+
+    def test_load_room_preview_real(self, temp_rooms_dir):
+        webapp_module.SAVED_ROOMS_DIR = temp_rooms_dir
+        import json
+        room = {"name": "Test", "width": 4, "height": 4, "resolution": 0.05,
+                "data": [0]*16, "saved_at": "2024-01-01"}
+        with open(temp_rooms_dir / "Test.json", "w") as f:
+            json.dump(room, f)
+        result = webapp_module.WebBridgeNode.load_room_preview("Test")
+        assert result is not None
+        assert result["name"] == "Test"
+        assert "image_b64" in result
+        assert len(result["image_b64"]) > 0
+
+    def test_load_room_preview_corrupted(self, temp_rooms_dir):
+        webapp_module.SAVED_ROOMS_DIR = temp_rooms_dir
+        with open(temp_rooms_dir / "Corrupt.json", "w") as f:
+            f.write("not valid json{{{")
+        result = webapp_module.WebBridgeNode.load_room_preview("Corrupt")
+        assert result is None
+
+    def test_load_room_preview_missing_fields(self, temp_rooms_dir):
+        webapp_module.SAVED_ROOMS_DIR = temp_rooms_dir
+        import json
+        room = {"name": "Incomplete"}  # missing width, height, data
+        with open(temp_rooms_dir / "Incomplete.json", "w") as f:
+            json.dump(room, f)
+        result = webapp_module.WebBridgeNode.load_room_preview("Incomplete")
+        assert result is None

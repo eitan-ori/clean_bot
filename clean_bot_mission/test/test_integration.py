@@ -133,7 +133,7 @@ def client(mock_ros_node, tmp_path):
     # Save original class methods that tests may override
     WBN = webapp_module.WebBridgeNode
     _saved_attrs = {}
-    for attr in ('list_rooms', 'delete_room', '_safe_room_path', 'load_room_preview'):
+    for attr in ('list_rooms', 'delete_room', '_safe_room_path', 'load_room_preview', 'rename_room'):
         if hasattr(WBN, attr):
             _saved_attrs[attr] = getattr(WBN, attr)
 
