@@ -564,7 +564,7 @@ map
  └── odom (published by SLAM Toolbox)
       └── base_link (published by rf2o_laser_odometry)
            ├── chassis
-           │    ├── laser_frame (LiDAR)
+           │    ├── laser (LiDAR)
            │    ├── imu_link (IMU)
            │    └── ultrasonic_link (Ultrasonic)
            ├── left_wheel

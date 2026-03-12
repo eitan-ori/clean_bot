@@ -9,7 +9,7 @@
 # - serial_port: /dev/ttyUSB0 (The physical USB port).
 # - serial_baudrate: 115200 (Required for version A1).
 # - scan_mode: Standard (The default scanning mode).
-# - frame_id: laser_frame (Matches the child link in lidar.xacro).
+# - frame_id: laser (Matches the child link in lidar.xacro / URDF).
 #
 # ASSUMPTIONS:
 # - The sensor is version A1. Older or newer versions (A2, A3) might
@@ -28,7 +28,7 @@ rplidar_node:
     serial_baudrate: 115200
     
     # Frame ID for TF
-    frame_id: "laser_frame"
+    frame_id: "laser"
     
     # Invert scan direction
     inverted: false

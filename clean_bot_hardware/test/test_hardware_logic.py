@@ -545,3 +545,17 @@ class TestSafetyTopicNaming:
         global_r = params['global_costmap']['global_costmap']['ros__parameters']['robot_radius']
         assert local_r == global_r, f"Costmap robot_radius mismatch: local={local_r}, global={global_r}"
         assert local_r >= 0.20, f"robot_radius {local_r} is smaller than actual robot (0.20m)"
+
+    def test_lidar_frame_id_consistent(self):
+        """Bug 33: LiDAR frame_id must be 'laser' everywhere to match URDF."""
+        import yaml
+        try:
+            path = 'clean_bot_hardware/config/rplidar_a1.yaml'
+            with open(path) as f:
+                params = yaml.safe_load(f)
+        except FileNotFoundError:
+            path = 'config/rplidar_a1.yaml'
+            with open(path) as f:
+                params = yaml.safe_load(f)
+        frame_id = params['rplidar_node']['ros__parameters']['frame_id']
+        assert frame_id == 'laser', f"rplidar_a1.yaml frame_id is '{frame_id}', expected 'laser'"

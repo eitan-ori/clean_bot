@@ -113,6 +113,8 @@ class ArduinoDriver(Node):
         # ===================== State Variables =====================
         # Last command time (for watchdog)
         self.last_cmd_time = self.get_clock().now()
+        self._motors_stopped = True  # Track whether motors are already at zero
+        self.CMD_VEL_TIMEOUT_SEC = 0.5  # Stop motors if no cmd_vel for this long
         
         # ===================== Timer =====================
         timer_period = 1.0 / publish_rate
@@ -201,8 +203,7 @@ class ArduinoDriver(Node):
             self.get_logger().warning(f'Serial write error: {e}')
         
         self.last_cmd_time = self.get_clock().now()
-
-    def _wheel_speed_to_pwm(
+        self._motors_stopped = (left_pwm == 0 and right_pwm == 0)
         self,
         wheel_speed_mps: float,
         linear_mps: float,
@@ -232,6 +233,17 @@ class ArduinoDriver(Node):
     def update_loop(self):
         """Main update loop - read from Arduino and publish ultrasonic data."""
         now = self.get_clock().now()
+        
+        # Watchdog: stop motors if no cmd_vel received recently
+        if not self._motors_stopped:
+            elapsed = (now - self.last_cmd_time).nanoseconds / 1e9
+            if elapsed > self.CMD_VEL_TIMEOUT_SEC:
+                self.get_logger().warn('⚠️ cmd_vel timeout — stopping motors')
+                try:
+                    self.serial.write(b"0,0\n")
+                except serial.SerialException:
+                    pass
+                self._motors_stopped = True
         
         # Read data from Arduino
         try:

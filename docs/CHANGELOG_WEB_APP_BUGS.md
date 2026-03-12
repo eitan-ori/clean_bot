@@ -161,3 +161,13 @@
 - **File:** `clean_bot_hardware/scripts/check_lidar.py`
 - **Problem:** Two bare `except:` clauses that would catch `KeyboardInterrupt` and `SystemExit`, preventing clean script termination. Same pattern as Bug 23.
 - **Fix:** Changed to `except Exception:` in both locations.
+
+### Bug 33: LiDAR frame_id inconsistency — `laser_frame` vs `laser`
+- **Files:** `clean_bot_hardware/config/rplidar_a1.yaml`, `clean_bot_hardware/launch/rplidar_test.launch.py`, `clean_bot_hardware/scripts/start_lidar.sh`, `clean_bot_description/urdf/lidar.xacro`
+- **Problem:** The URDF defines the LiDAR link as `laser` (line 28 of lidar.xacro), and the main launch file (`robot_bringup.launch.py`) + Nav2 costmap config both use `laser`. However, `rplidar_a1.yaml`, `rplidar_test.launch.py`, and `start_lidar.sh` all used `laser_frame`. If someone launched the LiDAR using these files directly (not through the main bringup), the TF frames wouldn't connect — SLAM and Nav2 would fail because the scan message frame_id wouldn't match the URDF link name.
+- **Fix:** Changed all occurrences of `laser_frame` to `laser` across config, launch, script, and URDF files. Also updated `docs/Clean_Bot_Flow_Diagrams.md` TF tree diagram. Added a test (`test_lidar_frame_id_consistent`) to catch future regressions.
+
+### Bug 34: Arduino driver cmd_vel watchdog never implemented (safety)
+- **File:** `clean_bot_hardware/clean_bot_hardware/arduino_driver.py`
+- **Problem:** The driver stored `last_cmd_time` for a "watchdog" but never actually checked it. If the navigation stack or web app died while the robot was moving, the robot would keep driving at the last velocity indefinitely — a physical safety hazard.
+- **Fix:** Added a watchdog check in `update_loop()` that sends `0,0` (stop motors) to the Arduino if no `cmd_vel` message arrives within 0.5 seconds. Tracks `_motors_stopped` to avoid spamming stop commands.
