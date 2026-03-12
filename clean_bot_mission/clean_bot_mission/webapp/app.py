@@ -295,8 +295,11 @@ class WebBridgeNode(Node):
         }
         safe_name = "".join(c if c.isalnum() or c in "-_ " else "" for c in name).strip().replace(" ", "_")
         path = SAVED_ROOMS_DIR / f"{safe_name}.json"
-        with open(path, "w") as f:
-            json.dump(room, f)
+        try:
+            with open(path, "w") as f:
+                json.dump(room, f)
+        except (TypeError, ValueError, OverflowError) as e:
+            return False, f"JSON serialization error: {e}"
         return True, str(path)
 
     @staticmethod
@@ -333,6 +336,9 @@ class WebBridgeNode(Node):
             return None
         with open(path) as f:
             d = json.load(f)
+        for field in ("width", "height", "data"):
+            if field not in d:
+                return None
         w, h = d["width"], d["height"]
         res = d["resolution"]
         data = np.array(d["data"], dtype=np.int8).reshape((h, w))
@@ -393,17 +399,20 @@ def index():
 def api_status():
     if ros_node is None:
         return jsonify({"error": "ROS not connected"}), 503
-    return jsonify({
-        "mission_state": ros_node.mission_state,
-        "exploration_state": ros_node.exploration_state,
-        "coverage_state": ros_node.coverage_state,
-        "robot_x": ros_node.robot_x,
-        "robot_y": ros_node.robot_y,
-        "robot_yaw": ros_node.robot_yaw,
-        "linear_vel": ros_node.linear_vel,
-        "angular_vel": ros_node.angular_vel,
-        "map_updates": ros_node.map_update_counter,
-    })
+    try:
+        return jsonify({
+            "mission_state": ros_node.mission_state,
+            "exploration_state": ros_node.exploration_state,
+            "coverage_state": ros_node.coverage_state,
+            "robot_x": ros_node.robot_x,
+            "robot_y": ros_node.robot_y,
+            "robot_yaw": ros_node.robot_yaw,
+            "linear_vel": ros_node.linear_vel,
+            "angular_vel": ros_node.angular_vel,
+            "map_updates": ros_node.map_update_counter,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/command", methods=["POST"])
@@ -415,7 +424,10 @@ def api_command():
              "go_home", "reset", "pause", "resume"}
     if cmd not in valid:
         return jsonify({"error": f"Unknown command: {cmd}"}), 400
-    ros_node.send_command(cmd)
+    try:
+        ros_node.send_command(cmd)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
     return jsonify({"ok": True, "command": cmd})
 
 
@@ -425,7 +437,10 @@ def api_velocity():
         return jsonify({"error": "ROS not connected"}), 503
     lin = request.json.get("linear", 0.0)
     ang = request.json.get("angular", 0.0)
-    ros_node.send_velocity(lin, ang)
+    try:
+        ros_node.send_velocity(lin, ang)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
     return jsonify({"ok": True})
 
 
@@ -433,7 +448,10 @@ def api_velocity():
 def api_map():
     if ros_node is None:
         return jsonify({"error": "ROS not connected"}), 503
-    data = ros_node.get_map_data()
+    try:
+        data = ros_node.get_map_data()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
     if data is None:
         return jsonify({"error": "No map available"}), 404
     return jsonify(data)
@@ -451,7 +469,10 @@ def api_save_room():
     name = request.json.get("name", "").strip()
     if not name:
         return jsonify({"error": "Room name required"}), 400
-    ok, info = ros_node.save_room(name)
+    try:
+        ok, info = ros_node.save_room(name)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
     if ok:
         return jsonify({"ok": True, "path": info})
     return jsonify({"error": info}), 400
@@ -461,7 +482,10 @@ def api_save_room():
 def api_room_preview(filename):
     if ros_node is None:
         return jsonify({"error": "ROS not connected"}), 503
-    data = ros_node.load_room_preview(filename)
+    try:
+        data = ros_node.load_room_preview(filename)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
     if data is None:
         return jsonify({"error": "Room not found"}), 404
     return jsonify(data)

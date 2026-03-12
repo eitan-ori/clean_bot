@@ -156,6 +156,47 @@ main{
   transition:all .3s;pointer-events:none;
 }
 .toast.show{opacity:1;transform:translateX(0)}
+
+/* ── Emergency Stop ─────────────────────────────── */
+.estop-btn{
+  width:100%;padding:.85rem;font-size:1.1rem;font-weight:800;
+  background:var(--red);color:#fff;border:3px solid #ff6666;
+  border-radius:var(--radius);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:.5rem;
+  text-transform:uppercase;letter-spacing:.05em;
+  transition:filter .15s,transform .1s;
+}
+.estop-btn:hover{filter:brightness(1.2)}
+.estop-btn:active{transform:scale(.97)}
+@keyframes estop-pulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.5)}50%{box-shadow:0 0 18px 6px rgba(239,68,68,.45)}}
+.estop-btn.pulsing{animation:estop-pulse 1.2s infinite}
+
+/* ── Progress Bar ───────────────────────────────── */
+.progress-wrap{margin-top:.4rem}
+.progress-label{font-size:.8rem;color:var(--text-dim);margin-bottom:.2rem}
+.progress-bar{height:10px;background:#1a1b30;border-radius:5px;overflow:hidden}
+.progress-fill{height:100%;border-radius:5px;background:var(--blue);transition:width .3s}
+@keyframes progress-animate{0%{background-position:0 0}100%{background-position:30px 0}}
+.progress-fill.animated{
+  background:repeating-linear-gradient(45deg,var(--blue),var(--blue) 10px,#5b9cff 10px,#5b9cff 20px);
+  background-size:30px 30px;animation:progress-animate .8s linear infinite;width:100%!important;
+}
+
+/* ── Map Legend ──────────────────────────────────── */
+.map-legend{display:flex;gap:1rem;font-size:.75rem;color:var(--text-dim);flex-wrap:wrap;margin-top:.3rem}
+.map-legend-item{display:flex;align-items:center;gap:.3rem}
+.legend-swatch{width:14px;height:14px;border-radius:3px;border:1px solid #444}
+
+/* ── Map Zoom ───────────────────────────────────── */
+.zoom-controls{display:flex;gap:.4rem;align-items:center;margin-top:.4rem}
+.zoom-controls .btn{font-size:1rem;padding:.3rem .65rem;min-width:34px}
+.zoom-level{font-size:.8rem;color:var(--text-dim)}
+
+/* ── Keyboard Hint ──────────────────────────────── */
+.keyboard-hint{text-align:center;font-size:.72rem;color:var(--text-dim);margin-top:.4rem}
+
+/* ── Scan Timer ─────────────────────────────────── */
+.scan-timer{font-size:.85rem;color:var(--accent);font-weight:600;font-family:monospace}
 </style>
 </head>
 <body>
@@ -185,10 +226,24 @@ main{
       <span>Size: <b id="mapDims">—</b></span>
       <span>Updates: <b id="mapCount">0</b></span>
     </div>
+    <div class="zoom-controls">
+      <button class="btn btn-gray" id="zoomIn">＋</button>
+      <button class="btn btn-gray" id="zoomOut">−</button>
+      <span class="zoom-level">Zoom: <span id="zoomVal">1.0</span>×</span>
+    </div>
+    <div class="map-legend">
+      <span class="map-legend-item"><span class="legend-swatch" style="background:#e6ebf0"></span> Free</span>
+      <span class="map-legend-item"><span class="legend-swatch" style="background:#dc3232"></span> Obstacle</span>
+      <span class="map-legend-item"><span class="legend-swatch" style="background:#282830"></span> Unknown</span>
+      <span class="map-legend-item"><span class="legend-swatch" style="background:#4a9eff"></span> Robot</span>
+    </div>
   </div>
 
   <!-- Right: Panels -->
   <div class="panels">
+    <!-- Emergency Stop -->
+    <button class="estop-btn" id="estopBtn" onclick="emergencyStop()">⚠️ EMERGENCY STOP</button>
+
     <!-- Status -->
     <div class="card">
       <h2>📊 Status</h2>
@@ -198,6 +253,11 @@ main{
         <span class="label">Coverage</span><span id="sCoverage">UNKNOWN</span>
         <span class="label">Position</span><span id="sPos">0, 0</span>
         <span class="label">Velocity</span><span id="sVel">0 m/s</span>
+        <span class="label">Scan Time</span><span id="sScanTimer" class="scan-timer">—</span>
+      </div>
+      <div class="progress-wrap" id="coverageProgressWrap" style="display:none">
+        <div class="progress-label">Coverage</div>
+        <div class="progress-bar"><div class="progress-fill" id="coverageFill" style="width:0%"></div></div>
       </div>
     </div>
 
@@ -235,6 +295,7 @@ main{
         <input type="range" id="speedSlider" min="0.05" max="0.3" step="0.01" value="0.15">
         <span id="speedVal">0.15</span> m/s
       </div>
+      <div class="keyboard-hint">Keyboard: W/A/S/D or arrows, Space=stop</div>
     </div>
 
     <!-- Room Manager -->
@@ -298,6 +359,31 @@ const placeholder = document.getElementById('mapPlaceholder');
 let mapImg = new Image();
 let lastMapData = null;
 
+/* ── Zoom state ────────────────────────────────── */
+let zoomLevel = 1.0;
+const ZOOM_MIN = 0.5, ZOOM_MAX = 4.0, ZOOM_STEP = 0.25;
+function applyZoom() {
+  canvas.style.transform = 'scale(' + zoomLevel + ')';
+  canvas.style.transformOrigin = 'center center';
+  document.getElementById('zoomVal').textContent = zoomLevel.toFixed(1);
+}
+document.getElementById('zoomIn').addEventListener('click', () => {
+  zoomLevel = Math.min(ZOOM_MAX, zoomLevel + ZOOM_STEP);
+  applyZoom();
+});
+document.getElementById('zoomOut').addEventListener('click', () => {
+  zoomLevel = Math.max(ZOOM_MIN, zoomLevel - ZOOM_STEP);
+  applyZoom();
+});
+document.getElementById('mapContainer').addEventListener('wheel', e => {
+  e.preventDefault();
+  zoomLevel = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoomLevel + (e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP)));
+  applyZoom();
+}, {passive: false});
+
+/* ── Velocity tracking for estop pulse & vector ── */
+let currentLinVel = 0, currentAngVel = 0;
+
 socket.on('map_update', data => {
   lastMapData = data;
   placeholder.style.display = 'none';
@@ -339,9 +425,58 @@ function drawMap(data) {
   ctx.lineWidth = 3;
   ctx.strokeStyle = '#fff';
   ctx.stroke();
+
+  // Round 8: Velocity vector
+  if (currentLinVel !== 0 || currentAngVel !== 0) {
+    const vLen = Math.abs(currentLinVel) * r * 8;
+    const vAng = currentAngVel * 15;
+    const vYaw = -data.robot_yaw;
+    const ex = rpx + Math.cos(vYaw) * vLen * Math.sign(currentLinVel || 1);
+    const ey = rpy + Math.sin(vYaw) * vLen * Math.sign(currentLinVel || 1);
+    ctx.beginPath();
+    ctx.moveTo(rpx, rpy);
+    ctx.lineTo(ex, ey);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#34d399';
+    ctx.stroke();
+    // arrowhead
+    const aLen = 8;
+    const angle = Math.atan2(ey - rpy, ex - rpx);
+    ctx.beginPath();
+    ctx.moveTo(ex, ey);
+    ctx.lineTo(ex - aLen * Math.cos(angle - 0.4), ey - aLen * Math.sin(angle - 0.4));
+    ctx.moveTo(ex, ey);
+    ctx.lineTo(ex - aLen * Math.cos(angle + 0.4), ey - aLen * Math.sin(angle + 0.4));
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#34d399';
+    ctx.stroke();
+  }
 }
 
 /* ── Status ────────────────────────────────────── */
+let prevMissionState = 'UNKNOWN';
+
+/* ── Scan Timer (Round 5) ─────────────────────── */
+let scanTimerInterval = null;
+let scanStartTime = null;
+
+function startScanTimer() {
+  if (scanTimerInterval) return;
+  scanStartTime = Date.now();
+  scanTimerInterval = setInterval(updateScanTimer, 1000);
+  updateScanTimer();
+}
+function stopScanTimer() {
+  if (scanTimerInterval) { clearInterval(scanTimerInterval); scanTimerInterval = null; }
+}
+function updateScanTimer() {
+  if (!scanStartTime) return;
+  const elapsed = Math.floor((Date.now() - scanStartTime) / 1000);
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+  const ss = String(elapsed % 60).padStart(2, '0');
+  document.getElementById('sScanTimer').textContent = mm + ':' + ss;
+}
+
 socket.on('status', d => {
   setMissionBadge(d.mission_state);
   document.getElementById('sExplore').textContent = d.exploration_state;
@@ -349,6 +484,42 @@ socket.on('status', d => {
   document.getElementById('sPos').textContent = d.robot_x + ', ' + d.robot_y;
   document.getElementById('sVel').textContent = d.linear_vel + ' m/s · ' + d.angular_vel + ' rad/s';
   document.getElementById('mapCount').textContent = d.map_updates;
+
+  // Track velocity for estop pulse and velocity vector
+  currentLinVel = d.linear_vel;
+  currentAngVel = d.angular_vel;
+  const isMoving = d.linear_vel !== 0 || d.angular_vel !== 0;
+  document.getElementById('estopBtn').classList.toggle('pulsing', isMoving);
+
+  // Round 4: Coverage progress bar
+  const coverageWrap = document.getElementById('coverageProgressWrap');
+  const coverageFill = document.getElementById('coverageFill');
+  const cState = (d.coverage_state || '').toUpperCase();
+  const pctMatch = cState.match(/(\d+)%/);
+  if (pctMatch) {
+    coverageWrap.style.display = '';
+    coverageFill.classList.remove('animated');
+    coverageFill.style.width = pctMatch[1] + '%';
+  } else if (/COVER|ACTIVE|CLEAN/.test(cState) && cState !== 'UNKNOWN' && cState !== 'IDLE') {
+    coverageWrap.style.display = '';
+    coverageFill.classList.add('animated');
+  } else {
+    coverageWrap.style.display = 'none';
+    coverageFill.classList.remove('animated');
+    coverageFill.style.width = '0%';
+  }
+
+  // Round 5: Scan timer
+  const mState = (d.mission_state || '').toUpperCase();
+  if (/EXPLOR/.test(mState) && !/EXPLOR/.test(prevMissionState.toUpperCase())) {
+    startScanTimer();
+  } else if (!/EXPLOR/.test(mState) && /EXPLOR/.test(prevMissionState.toUpperCase())) {
+    stopScanTimer();
+  }
+  prevMissionState = d.mission_state || 'UNKNOWN';
+
+  // Redraw map with velocity vector if available
+  if (lastMapData && mapImg.complete) drawMap(lastMapData);
 });
 
 socket.on('mission_state', d => {
@@ -367,10 +538,21 @@ function setMissionBadge(state) {
   document.getElementById('sMission').innerHTML = '<span class="badge ' + cls + '">' + s + '</span>';
 }
 
-/* ── Commands ──────────────────────────────────── */
+/* ── Commands (Round 7: confirmation dialogs) ── */
+const DESTRUCTIVE_CMDS = new Set(['reset', 'stop_clean', 'stop_scan']);
 window.sendCommand = function(cmd) {
+  if (DESTRUCTIVE_CMDS.has(cmd)) {
+    if (!confirm('Are you sure you want to ' + cmd.replace('_', ' ') + '?')) return;
+  }
   socket.emit('command', {command: cmd});
   toast('Command sent: ' + cmd);
+};
+
+/* ── Emergency Stop (Round 2) ─────────────────── */
+window.emergencyStop = function() {
+  socket.emit('command', {command: 'stop_clean'});
+  socket.emit('velocity', {linear: 0, angular: 0});
+  toast('⚠️ Emergency stop activated!');
 };
 
 /* ── Manual Drive ──────────────────────────────── */
@@ -404,6 +586,34 @@ document.querySelectorAll('#dpad .btn').forEach(btn => {
     sendVelocity(lin, ang);
   });
   btn.addEventListener('touchend', e => { e.preventDefault(); if (!isStop) sendStop(); });
+});
+
+/* ── Keyboard shortcuts (Round 1) ─────────────── */
+const keyMap = {
+  'w': {lin:1, ang:0}, 'arrowup': {lin:1, ang:0},
+  's': {lin:-1, ang:0}, 'arrowdown': {lin:-1, ang:0},
+  'a': {lin:0, ang:1}, 'arrowleft': {lin:0, ang:1},
+  'd': {lin:0, ang:-1}, 'arrowright': {lin:0, ang:-1},
+  ' ': {lin:0, ang:0}
+};
+const keysDown = new Set();
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  const k = e.key.toLowerCase();
+  if (!(k in keyMap)) return;
+  e.preventDefault();
+  if (keysDown.has(k)) return;
+  keysDown.add(k);
+  const m = keyMap[k];
+  if (m.lin === 0 && m.ang === 0) sendStop();
+  else sendVelocity(m.lin, m.ang);
+});
+document.addEventListener('keyup', e => {
+  const k = e.key.toLowerCase();
+  if (!(k in keyMap)) return;
+  keysDown.delete(k);
+  const m = keyMap[k];
+  if (!(m.lin === 0 && m.ang === 0)) sendStop();
 });
 
 /* ── Room Manager ──────────────────────────────── */
@@ -465,6 +675,9 @@ window.closeModal = function(e) {
   if (e && e.target !== document.getElementById('modalOverlay')) return;
   document.getElementById('modalOverlay').classList.remove('active');
 };
+
+/* ── Auto-refresh room list (Round 9) ─────────── */
+setInterval(fetchRooms, 30000);
 
 /* ── Log ───────────────────────────────────────── */
 const logBox = document.getElementById('logBox');
