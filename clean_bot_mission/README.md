@@ -280,9 +280,7 @@ clean_bot_mission/
 │   ├── frontier_explorer.py    # Autonomous exploration
 │   ├── adaptive_coverage.py    # Coverage path planning
 │   ├── full_mission.py         # Combined controller
-│   ├── coverage_mission.py     # Legacy simple coverage
-│   ├── exploration.py          # Legacy waypoint exploration
-│   └── mission.py              # Legacy mission
+│   └── simple_coverage.py      # Simple boustrophedon fallback
 ├── launch/
 │   └── cleaning_mission.launch.py  # Main launch file
 ├── package.xml

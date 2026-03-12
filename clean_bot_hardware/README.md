@@ -7,7 +7,6 @@ ROS 2 hardware drivers and main bringup for the Clean Bot robot.
 | Component | Model | Connection | Driver |
 |-----------|-------|------------|--------|
 | **Motors** | GB37-131 DC Motors | Arduino (L298N) | `arduino_driver` |
-| **Encoders** | Hall Effect (11 CPR) | Arduino (GPIO) | `arduino_driver` |
 | **Ultrasonic** | HC-SR04 | Arduino (GPIO) | `arduino_driver` |
 | **Lidar** | RPLIDAR A1M8 Gen6 | USB Serial | `sllidar_ros2` |
 | **IMU** | Grove 9DOF (ICM20600+AK09918) | I2C | `imu_publisher` |
@@ -17,9 +16,12 @@ ROS 2 hardware drivers and main bringup for the Clean Bot robot.
 ```
 clean_bot_hardware/
 ├── clean_bot_hardware/          # Python modules
-│   ├── arduino_driver.py        # ⭐ Motor/encoder/ultrasonic driver
+│   ├── arduino_driver.py        # ⭐ Motor/ultrasonic/cleaning driver
+│   ├── emergency_stop.py        # Safety velocity filter
+│   ├── low_obstacle_detector.py # Ultrasonic → PointCloud2
 │   ├── imu_publisher_node.py    # IMU ROS publisher
 │   ├── simple_imu_driver.py     # Low-level IMU I2C driver
+│   ├── rplidar_test.py          # Lidar diagnostic tool
 │   └── imu_odom_broadcaster.py  # TF broadcaster (legacy)
 ├── config/
 │   ├── ekf.yaml                 # Robot Localization EKF config
@@ -93,12 +95,6 @@ Edit these in launch or pass as arguments:
 |-----------|---------|-------------|
 | `wheel_radius` | 0.034m | Wheel radius (measure your wheels!) |
 | `wheel_separation` | 0.20m | Distance between wheels |
-| `ticks_per_revolution` | 1320 | Encoder CPR × Gear ratio |
-
-**How to measure:**
-- **wheel_radius**: Measure wheel diameter with calipers, divide by 2
-- **wheel_separation**: Measure center-to-center distance between wheels
-- **ticks_per_revolution**: For GB37-131: 11 (CPR) × 120 (gear ratio) = 1320
 
 ## 📡 Topics
 
@@ -106,7 +102,7 @@ Edit these in launch or pass as arguments:
 
 | Topic | Type | Description |
 |-------|------|-------------|
-| `/wheel_odom` | nav_msgs/Odometry | Wheel odometry from encoders |
+| `/odom` | nav_msgs/Odometry | Laser-based odometry (rf2o) |
 | `/ultrasonic_range` | sensor_msgs/Range | Distance from ultrasonic |
 | `/scan` | sensor_msgs/LaserScan | Lidar scan data |
 | `/imu/data_raw` | sensor_msgs/Imu | Raw IMU (accel+gyro) |
