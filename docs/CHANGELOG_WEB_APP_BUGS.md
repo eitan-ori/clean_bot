@@ -171,3 +171,13 @@
 - **File:** `clean_bot_hardware/clean_bot_hardware/arduino_driver.py`
 - **Problem:** The driver stored `last_cmd_time` for a "watchdog" but never actually checked it. If the navigation stack or web app died while the robot was moving, the robot would keep driving at the last velocity indefinitely — a physical safety hazard.
 - **Fix:** Added a watchdog check in `update_loop()` that sends `0,0` (stop motors) to the Arduino if no `cmd_vel` message arrives within 0.5 seconds. Tracks `_motors_stopped` to avoid spamming stop commands.
+
+### Bug 35: Room names with single quotes break UI onclick handlers
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/templates/index.html` (`esc()` helper)
+- **Problem:** The `esc()` HTML escaper used `textContent → innerHTML` which escapes `<>&"` but NOT single quotes (`'`). Room names with single quotes (e.g., "Bob's Room") would break inline `onclick="renameRoom('...')"` attributes, causing JavaScript syntax errors and making those room buttons non-functional.
+- **Fix:** Added `.replace(/'/g, '&#39;')` to the `esc()` function to also escape single quotes for safe use in HTML attribute contexts.
+
+### Bug 36: Room preview crashes on corrupted data length
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`load_room_preview`)
+- **Problem:** `load_room_preview` checked for missing fields but not data array length. A corrupted room file where `len(data) != width * height` would crash with `numpy.reshape` ValueError instead of returning `None` gracefully. Also, `resolution` field was not in the required-fields check.
+- **Fix:** Added validation: `w <= 0 or h <= 0 or len(data) != w * h` returns `None`. Added `resolution` to required fields list.

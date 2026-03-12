@@ -629,10 +629,12 @@ class WebBridgeNode(Node):
                 d = json.load(f)
         except (json.JSONDecodeError, OSError):
             return None
-        for field in ("width", "height", "data"):
+        for field in ("width", "height", "data", "resolution"):
             if field not in d:
                 return None
         w, h = d["width"], d["height"]
+        if w <= 0 or h <= 0 or len(d["data"]) != w * h:
+            return None
         res = d["resolution"]
         data = np.array(d["data"], dtype=np.int8).reshape((h, w))
 

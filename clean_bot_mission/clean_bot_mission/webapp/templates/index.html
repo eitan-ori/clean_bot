@@ -1222,7 +1222,7 @@ function toast(msg) {
 }
 
 /* ── Helpers ───────────────────────────────────── */
-function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML.replace(/'/g, '&#39;'); }
 
 /* ── Init: set smart button states ─────────────── */
 updateButtonStates('UNKNOWN');

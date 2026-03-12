@@ -696,6 +696,17 @@ class TestRoomFileOps:
         result = webapp_module.WebBridgeNode.load_room_preview("Incomplete")
         assert result is None
 
+    def test_load_room_preview_data_length_mismatch(self, temp_rooms_dir):
+        """Bug 36: Corrupted room with wrong data length should return None, not crash."""
+        webapp_module.SAVED_ROOMS_DIR = temp_rooms_dir
+        import json
+        room = {"name": "Bad", "width": 10, "height": 10, "resolution": 0.05,
+                "data": [0] * 50}  # 50 != 10*10
+        with open(temp_rooms_dir / "Bad.json", "w") as f:
+            json.dump(room, f)
+        result = webapp_module.WebBridgeNode.load_room_preview("Bad")
+        assert result is None
+
 
 # ── Coverage Algorithm Tests ────────────────────────────────────────────────
 class TestCoverageAlgorithm:
