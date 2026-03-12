@@ -34,7 +34,7 @@ All documentation changes made during the cleanup (`cleanup/streamline-project` 
 - Added note about auto-send map on completion
 
 ### `clean_bot_mission/scripts/TELEGRAM_README.md` — Updated
-- Token instructions reference `CLEANBOT_TELEGRAM_TOKEN` env var
+- Updated token setup instructions
 - Removed hardcoded token references
 
 ---

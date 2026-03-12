@@ -38,7 +38,6 @@ Telegram Commands:
 Author: Clean Bot Team
 """
 
-import os
 import sys
 import logging
 import asyncio
@@ -70,7 +69,7 @@ except ImportError:
     sys.exit(1)
 
 # ==================== USER SETTINGS ====================
-TELEGRAM_TOKEN = os.environ.get('CLEANBOT_TELEGRAM_TOKEN', '')
+TELEGRAM_TOKEN = '8604621353:AAG323rLiMZrc0A1vcyCepDalC_h3o7Fb0Q'  # Your bot token from BotFather
 ALLOWED_USER_IDS = None  # Set to [123456789] to restrict access, or None for all users
 # =======================================================
 
@@ -568,10 +567,6 @@ def main():
     time.sleep(2.0)
     
     # Build Telegram application
-    if not TELEGRAM_TOKEN:
-        print("❌ CLEANBOT_TELEGRAM_TOKEN environment variable not set!")
-        print("   export CLEANBOT_TELEGRAM_TOKEN='your_token_from_botfather'")
-        sys.exit(1)
     print("Starting Telegram bot...")
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     

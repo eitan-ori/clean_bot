@@ -126,7 +126,6 @@ This single command brings up the entire stack:
 
 ```bash
 export ROS_DOMAIN_ID=<same as Pi>
-export CLEANBOT_TELEGRAM_TOKEN='your_token_from_botfather'
 source ~/robot_ws/install/setup.bash
 ros2 run clean_bot_mission telegram_bridge
 ```
