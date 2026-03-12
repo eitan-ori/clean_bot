@@ -229,24 +229,6 @@ class ArduinoDriver(Node):
 
         return pwm if wheel_speed_mps > 0 else -pwm
 
-    def _velocity_to_pwm(self, velocity: float) -> int:
-        """Convert velocity (m/s) to PWM value (-255 to 255)."""
-        if abs(velocity) < 0.001:
-            return 0
-        
-        # Linear mapping (could be improved with calibration curve)
-        pwm = int((velocity / self.max_linear_speed) * self.max_pwm)
-        
-        # Minimum PWM threshold - motors won't move below ~90 PWM
-        MIN_PWM = 90
-        if 0 < pwm < MIN_PWM:
-            pwm = MIN_PWM
-        elif -MIN_PWM < pwm < 0:
-            pwm = -MIN_PWM
-        
-        # Clamp to valid range
-        return max(-self.max_pwm, min(self.max_pwm, pwm))
-
     def update_loop(self):
         """Main update loop - read from Arduino and publish ultrasonic data."""
         now = self.get_clock().now()
