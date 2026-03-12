@@ -707,6 +707,17 @@ class TestRoomFileOps:
         result = webapp_module.WebBridgeNode.load_room_preview("Bad")
         assert result is None
 
+    def test_rename_room_special_chars_name(self, temp_rooms_dir):
+        """Bug 37: Renaming to all-special-chars should fail, not create '.json'."""
+        webapp_module.SAVED_ROOMS_DIR = temp_rooms_dir
+        import json
+        room = {"name": "Test", "width": 2, "height": 2, "resolution": 0.05, "data": [0]*4}
+        with open(temp_rooms_dir / "Test.json", "w") as f:
+            json.dump(room, f)
+        ok, info = webapp_module.WebBridgeNode.rename_room("Test", "@#$%")
+        assert not ok
+        assert "alphanumeric" in info.lower()
+
 
 # ── Coverage Algorithm Tests ────────────────────────────────────────────────
 class TestCoverageAlgorithm:

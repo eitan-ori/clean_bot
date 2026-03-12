@@ -181,3 +181,8 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`load_room_preview`)
 - **Problem:** `load_room_preview` checked for missing fields but not data array length. A corrupted room file where `len(data) != width * height` would crash with `numpy.reshape` ValueError instead of returning `None` gracefully. Also, `resolution` field was not in the required-fields check.
 - **Fix:** Added validation: `w <= 0 or h <= 0 or len(data) != w * h` returns `None`. Added `resolution` to required fields list.
+
+### Bug 37: Room save/rename with all-special-characters name creates '.json' file
+- **Files:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`save_room`, `rename_room`)
+- **Problem:** If a room name consisted entirely of special characters (e.g., `@#$%`), the filename sanitization would produce an empty string, resulting in a file named `.json` — a hidden file that would be hard to manage. Same issue in `rename_room`.
+- **Fix:** Added `if not safe_name:` guard after sanitization, returning a clear error message asking for at least one alphanumeric character.

@@ -460,6 +460,8 @@ class WebBridgeNode(Node):
             "data": list(m.data),
         }
         safe_name = "".join(c if c.isalnum() or c in "-_ " else "" for c in name).strip().replace(" ", "_")
+        if not safe_name:
+            return False, "Room name must contain at least one alphanumeric character"
         path = SAVED_ROOMS_DIR / f"{safe_name}.json"
         try:
             with open(path, "w") as f:
@@ -479,6 +481,8 @@ class WebBridgeNode(Node):
                 d = json.load(f)
             d["name"] = new_name
             safe_new = "".join(c if c.isalnum() or c in "-_ " else "" for c in new_name).strip().replace(" ", "_")
+            if not safe_new:
+                return False, "New name must contain at least one alphanumeric character"
             new_path = SAVED_ROOMS_DIR / f"{safe_new}.json"
             if new_path != path:
                 with open(new_path, "w") as f:
