@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Clean Bot Control Panel</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#1a1b2e;--card:#252640;--card-hover:#2d2e4a;
+  --accent:#4a9eff;--text:#e0e0f0;--text-dim:#8888aa;
+  --green:#34d399;--orange:#f59e0b;--red:#ef4444;--purple:#a78bfa;
+  --yellow:#fbbf24;--gray:#6b7280;--blue:#3b82f6;
+  --radius:10px;--shadow:0 2px 12px rgba(0,0,0,.35);
+}
+html{font-size:14px}
+body{
+  font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  background:var(--bg);color:var(--text);
+  min-height:100vh;display:flex;flex-direction:column;
+}
+/* ── Header ──────────────────────────────────────── */
+header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:.75rem 1.5rem;background:#16172a;border-bottom:1px solid #2a2b44;
+}
+header h1{font-size:1.25rem;font-weight:700;letter-spacing:.02em}
+.conn-indicator{display:flex;align-items:center;gap:.4rem;font-size:.85rem;color:var(--text-dim)}
+.conn-dot{width:10px;height:10px;border-radius:50%;background:var(--red);transition:background .3s}
+.conn-dot.connected{background:var(--green)}
+
+/* ── Main Grid ───────────────────────────────────── */
+main{
+  display:grid;grid-template-columns:65% 35%;gap:1rem;
+  padding:1rem;flex:1;overflow:hidden;
+}
+@media(max-width:960px){main{grid-template-columns:1fr;overflow:auto}}
+
+/* ── Cards ───────────────────────────────────────── */
+.card{
+  background:var(--card);border-radius:var(--radius);
+  padding:1rem;box-shadow:var(--shadow);
+}
+.card h2{font-size:1rem;margin-bottom:.65rem;display:flex;align-items:center;gap:.4rem;color:var(--accent)}
+
+/* ── Map Area ────────────────────────────────────── */
+.map-wrap{display:flex;flex-direction:column;gap:.75rem;overflow:hidden}
+.map-container{
+  position:relative;flex:1;min-height:300px;
+  border:1px solid #333;border-radius:var(--radius);overflow:hidden;
+  background:#101020;display:flex;align-items:center;justify-content:center;
+}
+#mapCanvas{max-width:100%;max-height:100%;display:block}
+.map-placeholder{color:var(--text-dim);font-size:.95rem}
+.map-info{display:flex;gap:1.5rem;font-size:.8rem;color:var(--text-dim);flex-wrap:wrap}
+.map-info span{display:flex;align-items:center;gap:.3rem}
+
+/* ── Right Panels ────────────────────────────────── */
+.panels{display:flex;flex-direction:column;gap:.75rem;overflow-y:auto;padding-right:.25rem}
+.panels::-webkit-scrollbar{width:5px}
+.panels::-webkit-scrollbar-thumb{background:#444;border-radius:4px}
+
+/* ── Status Panel ────────────────────────────────── */
+.status-grid{display:grid;grid-template-columns:1fr 1fr;gap:.4rem .8rem;font-size:.85rem}
+.status-grid .label{color:var(--text-dim)}
+.badge{
+  display:inline-block;padding:.15rem .5rem;border-radius:20px;
+  font-size:.75rem;font-weight:600;text-transform:uppercase;
+}
+.badge-green{background:rgba(52,211,153,.18);color:var(--green)}
+.badge-blue{background:rgba(59,130,246,.18);color:var(--blue)}
+.badge-orange{background:rgba(245,158,11,.18);color:var(--orange)}
+.badge-red{background:rgba(239,68,68,.18);color:var(--red)}
+.badge-gray{background:rgba(107,114,128,.18);color:var(--gray)}
+
+/* ── Buttons ─────────────────────────────────────── */
+.btn{
+  border:none;border-radius:8px;padding:.55rem .75rem;cursor:pointer;
+  font-size:.85rem;font-weight:600;color:#fff;
+  transition:transform .1s,filter .15s;display:flex;align-items:center;justify-content:center;gap:.3rem;
+}
+.btn:hover{filter:brightness(1.15)}
+.btn:active{transform:scale(.96)}
+.btn-green{background:var(--green);color:#000}
+.btn-orange{background:var(--orange);color:#000}
+.btn-blue{background:var(--blue)}
+.btn-purple{background:var(--purple)}
+.btn-gray{background:var(--gray)}
+.btn-yellow{background:var(--yellow);color:#000}
+.btn-red{background:var(--red)}
+.btn-sm{padding:.35rem .55rem;font-size:.78rem}
+
+/* ── Mission Control Grid ────────────────────────── */
+.cmd-grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
+
+/* ── D-Pad ───────────────────────────────────────── */
+.dpad{display:grid;grid-template-columns:repeat(3,1fr);gap:.35rem;max-width:200px;margin:0 auto}
+.dpad .btn{aspect-ratio:1;font-size:1.2rem;border-radius:10px;background:#353660}
+.dpad .btn:hover{background:#4a4b78}
+.dpad .btn.stop-btn{background:var(--red);font-size:.7rem;font-weight:700}
+.dpad .empty{visibility:hidden}
+.speed-row{display:flex;align-items:center;gap:.5rem;margin-top:.5rem;font-size:.82rem}
+.speed-row input[type=range]{flex:1;accent-color:var(--accent)}
+
+/* ── Room Manager ────────────────────────────────── */
+.room-save-row{display:flex;gap:.4rem;margin-bottom:.6rem}
+.room-save-row input{
+  flex:1;padding:.4rem .6rem;border-radius:6px;border:1px solid #444;
+  background:#1e1f36;color:var(--text);font-size:.85rem;outline:none;
+}
+.room-save-row input:focus{border-color:var(--accent)}
+.room-list{max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:.4rem}
+.room-item{
+  display:flex;align-items:center;justify-content:space-between;
+  background:#1e1f36;border-radius:8px;padding:.45rem .65rem;font-size:.82rem;
+}
+.room-item .room-name{font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.room-item .room-date{color:var(--text-dim);font-size:.72rem;margin-left:.5rem;white-space:nowrap}
+.room-actions{display:flex;gap:.3rem;margin-left:.5rem;flex-shrink:0}
+
+/* ── Mission Log ─────────────────────────────────── */
+.log-box{
+  max-height:160px;overflow-y:auto;background:#1a1b30;
+  border-radius:8px;padding:.5rem;font-size:.78rem;font-family:monospace;
+}
+.log-box::-webkit-scrollbar{width:4px}
+.log-box::-webkit-scrollbar-thumb{background:#444;border-radius:3px}
+.log-entry{padding:.15rem 0;border-bottom:1px solid #2228;display:flex;gap:.5rem}
+.log-time{color:var(--accent);flex-shrink:0}
+.log-event{color:var(--text-dim)}
+
+/* ── Modal ───────────────────────────────────────── */
+.modal-overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;
+  align-items:center;justify-content:center;z-index:1000;
+}
+.modal-overlay.active{display:flex}
+.modal{
+  background:var(--card);border-radius:var(--radius);padding:1.25rem;
+  max-width:90vw;max-height:90vh;overflow:auto;position:relative;min-width:320px;
+}
+.modal h3{margin-bottom:.75rem;color:var(--accent)}
+.modal img{max-width:100%;border-radius:8px}
+.modal-close{
+  position:absolute;top:.6rem;right:.75rem;background:none;border:none;
+  color:var(--text-dim);font-size:1.3rem;cursor:pointer;
+}
+.modal-close:hover{color:var(--text)}
+.modal-meta{margin-top:.6rem;font-size:.8rem;color:var(--text-dim)}
+
+/* ── Toast ───────────────────────────────────────── */
+.toast-container{position:fixed;top:1rem;right:1rem;z-index:2000;display:flex;flex-direction:column;gap:.4rem}
+.toast{
+  background:#353660;color:var(--text);padding:.55rem 1rem;border-radius:8px;
+  font-size:.82rem;box-shadow:var(--shadow);opacity:0;transform:translateX(30px);
+  transition:all .3s;pointer-events:none;
+}
+.toast.show{opacity:1;transform:translateX(0)}
+</style>
+</head>
+<body>
+
+<!-- ═══ Header ═══ -->
+<header>
+  <h1>🤖 Clean Bot Control Panel</h1>
+  <div class="conn-indicator">
+    <div class="conn-dot" id="connDot"></div>
+    <span id="connLabel">Disconnected</span>
+  </div>
+</header>
+
+<!-- ═══ Main ═══ -->
+<main>
+  <!-- Left: Map -->
+  <div class="map-wrap">
+    <div class="card" style="flex:1;display:flex;flex-direction:column">
+      <h2>🗺️ Live Map</h2>
+      <div class="map-container" id="mapContainer">
+        <canvas id="mapCanvas" width="500" height="500"></canvas>
+        <div class="map-placeholder" id="mapPlaceholder">Waiting for map data…</div>
+      </div>
+    </div>
+    <div class="map-info" id="mapInfo">
+      <span>Resolution: <b id="mapRes">—</b> m/px</span>
+      <span>Size: <b id="mapDims">—</b></span>
+      <span>Updates: <b id="mapCount">0</b></span>
+    </div>
+  </div>
+
+  <!-- Right: Panels -->
+  <div class="panels">
+    <!-- Status -->
+    <div class="card">
+      <h2>📊 Status</h2>
+      <div class="status-grid">
+        <span class="label">Mission</span><span id="sMission"><span class="badge badge-gray">UNKNOWN</span></span>
+        <span class="label">Exploration</span><span id="sExplore">UNKNOWN</span>
+        <span class="label">Coverage</span><span id="sCoverage">UNKNOWN</span>
+        <span class="label">Position</span><span id="sPos">0, 0</span>
+        <span class="label">Velocity</span><span id="sVel">0 m/s</span>
+      </div>
+    </div>
+
+    <!-- Mission Control -->
+    <div class="card">
+      <h2>🎮 Mission Control</h2>
+      <div class="cmd-grid">
+        <button class="btn btn-green" onclick="sendCommand('start_scan')">🔍 Scan Room</button>
+        <button class="btn btn-orange" onclick="sendCommand('stop_scan')">⏹ Stop Scan</button>
+        <button class="btn btn-blue" onclick="sendCommand('start_clean')">🧹 Clean Room</button>
+        <button class="btn btn-orange" onclick="sendCommand('stop_clean')">⏹ Stop Clean</button>
+        <button class="btn btn-purple" onclick="sendCommand('go_home')">🏠 Go Home</button>
+        <button class="btn btn-gray" onclick="sendCommand('reset')">🔄 Reset</button>
+        <button class="btn btn-yellow" onclick="sendCommand('pause')">⏸ Pause</button>
+        <button class="btn btn-green" onclick="sendCommand('resume')">▶ Resume</button>
+      </div>
+    </div>
+
+    <!-- Manual Drive -->
+    <div class="card">
+      <h2>🕹️ Manual Drive</h2>
+      <div class="dpad" id="dpad">
+        <div class="empty"></div>
+        <button class="btn" data-lin="1" data-ang="0">↑</button>
+        <div class="empty"></div>
+        <button class="btn" data-lin="0" data-ang="1">←</button>
+        <button class="btn stop-btn" data-lin="0" data-ang="0">STOP</button>
+        <button class="btn" data-lin="0" data-ang="-1">→</button>
+        <div class="empty"></div>
+        <button class="btn" data-lin="-1" data-ang="0">↓</button>
+        <div class="empty"></div>
+      </div>
+      <div class="speed-row">
+        <span>Speed</span>
+        <input type="range" id="speedSlider" min="0.05" max="0.3" step="0.01" value="0.15">
+        <span id="speedVal">0.15</span> m/s
+      </div>
+    </div>
+
+    <!-- Room Manager -->
+    <div class="card">
+      <h2>🏠 Room Manager</h2>
+      <div class="room-save-row">
+        <input type="text" id="roomName" placeholder="Room name…">
+        <button class="btn btn-blue btn-sm" onclick="saveRoom()">Save Room</button>
+      </div>
+      <div class="room-list" id="roomList"></div>
+    </div>
+
+    <!-- Mission Log -->
+    <div class="card">
+      <h2>📜 Mission Log</h2>
+      <div class="log-box" id="logBox"></div>
+    </div>
+  </div>
+</main>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
+  <div class="modal" id="modal">
+    <button class="modal-close" onclick="closeModal()">&times;</button>
+    <h3 id="modalTitle">Room Preview</h3>
+    <img id="modalImg" src="" alt="Room map">
+    <div class="modal-meta" id="modalMeta"></div>
+  </div>
+</div>
+
+<!-- Toasts -->
+<div class="toast-container" id="toasts"></div>
+
+<!-- ═══ Scripts ═══ -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js"></script>
+<script>
+(function(){
+"use strict";
+
+/* ── Socket.IO ─────────────────────────────────── */
+const socket = io();
+const connDot = document.getElementById('connDot');
+const connLabel = document.getElementById('connLabel');
+
+socket.on('connect', () => {
+  connDot.classList.add('connected');
+  connLabel.textContent = 'Connected';
+  socket.emit('request_map');
+  fetchLog();
+  fetchRooms();
+});
+socket.on('disconnect', () => {
+  connDot.classList.remove('connected');
+  connLabel.textContent = 'Disconnected';
+});
+
+/* ── Map Rendering ─────────────────────────────── */
+const canvas = document.getElementById('mapCanvas');
+const ctx = canvas.getContext('2d');
+const placeholder = document.getElementById('mapPlaceholder');
+let mapImg = new Image();
+let lastMapData = null;
+
+socket.on('map_update', data => {
+  lastMapData = data;
+  placeholder.style.display = 'none';
+  mapImg = new Image();
+  mapImg.onload = () => drawMap(data);
+  mapImg.src = 'data:image/png;base64,' + data.image_b64;
+  document.getElementById('mapRes').textContent = data.resolution.toFixed(3);
+  document.getElementById('mapDims').textContent = data.width + ' × ' + data.height;
+  document.getElementById('mapCount').textContent = data.map_updates;
+});
+
+function drawMap(data) {
+  canvas.width = mapImg.naturalWidth;
+  canvas.height = mapImg.naturalHeight;
+  ctx.drawImage(mapImg, 0, 0);
+
+  // Scale factor if image was upscaled in backend
+  const sx = canvas.width / data.width;
+  const sy = canvas.height / data.height;
+  const rpx = data.robot_px * sx;
+  const rpy = data.robot_py * sy;
+  const r = Math.max(6, Math.min(sx, sy) * 3);
+
+  // Robot circle
+  ctx.beginPath();
+  ctx.arc(rpx, rpy, r, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(74,158,255,0.85)';
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#fff';
+  ctx.stroke();
+
+  // Direction arrow
+  const yaw = -data.robot_yaw; // canvas Y is flipped
+  const len = r * 2.2;
+  ctx.beginPath();
+  ctx.moveTo(rpx, rpy);
+  ctx.lineTo(rpx + Math.cos(yaw) * len, rpy + Math.sin(yaw) * len);
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = '#fff';
+  ctx.stroke();
+}
+
+/* ── Status ────────────────────────────────────── */
+socket.on('status', d => {
+  setMissionBadge(d.mission_state);
+  document.getElementById('sExplore').textContent = d.exploration_state;
+  document.getElementById('sCoverage').textContent = d.coverage_state;
+  document.getElementById('sPos').textContent = d.robot_x + ', ' + d.robot_y;
+  document.getElementById('sVel').textContent = d.linear_vel + ' m/s · ' + d.angular_vel + ' rad/s';
+  document.getElementById('mapCount').textContent = d.map_updates;
+});
+
+socket.on('mission_state', d => {
+  setMissionBadge(d.state);
+  if (d.log_entry) addLogEntry(d.log_entry);
+});
+
+function setMissionBadge(state) {
+  const s = (state || 'UNKNOWN').toUpperCase();
+  let cls = 'badge-gray';
+  if (/EXPLOR|SCAN|ACTIVE/.test(s)) cls = 'badge-green';
+  else if (/COVER|CLEAN/.test(s)) cls = 'badge-blue';
+  else if (/PAUSE/.test(s)) cls = 'badge-orange';
+  else if (/ERROR|FAIL|ABORT/.test(s)) cls = 'badge-red';
+  else if (/IDLE|WAIT|HOME|UNKNOWN/.test(s)) cls = 'badge-gray';
+  document.getElementById('sMission').innerHTML = '<span class="badge ' + cls + '">' + s + '</span>';
+}
+
+/* ── Commands ──────────────────────────────────── */
+window.sendCommand = function(cmd) {
+  socket.emit('command', {command: cmd});
+  toast('Command sent: ' + cmd);
+};
+
+/* ── Manual Drive ──────────────────────────────── */
+const speedSlider = document.getElementById('speedSlider');
+const speedVal = document.getElementById('speedVal');
+speedSlider.addEventListener('input', () => { speedVal.textContent = speedSlider.value; });
+
+function sendVelocity(linear, angular) {
+  const speed = parseFloat(speedSlider.value);
+  socket.emit('velocity', {linear: linear * speed, angular: angular * speed * 4});
+}
+function sendStop() {
+  socket.emit('velocity', {linear: 0, angular: 0});
+}
+
+document.querySelectorAll('#dpad .btn').forEach(btn => {
+  const lin = parseFloat(btn.dataset.lin);
+  const ang = parseFloat(btn.dataset.ang);
+  const isStop = lin === 0 && ang === 0;
+
+  btn.addEventListener('mousedown', e => {
+    e.preventDefault();
+    if (isStop) { sendStop(); return; }
+    sendVelocity(lin, ang);
+  });
+  btn.addEventListener('mouseup', e => { e.preventDefault(); if (!isStop) sendStop(); });
+  btn.addEventListener('mouseleave', e => { e.preventDefault(); if (!isStop) sendStop(); });
+  btn.addEventListener('touchstart', e => {
+    e.preventDefault();
+    if (isStop) { sendStop(); return; }
+    sendVelocity(lin, ang);
+  });
+  btn.addEventListener('touchend', e => { e.preventDefault(); if (!isStop) sendStop(); });
+});
+
+/* ── Room Manager ──────────────────────────────── */
+function fetchRooms() {
+  fetch('/api/rooms').then(r => r.json()).then(renderRooms).catch(() => {});
+}
+
+function renderRooms(rooms) {
+  const el = document.getElementById('roomList');
+  if (!rooms.length) { el.innerHTML = '<div style="color:var(--text-dim);font-size:.82rem;padding:.3rem">No saved rooms</div>'; return; }
+  el.innerHTML = rooms.map(r => {
+    const date = r.saved_at ? new Date(r.saved_at).toLocaleDateString() : '';
+    return '<div class="room-item">' +
+      '<span class="room-name">' + esc(r.name) + '</span>' +
+      '<span class="room-date">' + date + '</span>' +
+      '<div class="room-actions">' +
+        '<button class="btn btn-blue btn-sm" onclick="previewRoom(\'' + esc(r.filename) + '\',\'' + esc(r.name) + '\')">Preview</button>' +
+        '<button class="btn btn-green btn-sm" onclick="cleanRoom(\'' + esc(r.filename) + '\')">Clean</button>' +
+        '<button class="btn btn-red btn-sm" onclick="deleteRoom(\'' + esc(r.filename) + '\')">Delete</button>' +
+      '</div></div>';
+  }).join('');
+}
+
+window.saveRoom = function() {
+  const name = document.getElementById('roomName').value.trim();
+  if (!name) { toast('Enter a room name'); return; }
+  fetch('/api/rooms/save', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})})
+    .then(r => r.json()).then(d => {
+      if (d.ok) { toast('Room saved: ' + name); document.getElementById('roomName').value = ''; fetchRooms(); }
+      else toast(d.error || 'Save failed');
+    }).catch(() => toast('Save failed'));
+};
+
+window.previewRoom = function(filename, name) {
+  fetch('/api/rooms/' + filename + '/preview').then(r => r.json()).then(d => {
+    if (d.error) { toast(d.error); return; }
+    document.getElementById('modalTitle').textContent = d.name || name;
+    document.getElementById('modalImg').src = 'data:image/png;base64,' + d.image_b64;
+    document.getElementById('modalMeta').textContent =
+      'Size: ' + d.width + '×' + d.height + '  ·  Resolution: ' + d.resolution + ' m/px  ·  Saved: ' + (d.saved_at || '');
+    document.getElementById('modalOverlay').classList.add('active');
+  }).catch(() => toast('Preview failed'));
+};
+
+window.cleanRoom = function(filename) {
+  sendCommand('start_clean');
+  toast('Cleaning room…');
+};
+
+window.deleteRoom = function(filename) {
+  if (!confirm('Delete this room?')) return;
+  fetch('/api/rooms/' + filename, {method:'DELETE'}).then(r => r.json()).then(d => {
+    if (d.ok) { toast('Room deleted'); fetchRooms(); }
+    else toast(d.error || 'Delete failed');
+  }).catch(() => toast('Delete failed'));
+};
+
+window.closeModal = function(e) {
+  if (e && e.target !== document.getElementById('modalOverlay')) return;
+  document.getElementById('modalOverlay').classList.remove('active');
+};
+
+/* ── Log ───────────────────────────────────────── */
+const logBox = document.getElementById('logBox');
+
+function addLogEntry(entry) {
+  const div = document.createElement('div');
+  div.className = 'log-entry';
+  div.innerHTML = '<span class="log-time">' + esc(entry.time) + '</span><span class="log-event">' + esc(entry.event) + '</span>';
+  logBox.appendChild(div);
+  logBox.scrollTop = logBox.scrollHeight;
+}
+
+function fetchLog() {
+  fetch('/api/log').then(r => r.json()).then(entries => {
+    logBox.innerHTML = '';
+    entries.forEach(addLogEntry);
+  }).catch(() => {});
+}
+
+/* ── Toast ─────────────────────────────────────── */
+function toast(msg) {
+  const c = document.getElementById('toasts');
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = msg;
+  c.appendChild(t);
+  requestAnimationFrame(() => t.classList.add('show'));
+  setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 350); }, 2500);
+}
+
+/* ── Helpers ───────────────────────────────────── */
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+})();
+</script>
+</body>
+</html>
