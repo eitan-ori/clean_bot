@@ -298,6 +298,82 @@ html.light .mute-toggle:hover{background:#e8e8e8}
 
 /* ── Header controls row ──────────────────────── */
 .header-controls{display:flex;align-items:center;gap:.6rem}
+
+/* ── Round 31: Stats Panel ─────────────────────── */
+.stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:.3rem .8rem;font-size:.82rem}
+.stats-grid .stat-val{font-weight:700;color:var(--accent)}
+
+/* ── Round 32: Heatmap Toggle ──────────────────── */
+.map-toggles{display:flex;gap:1rem;font-size:.8rem;color:var(--text-dim);align-items:center;margin-top:.3rem;flex-wrap:wrap}
+.map-toggles label{display:flex;align-items:center;gap:.3rem;cursor:pointer}
+.map-toggles input[type=checkbox]{accent-color:var(--accent)}
+
+/* ── Round 33: Schedule Panel ──────────────────── */
+.sched-form{display:flex;gap:.4rem;margin-bottom:.6rem;flex-wrap:wrap;align-items:center}
+.sched-form input[type=time]{
+  padding:.35rem .5rem;border-radius:6px;border:1px solid #444;
+  background:#1e1f36;color:var(--text);font-size:.82rem;outline:none;
+}
+.sched-form input[type=time]:focus{border-color:var(--accent)}
+.sched-days{display:flex;gap:.25rem;flex-wrap:wrap}
+.sched-days label{font-size:.72rem;display:flex;align-items:center;gap:.15rem;cursor:pointer;
+  background:#1e1f36;padding:.2rem .35rem;border-radius:4px}
+.sched-days input[type=checkbox]{width:14px;height:14px;accent-color:var(--accent)}
+.sched-list{max-height:140px;overflow-y:auto;display:flex;flex-direction:column;gap:.35rem}
+.sched-item{display:flex;align-items:center;justify-content:space-between;
+  background:#1e1f36;border-radius:6px;padding:.35rem .55rem;font-size:.8rem}
+.sched-item .sched-time{font-weight:700;color:var(--accent);margin-right:.5rem}
+.sched-item .sched-days-label{color:var(--text-dim);flex:1}
+
+/* ── Round 34: Battery Indicator ───────────────── */
+.battery-wrap{display:flex;align-items:center;gap:.3rem;font-size:.78rem;color:var(--text-dim)}
+.battery-icon{position:relative;width:28px;height:14px;border:2px solid var(--text-dim);border-radius:3px;overflow:hidden}
+.battery-icon::after{content:'';position:absolute;right:-5px;top:3px;width:3px;height:6px;background:var(--text-dim);border-radius:0 2px 2px 0}
+.battery-fill{height:100%;transition:width .5s,background .5s}
+.battery-fill.high{background:var(--green)}
+.battery-fill.medium{background:var(--yellow)}
+.battery-fill.low{background:var(--red)}
+
+/* ── Round 36: Language Selector ───────────────── */
+.lang-selector{
+  background:none;border:1px solid #444;border-radius:6px;padding:.2rem .45rem;
+  cursor:pointer;font-size:.8rem;color:var(--text);font-weight:600;transition:background .2s;
+}
+.lang-selector:hover{background:#333}
+html.light .lang-selector{border-color:#ccc}
+html.light .lang-selector:hover{background:#e8e8e8}
+
+/* ── Round 37: Accessibility ───────────────────── */
+*:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+/* ── Round 39: Settings Modal ──────────────────── */
+.settings-btn{
+  background:none;border:1px solid #444;border-radius:6px;padding:.25rem .5rem;
+  cursor:pointer;font-size:1.1rem;color:var(--text);transition:background .2s;
+}
+.settings-btn:hover{background:#333}
+html.light .settings-btn{border-color:#ccc}
+html.light .settings-btn:hover{background:#e8e8e8}
+.settings-group{margin-bottom:.8rem}
+.settings-group label{display:block;font-size:.85rem;color:var(--text-dim);margin-bottom:.3rem}
+.settings-group input[type=range]{width:100%;accent-color:var(--accent)}
+.settings-group select,.settings-group input[type=number]{
+  padding:.3rem .5rem;border-radius:6px;border:1px solid #444;
+  background:#1e1f36;color:var(--text);font-size:.82rem;outline:none;width:100%;
+}
+.settings-group select:focus,.settings-group input[type=number]:focus{border-color:var(--accent)}
+
+/* ── Round 40: Diagnostics Panel ───────────────── */
+.diag-section{cursor:pointer;user-select:none}
+.diag-content{display:none;margin-top:.4rem}
+.diag-content.open{display:block}
+.diag-grid{display:grid;grid-template-columns:auto 1fr;gap:.2rem .6rem;font-size:.78rem}
+.diag-grid .diag-label{color:var(--text-dim)}
+.diag-grid .diag-val{font-family:monospace;color:var(--text)}
+.diag-grid .diag-ok{color:var(--green)}
+.diag-grid .diag-warn{color:var(--orange)}
+.diag-grid .diag-err{color:var(--red)}
 </style>
 </head>
 <body>
@@ -306,13 +382,19 @@ html.light .mute-toggle:hover{background:#e8e8e8}
 <header>
   <h1>🤖 Clean Bot Control Panel</h1>
   <div class="header-controls">
-    <div class="latency-indicator" id="latencyIndicator">
+    <div class="battery-wrap" id="batteryWrap" aria-label="Battery level">
+      <div class="battery-icon"><div class="battery-fill high" id="batteryFill" style="width:100%"></div></div>
+      <span id="batteryLabel">100%</span>
+    </div>
+    <div class="latency-indicator" id="latencyIndicator" aria-label="Connection latency">
       <span class="latency-dot" id="latencyDot"></span>
       <span id="latencyLabel">— ms</span>
     </div>
-    <button class="mute-toggle" id="muteToggle" title="Toggle notification sound">🔔</button>
-    <button class="theme-toggle" id="themeToggle" title="Toggle dark/light theme">🌙</button>
-    <div class="conn-indicator">
+    <button class="mute-toggle" id="muteToggle" title="Toggle notification sound" aria-label="Toggle notification sound">🔔</button>
+    <button class="lang-selector" id="langToggle" title="Toggle language" aria-label="Toggle language">EN</button>
+    <button class="settings-btn" id="settingsBtn" title="Settings" aria-label="Open settings">⚙️</button>
+    <button class="theme-toggle" id="themeToggle" title="Toggle dark/light theme" aria-label="Toggle theme">🌙</button>
+    <div class="conn-indicator" role="status" aria-live="polite">
       <div class="conn-dot" id="connDot"></div>
       <span id="connLabel">Disconnected</span>
     </div>
@@ -350,21 +432,25 @@ html.light .mute-toggle:hover{background:#e8e8e8}
       <button class="btn btn-gray btn-sm" id="exportMapBtn" style="margin-left:auto">📥 Export Map</button>
     </div>
     <div class="map-legend">
-      <span class="map-legend-item"><span class="legend-swatch" style="background:#e6ebf0"></span> Free</span>
-      <span class="map-legend-item"><span class="legend-swatch" style="background:#dc3232"></span> Obstacle</span>
-      <span class="map-legend-item"><span class="legend-swatch" style="background:#282830"></span> Unknown</span>
-      <span class="map-legend-item"><span class="legend-swatch" style="background:#4a9eff"></span> Robot</span>
+      <span class="map-legend-item"><span class="legend-swatch" style="background:#e6ebf0"></span> <span data-i18n="free">Free</span></span>
+      <span class="map-legend-item"><span class="legend-swatch" style="background:#dc3232"></span> <span data-i18n="obstacle">Obstacle</span></span>
+      <span class="map-legend-item"><span class="legend-swatch" style="background:#282830"></span> <span data-i18n="unknown">Unknown</span></span>
+      <span class="map-legend-item"><span class="legend-swatch" style="background:#4a9eff"></span> <span data-i18n="robot">Robot</span></span>
+    </div>
+    <div class="map-toggles">
+      <label><input type="checkbox" id="heatmapToggle"> <span data-i18n="heatmap_overlay">Heatmap Overlay</span></label>
+      <label><input type="checkbox" id="trailToggle" checked> <span data-i18n="path_trail">Path Trail</span></label>
     </div>
   </div>
 
   <!-- Right: Panels -->
   <div class="panels">
     <!-- Emergency Stop -->
-    <button class="estop-btn" id="estopBtn" onclick="emergencyStop()">⚠️ EMERGENCY STOP</button>
+    <button class="estop-btn" id="estopBtn" onclick="emergencyStop()" aria-label="Emergency Stop" role="button">⚠️ <span data-i18n="emergency_stop">EMERGENCY STOP</span></button>
 
     <!-- Status -->
-    <div class="card">
-      <h2>📊 Status</h2>
+    <div class="card" role="status" aria-live="polite" aria-label="Robot status">
+      <h2>📊 <span data-i18n="status">Status</span></h2>
       <div class="status-grid">
         <span class="label">Mission</span><span id="sMission"><span class="badge badge-gray">UNKNOWN</span></span>
         <span class="label">Exploration</span><span id="sExplore">UNKNOWN</span>
@@ -385,55 +471,103 @@ html.light .mute-toggle:hover{background:#e8e8e8}
 
     <!-- Mission Control -->
     <div class="card">
-      <h2>🎮 Mission Control</h2>
-      <div class="cmd-grid">
-        <button class="btn btn-green" id="btnScan" onclick="sendCommand('start_scan')">🔍 Scan Room</button>
-        <button class="btn btn-orange" id="btnStopScan" onclick="sendCommand('stop_scan')">⏹ Stop Scan</button>
-        <button class="btn btn-blue" id="btnClean" onclick="sendCommand('start_clean')">🧹 Clean Room</button>
-        <button class="btn btn-orange" id="btnStopClean" onclick="sendCommand('stop_clean')">⏹ Stop Clean</button>
-        <button class="btn btn-purple" id="btnHome" onclick="sendCommand('go_home')">🏠 Go Home</button>
-        <button class="btn btn-gray" onclick="sendCommand('reset')">🔄 Reset</button>
-        <button class="btn btn-yellow" id="btnPause" onclick="sendCommand('pause')">⏸ Pause</button>
-        <button class="btn btn-green" id="btnResume" onclick="sendCommand('resume')">▶ Resume</button>
+      <h2>🎮 <span data-i18n="mission_control">Mission Control</span></h2>
+      <div class="cmd-grid" role="group" aria-label="Mission commands">
+        <button class="btn btn-green" id="btnScan" onclick="sendCommand('start_scan')" aria-label="Scan Room">🔍 <span data-i18n="scan_room">Scan Room</span></button>
+        <button class="btn btn-orange" id="btnStopScan" onclick="sendCommand('stop_scan')" aria-label="Stop Scan">⏹ <span data-i18n="stop_scan">Stop Scan</span></button>
+        <button class="btn btn-blue" id="btnClean" onclick="sendCommand('start_clean')" aria-label="Clean Room">🧹 <span data-i18n="clean_room">Clean Room</span></button>
+        <button class="btn btn-orange" id="btnStopClean" onclick="sendCommand('stop_clean')" aria-label="Stop Clean">⏹ <span data-i18n="stop_clean">Stop Clean</span></button>
+        <button class="btn btn-purple" id="btnHome" onclick="sendCommand('go_home')" aria-label="Go Home">🏠 <span data-i18n="go_home">Go Home</span></button>
+        <button class="btn btn-gray" onclick="sendCommand('reset')" aria-label="Reset">🔄 <span data-i18n="reset">Reset</span></button>
+        <button class="btn btn-yellow" id="btnPause" onclick="sendCommand('pause')" aria-label="Pause">⏸ <span data-i18n="pause">Pause</span></button>
+        <button class="btn btn-green" id="btnResume" onclick="sendCommand('resume')" aria-label="Resume">▶ <span data-i18n="resume">Resume</span></button>
       </div>
     </div>
 
     <!-- Manual Drive -->
     <div class="card">
-      <h2>🕹️ Manual Drive</h2>
-      <div class="dpad" id="dpad">
+      <h2>🕹️ <span data-i18n="manual_drive">Manual Drive</span></h2>
+      <div class="dpad" id="dpad" role="group" aria-label="Direction controls">
         <div class="empty"></div>
-        <button class="btn" data-lin="1" data-ang="0">↑</button>
+        <button class="btn" data-lin="1" data-ang="0" aria-label="Forward">↑</button>
         <div class="empty"></div>
-        <button class="btn" data-lin="0" data-ang="1">←</button>
-        <button class="btn stop-btn" data-lin="0" data-ang="0">STOP</button>
-        <button class="btn" data-lin="0" data-ang="-1">→</button>
+        <button class="btn" data-lin="0" data-ang="1" aria-label="Turn left">←</button>
+        <button class="btn stop-btn" data-lin="0" data-ang="0" aria-label="Stop">STOP</button>
+        <button class="btn" data-lin="0" data-ang="-1" aria-label="Turn right">→</button>
         <div class="empty"></div>
-        <button class="btn" data-lin="-1" data-ang="0">↓</button>
+        <button class="btn" data-lin="-1" data-ang="0" aria-label="Backward">↓</button>
         <div class="empty"></div>
       </div>
       <div class="speed-row">
-        <span>Speed</span>
-        <input type="range" id="speedSlider" min="0.05" max="0.3" step="0.01" value="0.15">
+        <span data-i18n="speed">Speed</span>
+        <input type="range" id="speedSlider" min="0.05" max="0.3" step="0.01" value="0.15" aria-label="Drive speed">
         <span id="speedVal">0.15</span> m/s
       </div>
-      <div class="keyboard-hint">Keyboard: W/A/S/D or arrows, Space=stop</div>
+      <div class="keyboard-hint" data-i18n="keyboard_hint">Keyboard: W/A/S/D or arrows, Space=stop</div>
     </div>
 
     <!-- Room Manager -->
     <div class="card">
-      <h2>🏠 Room Manager</h2>
+      <h2>🏠 <span data-i18n="room_manager">Room Manager</span></h2>
       <div class="room-save-row">
-        <input type="text" id="roomName" placeholder="Room name…">
-        <button class="btn btn-blue btn-sm" onclick="saveRoom()">Save Room</button>
+        <input type="text" id="roomName" placeholder="Room name…" aria-label="Room name">
+        <button class="btn btn-blue btn-sm" onclick="saveRoom()" aria-label="Save room"><span data-i18n="save_room">Save Room</span></button>
       </div>
-      <div class="room-list" id="roomList"></div>
+      <div class="room-list" id="roomList" role="list" aria-label="Saved rooms"></div>
     </div>
 
     <!-- Mission Log -->
     <div class="card">
-      <h2>📜 Mission Log</h2>
-      <div class="log-box" id="logBox"></div>
+      <h2>📜 <span data-i18n="mission_log">Mission Log</span></h2>
+      <div class="log-box" id="logBox" role="log" aria-live="polite" aria-label="Mission log"></div>
+    </div>
+
+    <!-- Round 31: Statistics -->
+    <div class="card">
+      <h2>📈 <span data-i18n="statistics">Statistics</span></h2>
+      <div class="stats-grid">
+        <span class="label" data-i18n="total_scan_time">Total Scan Time</span><span class="stat-val" id="statScanTime">0s</span>
+        <span class="label" data-i18n="total_clean_time">Total Clean Time</span><span class="stat-val" id="statCleanTime">0s</span>
+        <span class="label" data-i18n="rooms_scanned">Rooms Scanned</span><span class="stat-val" id="statRoomsScanned">0</span>
+        <span class="label" data-i18n="rooms_cleaned">Rooms Cleaned</span><span class="stat-val" id="statRoomsCleaned">0</span>
+        <span class="label" data-i18n="distance_traveled">Distance Traveled</span><span class="stat-val" id="statDistance">0 m</span>
+      </div>
+    </div>
+
+    <!-- Round 33: Schedule -->
+    <div class="card">
+      <h2>⏰ <span data-i18n="schedule">Schedule</span></h2>
+      <div class="sched-form">
+        <input type="time" id="schedTime" aria-label="Schedule time">
+        <div class="sched-days" id="schedDays">
+          <label><input type="checkbox" value="mon"> <span data-i18n="mon">Mo</span></label>
+          <label><input type="checkbox" value="tue"> <span data-i18n="tue">Tu</span></label>
+          <label><input type="checkbox" value="wed"> <span data-i18n="wed">We</span></label>
+          <label><input type="checkbox" value="thu"> <span data-i18n="thu">Th</span></label>
+          <label><input type="checkbox" value="fri"> <span data-i18n="fri">Fr</span></label>
+          <label><input type="checkbox" value="sat"> <span data-i18n="sat">Sa</span></label>
+          <label><input type="checkbox" value="sun"> <span data-i18n="sun">Su</span></label>
+        </div>
+        <button class="btn btn-blue btn-sm" onclick="addSchedule()" aria-label="Add schedule">+ <span data-i18n="add">Add</span></button>
+      </div>
+      <div class="sched-list" id="schedList"></div>
+    </div>
+
+    <!-- Round 40: Diagnostics -->
+    <div class="card">
+      <h2 class="diag-section" id="diagToggle" tabindex="0" role="button" aria-expanded="false" aria-controls="diagContent">🔧 <span data-i18n="diagnostics">Diagnostics</span> ▸</h2>
+      <div class="diag-content" id="diagContent" role="region">
+        <div class="diag-grid">
+          <span class="diag-label">LiDAR Hz</span><span class="diag-val" id="diagScanHz">—</span>
+          <span class="diag-label" data-i18n="valid_readings">Valid Readings</span><span class="diag-val" id="diagValidReadings">—</span>
+          <span class="diag-label" data-i18n="linear_vel">Linear Vel</span><span class="diag-val" id="diagLinVel">—</span>
+          <span class="diag-label" data-i18n="angular_vel">Angular Vel</span><span class="diag-val" id="diagAngVel">—</span>
+          <span class="diag-label" data-i18n="cumulative_dist">Cumulative Dist</span><span class="diag-val" id="diagDistance">—</span>
+          <span class="diag-label">TF Chain</span><span class="diag-val" id="diagTF">—</span>
+          <span class="diag-label" data-i18n="socket_status">Socket Status</span><span class="diag-val" id="diagSocket">—</span>
+          <span class="diag-label" data-i18n="latency">Latency</span><span class="diag-val" id="diagLatency">—</span>
+        </div>
+      </div>
     </div>
   </div>
 </main>
@@ -441,10 +575,45 @@ html.light .mute-toggle:hover{background:#e8e8e8}
 <!-- Modal -->
 <div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
   <div class="modal" id="modal">
-    <button class="modal-close" onclick="closeModal()">&times;</button>
+    <button class="modal-close" onclick="closeModal()" aria-label="Close modal">&times;</button>
     <h3 id="modalTitle">Room Preview</h3>
     <img id="modalImg" src="" alt="Room map">
     <div class="modal-meta" id="modalMeta"></div>
+  </div>
+</div>
+
+<!-- Round 39: Settings Modal -->
+<div class="modal-overlay" id="settingsOverlay" onclick="closeSettings(event)">
+  <div class="modal" id="settingsModal" style="min-width:340px;max-width:420px">
+    <button class="modal-close" onclick="closeSettings()" aria-label="Close settings">&times;</button>
+    <h3 data-i18n="settings">⚙️ Settings</h3>
+    <div class="settings-group">
+      <label data-i18n="map_update_rate">Map Update Rate</label>
+      <input type="range" id="setMapRate" min="0.5" max="5" step="0.5" value="0.5">
+      <span id="setMapRateVal" style="font-size:.8rem;color:var(--text-dim)">0.5s</span>
+    </div>
+    <div class="settings-group">
+      <label data-i18n="default_drive_speed">Default Drive Speed (m/s)</label>
+      <input type="number" id="setDriveSpeed" min="0.05" max="0.5" step="0.01" value="0.15">
+    </div>
+    <div class="settings-group">
+      <label><input type="checkbox" id="setNotifSound" checked> <span data-i18n="notification_sound">Notification Sound</span></label>
+    </div>
+    <div class="settings-group">
+      <label data-i18n="theme">Theme</label>
+      <select id="setTheme">
+        <option value="dark">Dark</option>
+        <option value="light">Light</option>
+      </select>
+    </div>
+    <div class="settings-group">
+      <label data-i18n="language">Language</label>
+      <select id="setLang">
+        <option value="en">English</option>
+        <option value="he">עברית</option>
+      </select>
+    </div>
+    <button class="btn btn-blue" onclick="saveSettings()" style="width:100%;margin-top:.5rem" data-i18n="save_settings">Save Settings</button>
   </div>
 </div>
 
@@ -468,6 +637,11 @@ socket.on('connect', () => {
   socket.emit('request_map');
   fetchLog();
   fetchRooms();
+  fetchSchedules();
+  fetchStats();
+  fetchTrail();
+  const savedRate = localStorage.getItem('cb_mapRate');
+  if (savedRate) socket.emit('set_map_rate', {rate: parseFloat(savedRate)});
 });
 socket.on('disconnect', () => {
   connDot.classList.remove('connected');
@@ -528,11 +702,45 @@ function drawMap(data) {
   canvas.height = mapImg.naturalHeight;
   ctx.drawImage(mapImg, 0, 0);
 
+  // Round 32: Heatmap overlay
+  if (showHeatmap && data.heatmap_b64) {
+    if (!heatmapImg.src || heatmapImg._b64 !== data.heatmap_b64) {
+      heatmapImg._b64 = data.heatmap_b64;
+      heatmapImg.src = 'data:image/png;base64,' + data.heatmap_b64;
+    }
+    if (heatmapImg.complete && heatmapImg.naturalWidth > 0) {
+      ctx.globalAlpha = 0.6;
+      ctx.drawImage(heatmapImg, 0, 0, canvas.width, canvas.height);
+      ctx.globalAlpha = 1.0;
+    }
+  }
+
   const sx = canvas.width / data.width;
   const sy = canvas.height / data.height;
   const rpx = data.robot_px * sx;
   const rpy = data.robot_py * sy;
   const r = Math.max(6, Math.min(sx, sy) * 3);
+
+  // Round 35: Path trail
+  if (showTrail && pathTrail.length > 1 && data.resolution > 0) {
+    ctx.beginPath();
+    for (let i = 0; i < pathTrail.length; i++) {
+      const p = pathTrail[i];
+      const px = ((p[0] - data.origin_x) / data.resolution) * sx;
+      const py = (data.height - 1 - (p[1] - data.origin_y) / data.resolution) * sy;
+      const alpha = 0.1 + 0.9 * (i / pathTrail.length);
+      if (i === 0) {
+        ctx.moveTo(px, py);
+      } else {
+        ctx.strokeStyle = 'rgba(167,139,250,' + alpha.toFixed(2) + ')';
+        ctx.lineWidth = 2;
+        ctx.lineTo(px, py);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(px, py);
+      }
+    }
+  }
 
   // Robot circle
   ctx.beginPath();
@@ -719,55 +927,7 @@ function updateScanTimer() {
   document.getElementById('sScanTimer').textContent = mm + ':' + ss;
 }
 
-socket.on('status', d => {
-  setMissionBadge(d.mission_state);
-  document.getElementById('sExplore').textContent = d.exploration_state;
-  document.getElementById('sCoverage').textContent = d.coverage_state;
-  document.getElementById('sPos').textContent = d.robot_x + ', ' + d.robot_y;
-  document.getElementById('sVel').textContent = d.linear_vel + ' m/s · ' + d.angular_vel + ' rad/s';
-  document.getElementById('mapCount').textContent = d.map_updates;
-
-  currentLinVel = d.linear_vel;
-  currentAngVel = d.angular_vel;
-  const isMoving = d.linear_vel !== 0 || d.angular_vel !== 0;
-  document.getElementById('estopBtn').classList.toggle('pulsing', isMoving);
-
-  // Coverage progress bar
-  const coverageWrap = document.getElementById('coverageProgressWrap');
-  const coverageFill = document.getElementById('coverageFill');
-  const cState = (d.coverage_state || '').toUpperCase();
-  const pctMatch = cState.match(/(\d+)%/);
-  if (pctMatch) {
-    coverageWrap.style.display = '';
-    coverageFill.classList.remove('animated');
-    coverageFill.style.width = pctMatch[1] + '%';
-  } else if (/COVER|ACTIVE|CLEAN/.test(cState) && cState !== 'UNKNOWN' && cState !== 'IDLE') {
-    coverageWrap.style.display = '';
-    coverageFill.classList.add('animated');
-  } else {
-    coverageWrap.style.display = 'none';
-    coverageFill.classList.remove('animated');
-    coverageFill.style.width = '0%';
-  }
-
-  // Scan timer
-  const mState = (d.mission_state || '').toUpperCase();
-  if (/EXPLOR/.test(mState) && !/EXPLOR/.test(prevMissionState.toUpperCase())) {
-    startScanTimer();
-  } else if (!/EXPLOR/.test(mState) && /EXPLOR/.test(prevMissionState.toUpperCase())) {
-    stopScanTimer();
-  }
-
-  // Round 12: State history
-  addStateHistory(d.mission_state || 'UNKNOWN');
-
-  // Round 13: Smart button states
-  updateButtonStates(d.mission_state);
-
-  prevMissionState = d.mission_state || 'UNKNOWN';
-
-  if (lastMapData && mapImg.complete) drawMap(lastMapData);
-});
+/* ── Status handler registered below after all feature functions ── */
 
 socket.on('mission_state', d => {
   setMissionBadge(d.state);
@@ -1064,6 +1224,308 @@ function esc(s) { const d = document.createElement('div'); d.textContent = s; re
 
 /* ── Init: set smart button states ─────────────── */
 updateButtonStates('UNKNOWN');
+
+/* ── Round 31: Stats fetching ──────────────────── */
+function fetchStats() {
+  fetch('/api/stats').then(r => r.json()).then(d => {
+    if (d.error) return;
+    const fmt = s => { const m = Math.floor(s/60); const sec = Math.floor(s%60); return m + 'm ' + sec + 's'; };
+    document.getElementById('statScanTime').textContent = fmt(d.total_scan_time);
+    document.getElementById('statCleanTime').textContent = fmt(d.total_clean_time);
+    document.getElementById('statRoomsScanned').textContent = d.rooms_scanned;
+    document.getElementById('statRoomsCleaned').textContent = d.rooms_cleaned;
+    document.getElementById('statDistance').textContent = d.total_distance + ' m';
+  }).catch(() => {});
+}
+setInterval(fetchStats, 5000);
+
+/* ── Round 32: Heatmap toggle ──────────────────── */
+let showHeatmap = false;
+let heatmapImg = new Image();
+document.getElementById('heatmapToggle').addEventListener('change', e => {
+  showHeatmap = e.target.checked;
+  if (lastMapData && mapImg.complete) drawMap(lastMapData);
+});
+
+/* ── Round 33: Schedule management ─────────────── */
+function fetchSchedules() {
+  fetch('/api/schedules').then(r => r.json()).then(renderSchedules).catch(() => {});
+}
+function renderSchedules(scheds) {
+  const el = document.getElementById('schedList');
+  if (!scheds.length) { el.innerHTML = '<div style="color:var(--text-dim);font-size:.8rem;padding:.3rem">' + t('no_schedules') + '</div>'; return; }
+  el.innerHTML = scheds.map(s => {
+    const days = (s.days || []).join(', ');
+    return '<div class="sched-item">' +
+      '<span class="sched-time">' + esc(s.time) + '</span>' +
+      '<span class="sched-days-label">' + esc(days) + '</span>' +
+      '<button class="btn btn-red btn-sm" onclick="deleteSchedule(\'' + esc(s.id) + '\')">✕</button>' +
+    '</div>';
+  }).join('');
+}
+window.addSchedule = function() {
+  const timeEl = document.getElementById('schedTime');
+  const time = timeEl.value;
+  if (!time) { toast(t('select_time')); return; }
+  const days = [];
+  document.querySelectorAll('#schedDays input[type=checkbox]:checked').forEach(cb => days.push(cb.value));
+  if (!days.length) { toast(t('select_days')); return; }
+  fetch('/api/schedules', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({time, days})
+  }).then(r => r.json()).then(d => {
+    if (d.ok) { toast(t('schedule_added')); fetchSchedules(); timeEl.value = ''; document.querySelectorAll('#schedDays input[type=checkbox]').forEach(cb => cb.checked = false); }
+    else toast(d.error || 'Failed');
+  }).catch(() => toast('Failed'));
+};
+window.deleteSchedule = function(id) {
+  fetch('/api/schedules/' + id, {method:'DELETE'}).then(r => r.json()).then(d => {
+    if (d.ok) { toast(t('schedule_deleted')); fetchSchedules(); }
+  }).catch(() => toast('Failed'));
+};
+
+/* ── Round 34: Battery indicator update ────────── */
+function updateBattery(level) {
+  const fill = document.getElementById('batteryFill');
+  const label = document.getElementById('batteryLabel');
+  const pct = Math.max(0, Math.min(100, Math.round(level)));
+  fill.style.width = pct + '%';
+  fill.className = 'battery-fill ' + (pct > 50 ? 'high' : pct > 20 ? 'medium' : 'low');
+  label.textContent = pct + '%';
+}
+
+/* ── Round 35: Path trail (incremental) ────────── */
+let showTrail = true;
+const pathTrail = [];
+document.getElementById('trailToggle').addEventListener('change', e => {
+  showTrail = e.target.checked;
+  if (lastMapData && mapImg.complete) drawMap(lastMapData);
+});
+// Load initial trail on connect
+function fetchTrail() {
+  fetch('/api/trail').then(r => r.json()).then(pts => {
+    pathTrail.length = 0;
+    pts.forEach(p => pathTrail.push(p));
+  }).catch(() => {});
+}
+
+/* ── Round 36: Internationalization (i18n) ─────── */
+const LANG = {
+  en: {
+    emergency_stop:'EMERGENCY STOP',status:'Status',mission_control:'Mission Control',
+    scan_room:'Scan Room',stop_scan:'Stop Scan',clean_room:'Clean Room',stop_clean:'Stop Clean',
+    go_home:'Go Home',reset:'Reset',pause:'Pause',resume:'Resume',
+    manual_drive:'Manual Drive',speed:'Speed',keyboard_hint:'Keyboard: W/A/S/D or arrows, Space=stop',
+    room_manager:'Room Manager',save_room:'Save Room',mission_log:'Mission Log',
+    statistics:'Statistics',total_scan_time:'Total Scan Time',total_clean_time:'Total Clean Time',
+    rooms_scanned:'Rooms Scanned',rooms_cleaned:'Rooms Cleaned',distance_traveled:'Distance Traveled',
+    schedule:'Schedule',add:'Add',diagnostics:'Diagnostics',
+    settings:'⚙️ Settings',map_update_rate:'Map Update Rate',default_drive_speed:'Default Drive Speed (m/s)',
+    notification_sound:'Notification Sound',theme:'Theme',language:'Language',save_settings:'Save Settings',
+    free:'Free',obstacle:'Obstacle',unknown:'Unknown',robot:'Robot',
+    heatmap_overlay:'Heatmap Overlay',path_trail:'Path Trail',
+    valid_readings:'Valid Readings',linear_vel:'Linear Vel',angular_vel:'Angular Vel',
+    cumulative_dist:'Cumulative Dist',socket_status:'Socket Status',latency:'Latency',
+    no_schedules:'No scheduled cleanings',select_time:'Select a time',select_days:'Select at least one day',
+    schedule_added:'Schedule added',schedule_deleted:'Schedule deleted',
+    mon:'Mo',tue:'Tu',wed:'We',thu:'Th',fri:'Fr',sat:'Sa',sun:'Su',
+  },
+  he: {
+    emergency_stop:'עצירת חירום',status:'סטטוס',mission_control:'בקרת משימה',
+    scan_room:'סרוק חדר',stop_scan:'עצור סריקה',clean_room:'נקה חדר',stop_clean:'עצור ניקוי',
+    go_home:'חזור הביתה',reset:'אתחול',pause:'השהה',resume:'המשך',
+    manual_drive:'נהיגה ידנית',speed:'מהירות',keyboard_hint:'מקלדת: W/A/S/D או חצים, רווח=עצור',
+    room_manager:'ניהול חדרים',save_room:'שמור חדר',mission_log:'יומן משימה',
+    statistics:'סטטיסטיקות',total_scan_time:'זמן סריקה כולל',total_clean_time:'זמן ניקוי כולל',
+    rooms_scanned:'חדרים שנסרקו',rooms_cleaned:'חדרים שנוקו',distance_traveled:'מרחק שנסע',
+    schedule:'תזמון',add:'הוסף',diagnostics:'אבחון',
+    settings:'⚙️ הגדרות',map_update_rate:'קצב עדכון מפה',default_drive_speed:'מהירות נהיגה (מ/ש)',
+    notification_sound:'צליל התראה',theme:'ערכת נושא',language:'שפה',save_settings:'שמור הגדרות',
+    free:'פנוי',obstacle:'מכשול',unknown:'לא ידוע',robot:'רובוט',
+    heatmap_overlay:'שכבת חום',path_trail:'מסלול',
+    valid_readings:'קריאות תקינות',linear_vel:'מהירות קווית',angular_vel:'מהירות זוויתית',
+    cumulative_dist:'מרחק מצטבר',socket_status:'סטטוס חיבור',latency:'השהיה',
+    no_schedules:'אין ניקויים מתוזמנים',select_time:'בחר שעה',select_days:'בחר לפחות יום אחד',
+    schedule_added:'תזמון נוסף',schedule_deleted:'תזמון הוסר',
+    mon:'ב׳',tue:'ג׳',wed:'ד׳',thu:'ה׳',fri:'ו׳',sat:'ש׳',sun:'א׳',
+  }
+};
+let currentLang = localStorage.getItem('cb_lang') || 'en';
+function t(key) { return (LANG[currentLang] || LANG.en)[key] || (LANG.en[key] || key); }
+function applyLanguage() {
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    el.textContent = t(key);
+  });
+  document.documentElement.lang = currentLang;
+  if (currentLang === 'he') document.documentElement.dir = 'rtl';
+  else document.documentElement.dir = 'ltr';
+  document.getElementById('langToggle').textContent = currentLang.toUpperCase();
+}
+document.getElementById('langToggle').addEventListener('click', () => {
+  currentLang = currentLang === 'en' ? 'he' : 'en';
+  localStorage.setItem('cb_lang', currentLang);
+  applyLanguage();
+});
+applyLanguage();
+
+/* ── Round 38: Session persistence ─────────────── */
+function saveSession() {
+  try {
+    const entries = [];
+    document.querySelectorAll('#logBox .log-entry').forEach(el => {
+      entries.push(el.innerHTML);
+    });
+    sessionStorage.setItem('cb_log', JSON.stringify(entries.slice(-100)));
+    sessionStorage.setItem('cb_trail', JSON.stringify(pathTrail.slice(-200)));
+  } catch(e) {}
+}
+function restoreSession() {
+  try {
+    const log = JSON.parse(sessionStorage.getItem('cb_log') || '[]');
+    log.forEach(html => {
+      const div = document.createElement('div');
+      div.className = 'log-entry';
+      div.innerHTML = html;
+      logBox.appendChild(div);
+    });
+    if (logBox.children.length > 0) logBox.scrollTop = logBox.scrollHeight;
+    const trail = JSON.parse(sessionStorage.getItem('cb_trail') || '[]');
+    trail.forEach(p => pathTrail.push(p));
+  } catch(e) {}
+}
+restoreSession();
+setInterval(saveSession, 10000);
+
+/* ── Round 39: Settings panel ──────────────────── */
+const settingsBtn = document.getElementById('settingsBtn');
+const settingsOverlay = document.getElementById('settingsOverlay');
+settingsBtn.addEventListener('click', () => {
+  // Load current values
+  document.getElementById('setMapRate').value = parseFloat(localStorage.getItem('cb_mapRate') || '0.5');
+  document.getElementById('setMapRateVal').textContent = document.getElementById('setMapRate').value + 's';
+  document.getElementById('setDriveSpeed').value = parseFloat(localStorage.getItem('cb_driveSpeed') || speedSlider.value);
+  document.getElementById('setNotifSound').checked = !soundMuted;
+  document.getElementById('setTheme').value = document.documentElement.classList.contains('light') ? 'light' : 'dark';
+  document.getElementById('setLang').value = currentLang;
+  settingsOverlay.classList.add('active');
+});
+document.getElementById('setMapRate').addEventListener('input', function() {
+  document.getElementById('setMapRateVal').textContent = this.value + 's';
+});
+window.closeSettings = function(e) {
+  if (e && e.target !== settingsOverlay) return;
+  settingsOverlay.classList.remove('active');
+};
+window.saveSettings = function() {
+  const mapRate = parseFloat(document.getElementById('setMapRate').value);
+  const driveSpeed = parseFloat(document.getElementById('setDriveSpeed').value);
+  const notifOn = document.getElementById('setNotifSound').checked;
+  const theme = document.getElementById('setTheme').value;
+  const lang = document.getElementById('setLang').value;
+  // Apply map rate
+  socket.emit('set_map_rate', {rate: mapRate});
+  localStorage.setItem('cb_mapRate', mapRate);
+  // Apply drive speed
+  speedSlider.value = driveSpeed;
+  speedVal.textContent = driveSpeed;
+  localStorage.setItem('cb_driveSpeed', driveSpeed);
+  // Apply notification
+  soundMuted = !notifOn;
+  muteToggle.textContent = soundMuted ? '🔕' : '🔔';
+  localStorage.setItem('cb_muted', soundMuted ? '1' : '0');
+  // Apply theme
+  const isLight = theme === 'light';
+  document.documentElement.classList.toggle('light', isLight);
+  themeToggle.textContent = isLight ? '☀️' : '🌙';
+  localStorage.setItem('cb_theme', theme);
+  // Apply language
+  if (lang !== currentLang) { currentLang = lang; localStorage.setItem('cb_lang', lang); applyLanguage(); }
+  settingsOverlay.classList.remove('active');
+  toast(t('save_settings'));
+};
+// Restore saved drive speed
+const savedSpeed = localStorage.getItem('cb_driveSpeed');
+if (savedSpeed) { speedSlider.value = savedSpeed; speedVal.textContent = savedSpeed; }
+
+/* ── Round 40: Diagnostics panel ───────────────── */
+const diagToggle = document.getElementById('diagToggle');
+const diagContent = document.getElementById('diagContent');
+diagToggle.addEventListener('click', () => {
+  const open = diagContent.classList.toggle('open');
+  diagToggle.setAttribute('aria-expanded', open);
+  diagToggle.querySelector('span:last-child') || null;
+  diagToggle.innerHTML = '🔧 <span data-i18n="diagnostics">' + t('diagnostics') + '</span> ' + (open ? '▾' : '▸');
+});
+diagToggle.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); diagToggle.click(); } });
+
+/* ── Update status handler with all round 31-40 features ── */
+const origStatusHandler = socket._callbacks['$status'];
+socket.off('status');
+socket.on('status', d => {
+  setMissionBadge(d.mission_state);
+  document.getElementById('sExplore').textContent = d.exploration_state;
+  document.getElementById('sCoverage').textContent = d.coverage_state;
+  document.getElementById('sPos').textContent = d.robot_x + ', ' + d.robot_y;
+  document.getElementById('sVel').textContent = d.linear_vel + ' m/s · ' + d.angular_vel + ' rad/s';
+  document.getElementById('mapCount').textContent = d.map_updates;
+
+  currentLinVel = d.linear_vel;
+  currentAngVel = d.angular_vel;
+  const isMoving = d.linear_vel !== 0 || d.angular_vel !== 0;
+  document.getElementById('estopBtn').classList.toggle('pulsing', isMoving);
+
+  // Coverage progress
+  const coverageWrap = document.getElementById('coverageProgressWrap');
+  const coverageFill = document.getElementById('coverageFill');
+  const cState = (d.coverage_state || '').toUpperCase();
+  const pctMatch = cState.match(/(\d+)%/);
+  if (pctMatch) {
+    coverageWrap.style.display = '';
+    coverageFill.classList.remove('animated');
+    coverageFill.style.width = pctMatch[1] + '%';
+  } else if (/COVER|ACTIVE|CLEAN/.test(cState) && cState !== 'UNKNOWN' && cState !== 'IDLE') {
+    coverageWrap.style.display = '';
+    coverageFill.classList.add('animated');
+  } else {
+    coverageWrap.style.display = 'none';
+    coverageFill.classList.remove('animated');
+    coverageFill.style.width = '0%';
+  }
+
+  // Scan timer
+  const mState = (d.mission_state || '').toUpperCase();
+  if (/EXPLOR/.test(mState) && !/EXPLOR/.test(prevMissionState.toUpperCase())) startScanTimer();
+  else if (!/EXPLOR/.test(mState) && /EXPLOR/.test(prevMissionState.toUpperCase())) stopScanTimer();
+
+  addStateHistory(d.mission_state || 'UNKNOWN');
+  updateButtonStates(d.mission_state);
+  prevMissionState = d.mission_state || 'UNKNOWN';
+
+  // Round 34: Battery
+  if (d.battery !== undefined) updateBattery(d.battery);
+
+  // Round 35: Incremental trail
+  if (d.new_trail && d.new_trail.length > 0) {
+    d.new_trail.forEach(p => pathTrail.push(p));
+    while (pathTrail.length > 500) pathTrail.shift();
+  }
+
+  // Round 40: Diagnostics
+  document.getElementById('diagScanHz').textContent = d.scan_hz + ' Hz';
+  document.getElementById('diagScanHz').className = 'diag-val ' + (d.scan_hz > 3 ? 'diag-ok' : d.scan_hz > 0 ? 'diag-warn' : 'diag-err');
+  document.getElementById('diagValidReadings').textContent = d.scan_valid_count;
+  document.getElementById('diagLinVel').textContent = d.linear_vel + ' m/s';
+  document.getElementById('diagAngVel').textContent = d.angular_vel + ' rad/s';
+  document.getElementById('diagDistance').textContent = d.total_distance + ' m';
+  document.getElementById('diagTF').textContent = d.tf_healthy ? 'OK' : 'BROKEN';
+  document.getElementById('diagTF').className = 'diag-val ' + (d.tf_healthy ? 'diag-ok' : 'diag-err');
+  document.getElementById('diagSocket').textContent = socket.connected ? 'Connected' : 'Disconnected';
+  document.getElementById('diagSocket').className = 'diag-val ' + (socket.connected ? 'diag-ok' : 'diag-err');
+  document.getElementById('diagLatency').textContent = latencyLabelEl.textContent;
+
+  if (lastMapData && mapImg.complete) drawMap(lastMapData);
+});
 
 })();
 </script>

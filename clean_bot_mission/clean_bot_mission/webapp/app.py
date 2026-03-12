@@ -63,6 +63,7 @@ logger = logging.getLogger(__name__)
 WEBAPP_DIR = Path(__file__).parent
 SAVED_ROOMS_DIR = WEBAPP_DIR / "saved_rooms"
 SAVED_ROOMS_DIR.mkdir(exist_ok=True)
+SCHEDULES_FILE = WEBAPP_DIR / "schedules.json"
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -118,6 +119,46 @@ class WebBridgeNode(Node):
         self._last_map_emit = 0.0
         self._last_pose_emit = 0.0
 
+        # ── Round 31: Statistics ──
+        self.total_scan_time = 0.0
+        self.total_clean_time = 0.0
+        self.rooms_scanned = 0
+        self.rooms_cleaned = 0
+        self.total_distance_traveled = 0.0
+        self._scan_start_time = None
+        self._clean_start_time = None
+        self._last_odom_x = None
+        self._last_odom_y = None
+
+        # ── Round 32: Obstacle heatmap ──
+        self.obstacle_heatmap = None
+        self._heatmap_width = 0
+        self._heatmap_height = 0
+
+        # ── Round 33: Schedules ──
+        self._schedules = self._load_schedules()
+        self._schedule_lock = threading.Lock()
+
+        # ── Round 34: Battery simulation ──
+        self.battery_level = 100.0
+        self._battery_last_update = time.monotonic()
+        self._arduino_battery = None
+
+        # ── Round 35: Path trail ──
+        self.path_trail = []
+        self._trail_sent_index = 0
+
+        # ── Round 39: Configurable map rate ──
+        self._map_rate_interval = 0.5
+
+        # ── Round 40: Diagnostics ──
+        self._scan_callback_count = 0
+        self._scan_hz_last_time = time.monotonic()
+        self.scan_hz = 0.0
+        self._scan_valid_count = 0
+        self._tf_healthy = False
+        self._missed_updates = 0
+
         # ── Nav2 action client (Round 14) ──
         self._nav_client = None
         if HAS_NAV2:
@@ -127,6 +168,10 @@ class WebBridgeNode(Node):
         self.create_timer(0.1, self._update_pose)
         # ── Periodic status push (2 Hz) ──
         self.create_timer(0.5, self._push_status)
+        # ── Round 33: Schedule checker (every 60s) ──
+        self.create_timer(60.0, self._check_schedules)
+        # ── Round 40: Scan Hz calculator (every 1s) ──
+        self.create_timer(1.0, self._calc_scan_hz)
 
         self.get_logger().info("Web control panel ROS bridge started")
 
@@ -140,6 +185,22 @@ class WebBridgeNode(Node):
             if len(self.mission_log) > 200:
                 self.mission_log = self.mission_log[-200:]
             self.sio.emit("mission_state", {"state": msg.data, "log_entry": entry})
+            # Round 31: Track scan/clean stats
+            old_u = (old or '').upper()
+            new_u = (msg.data or '').upper()
+            if 'EXPLOR' in new_u and 'EXPLOR' not in old_u:
+                self._scan_start_time = time.monotonic()
+            elif 'EXPLOR' not in new_u and 'EXPLOR' in old_u and self._scan_start_time:
+                self.total_scan_time += time.monotonic() - self._scan_start_time
+                self.rooms_scanned += 1
+                self._scan_start_time = None
+            if ('COVER' in new_u or 'CLEAN' in new_u) and 'COVER' not in old_u and 'CLEAN' not in old_u:
+                self._clean_start_time = time.monotonic()
+            elif ('COVER' not in new_u and 'CLEAN' not in new_u) and \
+                 ('COVER' in old_u or 'CLEAN' in old_u) and self._clean_start_time:
+                self.total_clean_time += time.monotonic() - self._clean_start_time
+                self.rooms_cleaned += 1
+                self._clean_start_time = None
 
     def _on_exploration_state(self, msg):
         self.exploration_state = msg.data
@@ -150,19 +211,46 @@ class WebBridgeNode(Node):
     def _on_odom(self, msg):
         self.linear_vel = msg.twist.twist.linear.x
         self.angular_vel = msg.twist.twist.angular.z
+        # Round 31: Integrate distance
+        x = msg.pose.pose.position.x
+        y = msg.pose.pose.position.y
+        if self._last_odom_x is not None:
+            dx = x - self._last_odom_x
+            dy = y - self._last_odom_y
+            self.total_distance_traveled += math.sqrt(dx * dx + dy * dy)
+        self._last_odom_x = x
+        self._last_odom_y = y
+        # Round 34: Battery simulation
+        now = time.monotonic()
+        dt = now - self._battery_last_update
+        self._battery_last_update = now
+        speed = abs(self.linear_vel) + abs(self.angular_vel) * 0.3
+        drain = dt * (0.02 + speed * 0.15)  # base drain + velocity drain
+        self.battery_level = max(0.0, self.battery_level - drain)
 
     def _on_scan(self, msg):
         self.scan_ranges = list(msg.ranges)
         self.scan_angle_min = msg.angle_min
         self.scan_angle_max = msg.angle_max
         self.scan_angle_increment = msg.angle_increment
+        # Round 40: Track scan frequency
+        self._scan_callback_count += 1
+        self._scan_valid_count = sum(1 for r in msg.ranges if math.isfinite(r) and r > 0)
 
     def _on_map(self, msg):
         self.map_msg = msg
         self.map_update_counter += 1
-        # Rate-limit map emission to ≤2 Hz
+        # Round 32: Update obstacle heatmap
+        w, h = msg.info.width, msg.info.height
+        data = np.array(msg.data, dtype=np.int8).reshape((h, w))
+        if self.obstacle_heatmap is None or self._heatmap_width != w or self._heatmap_height != h:
+            self.obstacle_heatmap = np.zeros((h, w), dtype=np.float32)
+            self._heatmap_width = w
+            self._heatmap_height = h
+        self.obstacle_heatmap[data >= 50] += 1.0
+        # Rate-limit map emission
         now = time.monotonic()
-        if now - self._last_map_emit >= 0.5:
+        if now - self._last_map_emit >= self._map_rate_interval:
             self._last_map_emit = now
             self._emit_map()
 
@@ -176,10 +264,23 @@ class WebBridgeNode(Node):
             self.robot_yaw = math.atan2(
                 2.0 * (q.w * q.z + q.x * q.y),
                 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+            self._tf_healthy = True
+            # Round 35: Path trail
+            trail = self.path_trail
+            if not trail or (abs(self.robot_x - trail[-1][0]) > 0.01 or
+                             abs(self.robot_y - trail[-1][1]) > 0.01):
+                trail.append((round(self.robot_x, 3), round(self.robot_y, 3)))
+                if len(trail) > 500:
+                    self.path_trail = trail[-500:]
         except Exception:
-            pass
+            self._tf_healthy = False
 
     def _push_status(self):
+        # Round 34: Use arduino battery if available
+        battery = self._arduino_battery if self._arduino_battery is not None else round(self.battery_level, 1)
+        # Round 35: Only send new trail points since last push
+        new_trail = self.path_trail[self._trail_sent_index:]
+        self._trail_sent_index = len(self.path_trail)
         self.sio.emit("status", {
             "mission_state": self.mission_state,
             "exploration_state": self.exploration_state,
@@ -190,6 +291,14 @@ class WebBridgeNode(Node):
             "linear_vel": round(self.linear_vel, 3),
             "angular_vel": round(self.angular_vel, 3),
             "map_updates": self.map_update_counter,
+            "battery": battery,
+            "new_trail": new_trail,
+            "trail_total": len(self.path_trail),
+            # Round 40: Diagnostics
+            "scan_hz": round(self.scan_hz, 1),
+            "scan_valid_count": self._scan_valid_count,
+            "total_distance": round(self.total_distance_traveled, 2),
+            "tf_healthy": self._tf_healthy,
         })
 
     # ── Map rendering ─────────────────────────────────────────────
@@ -256,6 +365,44 @@ class WebBridgeNode(Node):
         img.save(buf, format="PNG", optimize=True)
         b64 = base64.b64encode(buf.getvalue()).decode("ascii")
 
+        # Round 32: Heatmap data (vectorized with numpy)
+        heatmap_b64 = None
+        if self.obstacle_heatmap is not None and self._heatmap_width == w and self._heatmap_height == h:
+            hm = self.obstacle_heatmap
+            max_val = hm.max()
+            if max_val > 0:
+                hm_norm = (hm / max_val * 255).astype(np.uint8)
+                hm_norm = hm_norm[::-1]
+                hm_rgba = np.zeros((h, w, 4), dtype=np.uint8)
+                mask = hm_norm > 0
+                v = hm_norm[mask].astype(np.int16)
+                low = v < 128
+                mid = (v >= 128) & (v < 200)
+                high = v >= 200
+                r = np.zeros_like(v, dtype=np.uint8)
+                g = np.zeros_like(v, dtype=np.uint8)
+                b = np.zeros_like(v, dtype=np.uint8)
+                a = np.zeros_like(v, dtype=np.uint8)
+                r[low] = 0; g[low] = 0
+                b[low] = np.minimum(255, v[low] * 4).astype(np.uint8)
+                a[low] = np.minimum(200, v[low] * 2).astype(np.uint8)
+                r[mid] = np.minimum(255, (v[mid] - 128) * 3).astype(np.uint8)
+                g[mid] = np.minimum(255, v[mid]).astype(np.uint8)
+                b[mid] = 0; a[mid] = np.minimum(220, v[mid]).astype(np.uint8)
+                r[high] = 255
+                g[high] = np.maximum(0, 255 - (v[high] - 200) * 4).astype(np.uint8)
+                b[high] = 0; a[high] = 230
+                hm_rgba[mask, 0] = r
+                hm_rgba[mask, 1] = g
+                hm_rgba[mask, 2] = b
+                hm_rgba[mask, 3] = a
+                hm_img = Image.fromarray(hm_rgba, "RGBA")
+                if w < min_dim or h < min_dim:
+                    hm_img = hm_img.resize((int(w * scale), int(h * scale)), Image.NEAREST)
+                hm_buf = io.BytesIO()
+                hm_img.save(hm_buf, format="PNG", optimize=True)
+                heatmap_b64 = base64.b64encode(hm_buf.getvalue()).decode("ascii")
+
         return {
             "image_b64": b64,
             "width": w,
@@ -268,6 +415,7 @@ class WebBridgeNode(Node):
             "robot_yaw": round(self.robot_yaw, 3),
             "obstacles": obs_world,
             "map_updates": self.map_update_counter,
+            "heatmap_b64": heatmap_b64,
         }
 
     def _emit_map(self):
@@ -356,6 +504,67 @@ class WebBridgeNode(Node):
         self.sio.emit("mission_state", {"state": self.mission_state, "log_entry": entry})
         self.get_logger().info(f"Navigate to ({x}, {y})")
         return True, "Goal sent"
+
+    # ── Round 33: Schedule helpers ────────────────────────────────
+    @staticmethod
+    def _load_schedules():
+        if SCHEDULES_FILE.exists():
+            try:
+                with open(SCHEDULES_FILE) as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return []
+
+    def _save_schedules(self):
+        with self._schedule_lock:
+            try:
+                with open(SCHEDULES_FILE, "w") as f:
+                    json.dump(self._schedules, f)
+            except Exception as e:
+                self.get_logger().warn(f"Failed to save schedules: {e}")
+
+    def _check_schedules(self):
+        now = datetime.now()
+        day_names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+        current_day = day_names[now.weekday()]
+        current_time = now.strftime("%H:%M")
+        # Only trigger if robot is idle (waiting states)
+        state_upper = (self.mission_state or '').upper()
+        if 'WAIT' not in state_upper and 'COMPLETE' not in state_upper and 'UNKNOWN' not in state_upper:
+            return
+        with self._schedule_lock:
+            for sched in self._schedules:
+                if not sched.get("enabled", True):
+                    continue
+                if current_day in sched.get("days", []) and sched.get("time") == current_time:
+                    self.get_logger().info(f"Scheduled clean triggered: {sched}")
+                    self.send_command("start_clean")
+
+    # ── Round 40: Scan Hz calculator ─────────────────────────────
+    def _calc_scan_hz(self):
+        now = time.monotonic()
+        dt = now - self._scan_hz_last_time
+        if dt > 0:
+            self.scan_hz = self._scan_callback_count / dt
+        self._scan_callback_count = 0
+        self._scan_hz_last_time = now
+
+    # ── Round 31: Get statistics ─────────────────────────────────
+    def get_stats(self):
+        active_scan = 0.0
+        active_clean = 0.0
+        if self._scan_start_time:
+            active_scan = time.monotonic() - self._scan_start_time
+        if self._clean_start_time:
+            active_clean = time.monotonic() - self._clean_start_time
+        return {
+            "total_scan_time": round(self.total_scan_time + active_scan, 1),
+            "total_clean_time": round(self.total_clean_time + active_clean, 1),
+            "rooms_scanned": self.rooms_scanned,
+            "rooms_cleaned": self.rooms_cleaned,
+            "total_distance": round(self.total_distance_traveled, 2),
+        }
 
     @staticmethod
     def list_rooms():
@@ -606,6 +815,60 @@ def api_log():
     return jsonify(ros_node.mission_log[-100:])
 
 
+@app.route("/api/stats")
+def api_stats():
+    if ros_node is None:
+        return jsonify({"error": "ROS not connected"}), 503
+    return jsonify(ros_node.get_stats())
+
+
+@app.route("/api/trail")
+def api_trail():
+    if ros_node is None:
+        return jsonify([])
+    return jsonify(ros_node.path_trail[-500:])
+
+
+@app.route("/api/schedules", methods=["GET"])
+def api_get_schedules():
+    if ros_node is None:
+        return jsonify([])
+    with ros_node._schedule_lock:
+        return jsonify(ros_node._schedules)
+
+
+@app.route("/api/schedules", methods=["POST"])
+def api_add_schedule():
+    if ros_node is None:
+        return jsonify({"error": "ROS not connected"}), 503
+    body = request.json or {}
+    sched_time = body.get("time", "")
+    days = body.get("days", [])
+    if not sched_time or not days:
+        return jsonify({"error": "Time and days required"}), 400
+    sched = {
+        "id": str(int(time.time() * 1000)),
+        "time": sched_time,
+        "days": days,
+        "enabled": True,
+        "created": datetime.now().isoformat(),
+    }
+    with ros_node._schedule_lock:
+        ros_node._schedules.append(sched)
+    ros_node._save_schedules()
+    return jsonify({"ok": True, "schedule": sched})
+
+
+@app.route("/api/schedules/<schedule_id>", methods=["DELETE"])
+def api_delete_schedule(schedule_id):
+    if ros_node is None:
+        return jsonify({"error": "ROS not connected"}), 503
+    with ros_node._schedule_lock:
+        ros_node._schedules = [s for s in ros_node._schedules if s.get("id") != schedule_id]
+    ros_node._save_schedules()
+    return jsonify({"ok": True})
+
+
 # ── WebSocket Events ─────────────────────────────────────────────
 @socketio.on("connect")
 def ws_connect():
@@ -635,6 +898,13 @@ def ws_request_map():
 @socketio.on("latency_ping")
 def ws_latency_ping(data):
     emit("latency_pong", {"ts": data.get("ts", 0)})
+
+
+@socketio.on("set_map_rate")
+def ws_set_map_rate(data):
+    if ros_node:
+        rate = max(0.5, min(5.0, float(data.get("rate", 0.5))))
+        ros_node._map_rate_interval = rate
 
 
 # ════════════════════════════════════════════════════════════════════
