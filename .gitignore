@@ -36,6 +36,11 @@ Thumbs.db
 *.log
 *.pyc
 
+# Runtime data (created by webapp)
+**/schedules.json
+**/saved_rooms/*.json
+!**/saved_rooms/.gitkeep
+
 # Maps (uncomment to track maps)
 # *.pgm
 # *.yaml
