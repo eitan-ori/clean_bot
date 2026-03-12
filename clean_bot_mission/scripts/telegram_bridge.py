@@ -43,6 +43,7 @@ import sys
 import logging
 import asyncio
 import io
+import math
 import threading
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -205,7 +206,6 @@ class RobotBridgeNode(Node):
             )
             
             # Direction indicator (calculate yaw from quaternion)
-            import math
             yaw = math.atan2(2.0 * rw * rz, 1.0 - 2.0 * rz * rz)
             arrow_len = radius * 2
             arrow_x = px + arrow_len * math.cos(yaw)
@@ -272,6 +272,17 @@ async def check_auth(update: Update) -> bool:
     return True
 
 
+async def check_ros(update: Update) -> bool:
+    """Check if ROS bridge is initialized."""
+    if ros_node is None:
+        await update.message.reply_text(
+            '❌ ROS bridge not initialized.\n'
+            'Start this script from a terminal where ROS2 is sourced.'
+        )
+        return False
+    return True
+
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show welcome message and available commands."""
     if not await check_auth(update):
@@ -307,13 +318,7 @@ Available commands:
 
 async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start scanning/exploration."""
-    if not await check_auth(update):
-        return
-    if ros_node is None:
-        await update.message.reply_text(
-            '❌ ROS bridge not initialized.\n'
-            'Start this script from a terminal where ROS2 is sourced, then try again.'
-        )
+    if not await check_auth(update) or not await check_ros(update):
         return
 
     ros_node.send_command('start_scan')
@@ -335,7 +340,7 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_stopscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Stop scanning."""
-    if not await check_auth(update):
+    if not await check_auth(update) or not await check_ros(update):
         return
     ros_node.send_command('stop_scan')
     await update.message.reply_text('🛑 Stopping scan...\nWaiting for clean command.')
@@ -343,7 +348,7 @@ async def cmd_stopscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start cleaning (map-based coverage)."""
-    if not await check_auth(update):
+    if not await check_auth(update) or not await check_ros(update):
         return
     ros_node.send_command('start_clean')
     await update.message.reply_text('🧹 Starting cleaning (map-based coverage)...\nRobot will cover all free space from the map.')
@@ -351,7 +356,7 @@ async def cmd_clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_stopclean(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Stop cleaning."""
-    if not await check_auth(update):
+    if not await check_auth(update) or not await check_ros(update):
         return
     ros_node.send_command('stop_clean')
     await update.message.reply_text('🛑 Stopping cleaning...')
@@ -359,7 +364,7 @@ async def cmd_stopclean(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Return to home position."""
-    if not await check_auth(update):
+    if not await check_auth(update) or not await check_ros(update):
         return
     ros_node.send_command('go_home')
     await update.message.reply_text('🏠 Returning home...')
@@ -367,7 +372,7 @@ async def cmd_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Reset mission: Stop robot and return to initial state."""
-    if not await check_auth(update):
+    if not await check_auth(update) or not await check_ros(update):
         return
     ros_node.send_command('reset')
     await update.message.reply_text('🛑 Stopping robot...\n🔄 Mission reset to initial state.\nReady for commands.')
@@ -375,7 +380,7 @@ async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Pause current operation."""
-    if not await check_auth(update):
+    if not await check_auth(update) or not await check_ros(update):
         return
     ros_node.send_command('pause')
     await update.message.reply_text('⏸️ Paused.')
@@ -383,7 +388,7 @@ async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Resume from pause."""
-    if not await check_auth(update):
+    if not await check_auth(update) or not await check_ros(update):
         return
     ros_node.send_command('resume')
     await update.message.reply_text('▶️ Resuming...')
@@ -391,7 +396,7 @@ async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Get current mission state."""
-    if not await check_auth(update):
+    if not await check_auth(update) or not await check_ros(update):
         return
     
     # State emoji mapping
@@ -446,7 +451,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_map(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Get map image with robot position."""
-    if not await check_auth(update):
+    if not await check_auth(update) or not await check_ros(update):
         return
     
     await update.message.reply_text('🗺️ Generating map...')

@@ -52,18 +52,15 @@ Usage:
 Author: Clean Bot Team
 """
 
-import math
 import time
 import rclpy
-import threading
 from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.action import ActionClient
 
 from std_msgs.msg import Bool, String, Empty
-from geometry_msgs.msg import PoseStamped, Twist
-from nav_msgs.msg import OccupancyGrid
+from geometry_msgs.msg import Twist
 from nav2_msgs.action import NavigateToPose
 
 # Import our mission modules
@@ -94,7 +91,6 @@ class FullMissionController(Node):
         self.declare_parameter('home_x', 0.0)
         self.declare_parameter('home_y', 0.0)
 
-        
         self.coverage_width = self.get_parameter('coverage_width').value
         self.auto_start = self.get_parameter('auto_start').value
         self.return_home = self.get_parameter('return_home_after').value
@@ -256,14 +252,7 @@ class FullMissionController(Node):
         if self.state == MissionState.COVERAGE:
             self.get_logger().info('🛑 Stopping cleaning...')
             self.stop_robot()
-            
-            # DEACTIVATE CLEANING VIA ARDUINO
-            self.get_logger().info('🔌 Deactivating cleaning switch...')
-            self.stop_clean_trigger_pub.publish(Empty())  # Legacy topic
-            # Send to arduino_driver via arduino_command topic
-            arduino_msg = String()
-            arduino_msg.data = 'stop_clean'
-            self.arduino_clean_pub.publish(arduino_msg)
+            self._deactivate_cleaning_hardware()
 
             # Tell coverage planner to stop
             ctrl_msg = String()
@@ -357,6 +346,22 @@ class FullMissionController(Node):
         stop_cmd = Twist()
         self.cmd_vel_pub.publish(stop_cmd)
 
+    def _activate_cleaning_hardware(self):
+        """Send cleaning start signals to Arduino (relay + servo)."""
+        self.clean_trigger_pub.publish(Empty())
+        arduino_msg = String()
+        arduino_msg.data = 'start_clean'
+        self.arduino_clean_pub.publish(arduino_msg)
+        self.get_logger().info('🔌 Cleaning hardware activated')
+
+    def _deactivate_cleaning_hardware(self):
+        """Send cleaning stop signals to Arduino (relay + servo)."""
+        self.stop_clean_trigger_pub.publish(Empty())
+        arduino_msg = String()
+        arduino_msg.data = 'stop_clean'
+        self.arduino_clean_pub.publish(arduino_msg)
+        self.get_logger().info('🔌 Cleaning hardware deactivated')
+
     def start_exploration(self):
         """Start the exploration phase."""
         self.start_time = time.time()
@@ -392,14 +397,7 @@ class FullMissionController(Node):
         """Trigger coverage phase."""
         self.get_logger().info('')
         self.get_logger().info('🧹 Starting coverage/cleaning phase...')
-        
-        # ACTIVATE CLEANING VIA ARDUINO
-        self.get_logger().info('🔌 Activating cleaning switch...')
-        self.clean_trigger_pub.publish(Empty())  # Legacy topic
-        # Send to arduino_driver via arduino_command topic
-        arduino_msg = String()
-        arduino_msg.data = 'start_clean'
-        self.arduino_clean_pub.publish(arduino_msg)
+        self._activate_cleaning_hardware()
 
         self.get_logger().info('   Robot will clean all free space')
         self.get_logger().info('   Send "stop_clean" to stop')
@@ -423,15 +421,7 @@ class FullMissionController(Node):
             self.coverage_complete = True
             self.get_logger().info('')
             self.get_logger().info('✅ Coverage phase complete!')
-            
-            # DEACTIVATE CLEANING VIA ARDUINO
-            self.get_logger().info('🔌 Deactivating cleaning switch...')
-            self.stop_clean_trigger_pub.publish(Empty())  # Legacy topic
-            # Send to arduino_driver via arduino_command topic
-            arduino_msg = String()
-            arduino_msg.data = 'stop_clean'
-            self.arduino_clean_pub.publish(arduino_msg)
-
+            self._deactivate_cleaning_hardware()
             self.get_logger().info('')
             
             if self.return_home:
