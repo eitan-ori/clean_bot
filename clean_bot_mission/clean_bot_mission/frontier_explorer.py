@@ -44,12 +44,10 @@ from tf2_ros import Buffer, TransformListener
 
 from nav2_msgs.action import NavigateToPose
 from nav_msgs.msg import OccupancyGrid
-from geometry_msgs.msg import PoseStamped, Point
 from std_msgs.msg import Bool, String
 from visualization_msgs.msg import Marker, MarkerArray
 
 from scipy import ndimage
-from collections import deque
 
 
 # Occupancy grid values

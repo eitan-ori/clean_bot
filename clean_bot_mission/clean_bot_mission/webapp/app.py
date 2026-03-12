@@ -37,7 +37,7 @@ from pathlib import Path
 import numpy as np
 
 # Flask
-from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit
 
 # ROS 2

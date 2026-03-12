@@ -81,8 +81,6 @@ from std_msgs.msg import Bool, String
 from visualization_msgs.msg import Marker, MarkerArray
 
 from scipy import ndimage
-from collections import deque
-import heapq
 
 
 # Occupancy grid values
