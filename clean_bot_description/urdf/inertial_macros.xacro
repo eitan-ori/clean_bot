@@ -4,7 +4,7 @@
     <!--
     This file provides reusable Xacro macros for calculating the inertial properties 
     of common geometric shapes (sphere, box, cylinder). These calculations are 
-    essential for realistic physical simulation in Gazebo.
+    essential for accurate physics calculations in the robot model.
 
     Macros:
     - inertial_sphere: Calculates inertia for a solid sphere based on mass and radius.

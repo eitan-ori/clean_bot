@@ -13,7 +13,7 @@
 # 5. Sensor Fusion: Configures EKF (robot_localization) if available.
 #
 # PARAMETERS & VALUES:
-# - use_sim_time: false (Set to true only when running in Gazebo).
+# - use_sim_time: false (Always false for physical robot).
 # - arduino_port: /dev/ttyUSB0 (Primary motor/sensor interface).
 # - lidar_port: /dev/ttyUSB1 (Laser scanner interface).
 # - i2c_bus: 1 (I2C interface for the IMU).

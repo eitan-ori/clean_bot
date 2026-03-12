@@ -142,14 +142,17 @@ class FullMissionController(Node):
         
         # Auto-start if configured
         if self.auto_start:
-            self.create_timer(3.0, self._auto_start_once, callback_group=ReentrantCallbackGroup())
+            self._auto_start_timer = self.create_timer(
+                3.0, self._auto_start_once, callback_group=ReentrantCallbackGroup())
 
     def _auto_start_once(self):
-        """Auto-start exploration once."""
+        """Auto-start exploration once, then cancel the timer."""
         if self.state == MissionState.WAITING_FOR_SCAN:
             self.get_logger().info('🚀 Auto-starting exploration...')
             self.start_exploration()
-        # This timer fires once, we don't need to track it
+        if self._auto_start_timer is not None:
+            self._auto_start_timer.cancel()
+            self._auto_start_timer = None
 
     def print_banner(self):
         """Print startup banner."""
@@ -273,6 +276,10 @@ class FullMissionController(Node):
         self.get_logger().info('🏠 Going home...')
         self.stop_robot()
         
+        # Deactivate cleaning if it was active
+        if self.state == MissionState.COVERAGE:
+            self._deactivate_cleaning_hardware()
+        
         # Stop any running operations
         ctrl_msg = String()
         ctrl_msg.data = 'stop'
@@ -286,6 +293,10 @@ class FullMissionController(Node):
         """Handle reset command - go back to initial waiting state."""
         self.get_logger().info('🔄 Resetting mission...')
         self.stop_robot()
+        
+        # Deactivate cleaning if it was active
+        if self.state == MissionState.COVERAGE:
+            self._deactivate_cleaning_hardware()
         
         # Stop any running operations
         ctrl_msg = String()
