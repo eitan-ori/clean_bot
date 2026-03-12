@@ -52,6 +52,7 @@ class ImuPublisherNode(Node):
         self.mag_pub = self.create_publisher(MagneticField, 'imu/mag', 10)
         
         # Initialize IMU
+        self.sensor = None
         try:
             self.sensor = SimpleIMU(bus_num=i2c_bus)
             self.get_logger().info(f"IMU initialized on I2C bus {i2c_bus}")
@@ -67,6 +68,8 @@ class ImuPublisherNode(Node):
 
     def publish_data(self):
         """Read IMU data and publish messages"""
+        if self.sensor is None:
+            return
         now = self.get_clock().now().to_msg()
         
         # Read sensor data

@@ -234,21 +234,24 @@ class ArduinoDriver(Node):
         now = self.get_clock().now()
         
         # Read data from Arduino
-        if self.serial.in_waiting > 0:
-            try:
-                line = self.serial.readline().decode('utf-8').strip()
-                
-                # Try to parse as distance (single number)
+        try:
+            if not self.serial.is_open:
+                return
+            if self.serial.in_waiting > 0:
                 try:
-                    distance_cm = float(line)
-                    self._publish_range(distance_cm, now)
-                except ValueError:
-                    pass  # Not a distance reading, ignore
+                    line = self.serial.readline().decode('utf-8').strip()
                     
-            except (ValueError, UnicodeDecodeError) as e:
-                pass  # Ignore malformed data (common during startup)
-            except serial.SerialException as e:
-                self.get_logger().warning(f'Serial read error: {e}')
+                    # Try to parse as distance (single number)
+                    try:
+                        distance_cm = float(line)
+                        self._publish_range(distance_cm, now)
+                    except ValueError:
+                        pass  # Not a distance reading, ignore
+                        
+                except (ValueError, UnicodeDecodeError) as e:
+                    pass  # Ignore malformed data (common during startup)
+        except (serial.SerialException, OSError) as e:
+            self.get_logger().warning(f'Serial read error: {e}')
 
     def _publish_range(self, distance_cm: float, stamp):
         """Publish ultrasonic range measurement."""
@@ -270,7 +273,7 @@ class ArduinoDriver(Node):
                 self.serial.write(b"0,0\n")         # Stop motors
                 self.serial.write(b"CLEAN_STOP\n")  # Stop cleaning
                 self.serial.close()
-            except:
+            except Exception:
                 pass
         super().destroy_node()
 

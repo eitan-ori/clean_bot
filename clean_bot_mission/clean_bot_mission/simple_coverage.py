@@ -121,7 +121,10 @@ class SimpleCoverage(Node):
         center = num_readings // 2
         
         # Check front 60° (30° each side)
-        angle_per_reading = (msg.angle_max - msg.angle_min) / num_readings
+        angle_range = msg.angle_max - msg.angle_min
+        if angle_range <= 0 or num_readings < 2:
+            return
+        angle_per_reading = angle_range / num_readings
         front_readings = int(math.radians(60) / angle_per_reading / 2)
         
         start_idx = max(0, center - front_readings)
@@ -338,7 +341,8 @@ def main(args=None):
     finally:
         node.stop_robot()
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

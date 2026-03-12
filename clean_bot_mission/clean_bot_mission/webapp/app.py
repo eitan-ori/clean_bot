@@ -172,9 +172,10 @@ class WebBridgeNode(Node):
             t = self.tf_buffer.lookup_transform("map", "base_link", rclpy.time.Time())
             self.robot_x = t.transform.translation.x
             self.robot_y = t.transform.translation.y
-            qz = t.transform.rotation.z
-            qw = t.transform.rotation.w
-            self.robot_yaw = math.atan2(2.0 * qw * qz, 1.0 - 2.0 * qz * qz)
+            q = t.transform.rotation
+            self.robot_yaw = math.atan2(
+                2.0 * (q.w * q.z + q.x * q.y),
+                1.0 - 2.0 * (q.y * q.y + q.z * q.z))
         except Exception:
             pass
 
@@ -310,15 +311,15 @@ class WebBridgeNode(Node):
         try:
             with open(path, "w") as f:
                 json.dump(room, f)
-        except (TypeError, ValueError, OverflowError) as e:
-            return False, f"JSON serialization error: {e}"
+        except (TypeError, ValueError, OverflowError, OSError) as e:
+            return False, f"Save error: {e}"
         return True, str(path)
 
     @staticmethod
     def rename_room(filename, new_name):
         """Rename a saved room: update the JSON name field and rename the file."""
-        path = SAVED_ROOMS_DIR / f"{filename}.json"
-        if not path.exists():
+        path = WebBridgeNode._safe_room_path(filename)
+        if path is None or not path.exists():
             return False, "Room not found"
         try:
             with open(path) as f:
@@ -376,20 +377,35 @@ class WebBridgeNode(Node):
         return rooms
 
     @staticmethod
+    def _safe_room_path(filename):
+        """Return a safe path inside SAVED_ROOMS_DIR, or None if traversal detected."""
+        safe = "".join(c if c.isalnum() or c in "-_" else "" for c in filename)
+        if not safe or safe != filename:
+            return None
+        path = (SAVED_ROOMS_DIR / f"{safe}.json").resolve()
+        if not str(path).startswith(str(SAVED_ROOMS_DIR.resolve())):
+            return None
+        return path
+
+    @staticmethod
     def delete_room(filename):
-        path = SAVED_ROOMS_DIR / f"{filename}.json"
-        if path.exists():
-            path.unlink()
-            return True
-        return False
+        path = WebBridgeNode._safe_room_path(filename)
+        if path is None or not path.exists():
+            return False
+        path.unlink()
+        return True
 
     def load_room_preview(self, filename):
         """Load a saved room and return map image data."""
-        path = SAVED_ROOMS_DIR / f"{filename}.json"
-        if not path.exists():
+        path = WebBridgeNode._safe_room_path(filename)
+        if path is None or not path.exists():
             return None
-        with open(path) as f:
-            d = json.load(f)
+        try:
+            with open(path) as f:
+                d = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            self.get_logger().warn(f"Failed to load room {filename}: {e}")
+            return None
         for field in ("width", "height", "data"):
             if field not in d:
                 return None
@@ -473,7 +489,8 @@ def api_status():
 def api_command():
     if ros_node is None:
         return jsonify({"error": "ROS not connected"}), 503
-    cmd = request.json.get("command", "")
+    body = request.json or {}
+    cmd = body.get("command", "")
     valid = {"start_scan", "stop_scan", "start_clean", "stop_clean",
              "go_home", "reset", "pause", "resume"}
     if cmd not in valid:
@@ -489,8 +506,9 @@ def api_command():
 def api_velocity():
     if ros_node is None:
         return jsonify({"error": "ROS not connected"}), 503
-    lin = request.json.get("linear", 0.0)
-    ang = request.json.get("angular", 0.0)
+    body = request.json or {}
+    lin = body.get("linear", 0.0)
+    ang = body.get("angular", 0.0)
     try:
         ros_node.send_velocity(lin, ang)
     except Exception as e:
@@ -520,7 +538,8 @@ def api_rooms():
 def api_save_room():
     if ros_node is None:
         return jsonify({"error": "ROS not connected"}), 503
-    name = request.json.get("name", "").strip()
+    body = request.json or {}
+    name = body.get("name", "").strip()
     if not name:
         return jsonify({"error": "Room name required"}), 400
     try:
@@ -554,7 +573,8 @@ def api_delete_room(filename):
 
 @app.route("/api/rooms/<filename>/rename", methods=["PUT"])
 def api_rename_room(filename):
-    new_name = request.json.get("name", "").strip()
+    body = request.json or {}
+    new_name = body.get("name", "").strip()
     if not new_name:
         return jsonify({"error": "New name required"}), 400
     ok, info = WebBridgeNode.rename_room(filename, new_name)
@@ -567,8 +587,9 @@ def api_rename_room(filename):
 def api_navigate():
     if ros_node is None:
         return jsonify({"error": "ROS not connected"}), 503
-    x = request.json.get("x", 0.0)
-    y = request.json.get("y", 0.0)
+    body = request.json or {}
+    x = body.get("x", 0.0)
+    y = body.get("y", 0.0)
     try:
         ok, info = ros_node.navigate_to_pose(x, y)
     except Exception as e:

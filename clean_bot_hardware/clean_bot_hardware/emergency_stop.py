@@ -131,8 +131,12 @@ class EmergencyStopController(Node):
             if msg.linear.x > 0:
                 # Scale speed based on distance
                 # At slow_dist: full speed, at stop_dist: slow_factor
-                scale = self.slow_factor + (1 - self.slow_factor) * \
-                        (distance - self.stop_dist) / (self.slow_dist - self.stop_dist)
+                dist_range = self.slow_dist - self.stop_dist
+                if dist_range > 0:
+                    scale = self.slow_factor + (1 - self.slow_factor) * \
+                            (distance - self.stop_dist) / dist_range
+                else:
+                    scale = self.slow_factor
                 output.linear.x = msg.linear.x * scale
                 
                 self.get_logger().debug(
