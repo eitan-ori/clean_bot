@@ -61,3 +61,38 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`load_room_preview`)
 - **Problem:** `json.load(f)` was called with no exception handling. If a saved room file is corrupted or contains invalid JSON, this raises `json.JSONDecodeError` and crashes the endpoint.
 - **Fix:** Wrapped the file open and JSON load in `try/except (json.JSONDecodeError, OSError)` with a warning log and `None` return.
+
+### Bug 13: WebSocket command handler has no validation
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`ws_command`)
+- **Problem:** The WebSocket `command` event handler forwarded any string directly to `send_command()` without validation. While the HTTP route validated against a whitelist of 8 commands, the WebSocket route did not. Malicious or buggy clients could send arbitrary strings to `/mission_command`.
+- **Fix:** Added validation against `VALID_COMMANDS` set (shared with the HTTP route) before calling `send_command()`.
+
+### Bug 14: Race condition on mission_log list
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`_on_mission_state`, `api_log`)
+- **Problem:** `mission_log` was a plain list appended from the ROS callback thread and read from Flask threads. The truncation `self.mission_log = self.mission_log[-200:]` created a window where another thread's append could be lost. List reassignment is not atomic with the preceding read.
+- **Fix:** Changed `mission_log` from `list` to `collections.deque(maxlen=200)` which is thread-safe for append/iterate and auto-truncates.
+
+### Bug 15: Race condition on path_trail list
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`_update_pose`, `_push_status`, `api_trail`)
+- **Problem:** `path_trail` was modified from the ROS timer thread (`_update_pose`) and read from Flask threads (`api_trail`, `_push_status`). The reassignment `self.path_trail = trail[-500:]` could lose concurrent appends.
+- **Fix:** Added `_trail_lock` (threading.Lock) protecting all reads and writes to `path_trail` and `_trail_sent_index`.
+
+### Bug 16: Room preview required ROS connection unnecessarily
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`api_room_preview`, `load_room_preview`)
+- **Problem:** The room preview endpoint returned 503 when `ros_node is None`, but the operation only reads saved JSON files from disk — no ROS connection needed. Users couldn't view saved rooms when the robot was disconnected.
+- **Fix:** Converted `load_room_preview` from instance method to `@staticmethod` and removed the `ros_node is None` check from the route.
+
+### Bug 17: rename_room writes to old file before renaming
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`rename_room`)
+- **Problem:** The method wrote updated JSON to the old file path, then renamed the file. If the rename failed (e.g., target exists, permissions), the old file would contain the new name in its JSON data, creating an inconsistency.
+- **Fix:** Changed to write directly to the new path first, then delete the old file. If the paths are the same, write in place.
+
+### Bug 18: rclpy.init() failure has no error message
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`main`)
+- **Problem:** If ROS 2 was not installed or not sourced on the remote PC, `rclpy.init()` would throw an exception with a cryptic error. Users wouldn't know what went wrong.
+- **Fix:** Wrapped in try/except with a clear error message explaining that ROS 2 must be installed and sourced.
+
+### Bug 19: Test cross-contamination between integration and webapp tests
+- **File:** `clean_bot_mission/test/test_integration.py`
+- **Problem:** Integration tests assigned lambdas to `WebBridgeNode` class methods (`list_rooms`, `delete_room`, etc.) but didn't restore them, causing subsequent webapp tests to fail when run in the same pytest session.
+- **Fix:** Used `_FakeNode` base class in integration tests so `WebBridgeNode` has real static methods. Added cleanup in the `client` fixture to restore any modified class attributes.

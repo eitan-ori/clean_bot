@@ -953,7 +953,7 @@ function setMissionBadge(state) {
 }
 
 /* ── Commands (Round 7: confirmation dialogs) ── */
-const DESTRUCTIVE_CMDS = new Set(['reset', 'stop_clean', 'stop_scan']);
+const DESTRUCTIVE_CMDS = new Set(['reset']);
 window.sendCommand = function(cmd) {
   if (DESTRUCTIVE_CMDS.has(cmd)) {
     if (!confirm('Are you sure you want to ' + cmd.replace('_', ' ') + '?')) return;
@@ -964,7 +964,9 @@ window.sendCommand = function(cmd) {
 
 /* ── Emergency Stop (Round 2) ─────────────────── */
 window.emergencyStop = function() {
+  // Stop ALL operations - scanning, cleaning, navigation
   socket.emit('command', {command: 'stop_clean'});
+  socket.emit('command', {command: 'stop_scan'});
   socket.emit('velocity', {linear: 0, angular: 0});
   toast('⚠️ Emergency stop activated!');
 };

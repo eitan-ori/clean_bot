@@ -30,6 +30,7 @@ import time
 import math
 import threading
 import logging
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 
@@ -114,7 +115,7 @@ class WebBridgeNode(Node):
         self.scan_angle_min = 0.0
         self.scan_angle_max = 0.0
         self.scan_angle_increment = 0.0
-        self.mission_log = []  # list of {time, event} dicts
+        self.mission_log = deque(maxlen=200)  # thread-safe, auto-truncating
         self._prev_mission_state = "UNKNOWN"
         self._last_map_emit = 0.0
         self._last_pose_emit = 0.0
@@ -147,6 +148,7 @@ class WebBridgeNode(Node):
         # ── Round 35: Path trail ──
         self.path_trail = []
         self._trail_sent_index = 0
+        self._trail_lock = threading.Lock()
 
         # ── Round 39: Configurable map rate ──
         self._map_rate_interval = 0.5
@@ -182,8 +184,6 @@ class WebBridgeNode(Node):
         if old != msg.data:
             entry = {"time": datetime.now().strftime("%H:%M:%S"), "event": f"Mission: {old} → {msg.data}"}
             self.mission_log.append(entry)
-            if len(self.mission_log) > 200:
-                self.mission_log = self.mission_log[-200:]
             self.sio.emit("mission_state", {"state": msg.data, "log_entry": entry})
             # Round 31: Track scan/clean stats
             old_u = (old or '').upper()
@@ -266,12 +266,13 @@ class WebBridgeNode(Node):
                 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
             self._tf_healthy = True
             # Round 35: Path trail
-            trail = self.path_trail
-            if not trail or (abs(self.robot_x - trail[-1][0]) > 0.01 or
-                             abs(self.robot_y - trail[-1][1]) > 0.01):
-                trail.append((round(self.robot_x, 3), round(self.robot_y, 3)))
-                if len(trail) > 500:
-                    self.path_trail = trail[-500:]
+            with self._trail_lock:
+                trail = self.path_trail
+                if not trail or (abs(self.robot_x - trail[-1][0]) > 0.01 or
+                                 abs(self.robot_y - trail[-1][1]) > 0.01):
+                    trail.append((round(self.robot_x, 3), round(self.robot_y, 3)))
+                    if len(trail) > 500:
+                        self.path_trail = trail[-500:]
         except Exception:
             self._tf_healthy = False
 
@@ -279,8 +280,9 @@ class WebBridgeNode(Node):
         # Round 34: Use arduino battery if available
         battery = self._arduino_battery if self._arduino_battery is not None else round(self.battery_level, 1)
         # Round 35: Only send new trail points since last push
-        new_trail = self.path_trail[self._trail_sent_index:]
-        self._trail_sent_index = len(self.path_trail)
+        with self._trail_lock:
+            new_trail = self.path_trail[self._trail_sent_index:]
+            self._trail_sent_index = len(self.path_trail)
         self.sio.emit("status", {
             "mission_state": self.mission_state,
             "exploration_state": self.exploration_state,
@@ -431,6 +433,9 @@ class WebBridgeNode(Node):
         entry = {"time": datetime.now().strftime("%H:%M:%S"), "event": f"Command sent: {cmd}"}
         self.mission_log.append(entry)
         self.get_logger().info(f"Command: {cmd}")
+        # Safety: stop commands also zero velocity to halt the robot immediately
+        if cmd in ("stop_clean", "stop_scan"):
+            self.send_velocity(0.0, 0.0)
 
     def send_velocity(self, linear, angular):
         t = Twist()
@@ -475,10 +480,13 @@ class WebBridgeNode(Node):
             d["name"] = new_name
             safe_new = "".join(c if c.isalnum() or c in "-_ " else "" for c in new_name).strip().replace(" ", "_")
             new_path = SAVED_ROOMS_DIR / f"{safe_new}.json"
-            with open(path, "w") as f:
-                json.dump(d, f)
             if new_path != path:
-                path.rename(new_path)
+                with open(new_path, "w") as f:
+                    json.dump(d, f)
+                path.unlink()
+            else:
+                with open(path, "w") as f:
+                    json.dump(d, f)
             return True, safe_new
         except Exception as e:
             return False, str(e)
@@ -604,7 +612,8 @@ class WebBridgeNode(Node):
         path.unlink()
         return True
 
-    def load_room_preview(self, filename):
+    @staticmethod
+    def load_room_preview(filename):
         """Load a saved room and return map image data."""
         path = WebBridgeNode._safe_room_path(filename)
         if path is None or not path.exists():
@@ -612,8 +621,7 @@ class WebBridgeNode(Node):
         try:
             with open(path) as f:
                 d = json.load(f)
-        except (json.JSONDecodeError, OSError) as e:
-            self.get_logger().warn(f"Failed to load room {filename}: {e}")
+        except (json.JSONDecodeError, OSError):
             return None
         for field in ("width", "height", "data"):
             if field not in d:
@@ -668,6 +676,10 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 ros_node: WebBridgeNode = None
 
 
+VALID_COMMANDS = {"start_scan", "stop_scan", "start_clean", "stop_clean",
+                  "go_home", "reset", "pause", "resume"}
+
+
 # ── HTTP Routes ───────────────────────────────────────────────────
 @app.route("/")
 def index():
@@ -700,9 +712,7 @@ def api_command():
         return jsonify({"error": "ROS not connected"}), 503
     body = request.json or {}
     cmd = body.get("command", "")
-    valid = {"start_scan", "stop_scan", "start_clean", "stop_clean",
-             "go_home", "reset", "pause", "resume"}
-    if cmd not in valid:
+    if cmd not in VALID_COMMANDS:
         return jsonify({"error": f"Unknown command: {cmd}"}), 400
     try:
         ros_node.send_command(cmd)
@@ -762,10 +772,8 @@ def api_save_room():
 
 @app.route("/api/rooms/<filename>/preview")
 def api_room_preview(filename):
-    if ros_node is None:
-        return jsonify({"error": "ROS not connected"}), 503
     try:
-        data = ros_node.load_room_preview(filename)
+        data = WebBridgeNode.load_room_preview(filename)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     if data is None:
@@ -812,7 +820,7 @@ def api_navigate():
 def api_log():
     if ros_node is None:
         return jsonify([])
-    return jsonify(ros_node.mission_log[-100:])
+    return jsonify(list(ros_node.mission_log)[-100:])
 
 
 @app.route("/api/stats")
@@ -826,7 +834,8 @@ def api_stats():
 def api_trail():
     if ros_node is None:
         return jsonify([])
-    return jsonify(ros_node.path_trail[-500:])
+    with ros_node._trail_lock:
+        return jsonify(ros_node.path_trail[-500:])
 
 
 @app.route("/api/schedules", methods=["GET"])
@@ -880,7 +889,9 @@ def ws_connect():
 @socketio.on("command")
 def ws_command(data):
     if ros_node:
-        ros_node.send_command(data.get("command", ""))
+        cmd = data.get("command", "")
+        if cmd in VALID_COMMANDS:
+            ros_node.send_command(cmd)
 
 
 @socketio.on("velocity")
@@ -913,6 +924,13 @@ def ws_set_map_rate(data):
 def main():
     global ros_node
 
+    import argparse
+    parser = argparse.ArgumentParser(description="Clean Bot Web Control Panel")
+    parser.add_argument("--port", type=int, default=5000, help="Web server port (default: 5000)")
+    parser.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0)")
+    # Parse known args only — ROS 2 may inject its own args
+    args, _ = parser.parse_known_args()
+
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
@@ -920,10 +938,43 @@ def main():
     print("🤖  Clean Bot Web Control Panel")
     print("=" * 60)
     print()
+
+    # Show network info so the user knows how to connect
+    try:
+        import socket as sock
+        hostname = sock.gethostname()
+        # Get all non-loopback IPv4 addresses
+        addrs = []
+        for info in sock.getaddrinfo(hostname, None, sock.AF_INET):
+            addr = info[4][0]
+            if not addr.startswith("127."):
+                addrs.append(addr)
+        if addrs:
+            print("Network addresses (use any of these from another PC):")
+            for a in sorted(set(addrs)):
+                print(f"  → http://{a}:{args.port}")
+        else:
+            print(f"Listening on http://localhost:{args.port}")
+        print()
+    except Exception:
+        pass
+
     print("Starting ROS 2 bridge...")
 
-    if not rclpy.ok():
-        rclpy.init()
+    # ROS_DOMAIN_ID must match the robot's domain
+    domain_id = os.environ.get("ROS_DOMAIN_ID", "0")
+    print(f"ROS_DOMAIN_ID = {domain_id}")
+    print("(Set ROS_DOMAIN_ID env var to match your robot if needed)")
+    print()
+
+    try:
+        if not rclpy.ok():
+            rclpy.init()
+    except Exception as e:
+        print(f"ERROR: Failed to initialize ROS 2: {e}")
+        print("Make sure ROS 2 is installed and sourced on this machine.")
+        print("The web app requires ROS 2 (rclpy) to communicate with the robot.")
+        sys.exit(1)
 
     ros_node = WebBridgeNode(socketio)
     executor = MultiThreadedExecutor()
@@ -934,12 +985,12 @@ def main():
 
     print("ROS 2 bridge started.")
     print()
-    print("Starting web server on http://0.0.0.0:5000")
+    print(f"Starting web server on http://{args.host}:{args.port}")
     print("Open this URL in your browser to control the robot.")
     print("=" * 60)
 
     try:
-        socketio.run(app, host="0.0.0.0", port=5000, allow_unsafe_werkzeug=True)
+        socketio.run(app, host=args.host, port=args.port, allow_unsafe_werkzeug=True)
     except KeyboardInterrupt:
         print("\nShutting down...")
     finally:
