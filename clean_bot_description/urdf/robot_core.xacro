@@ -22,7 +22,11 @@
     Assumptions:
     - The robot is a differential drive mobile platform.
     - The base_link is located on the ground directly between the drive wheels.
-    - Standard gravitational and physics parameters apply in Gazebo.
+    - Standard gravitational and physics parameters apply.
+    
+    Note: <gazebo> material tags are retained for optional visualization in
+    simulation tools but are safely ignored by robot_state_publisher on
+    the physical robot.
     -->
 
     <xacro:include filename="inertial_macros.xacro"/>

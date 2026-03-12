@@ -32,7 +32,7 @@
             <origin xyz="${xyz}" rpy="${rpy}"/>
         </joint>
         
-        <!-- Gazebo simulation plugin -->
+        <!-- Gazebo simulation plugin (ignored on physical robot) -->
         <gazebo reference="ultrasonic_link">
             <sensor type="ray" name="ultrasonic_sensor">
                 <pose>0 0 0 0 0 0</pose>
