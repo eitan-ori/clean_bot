@@ -44,11 +44,18 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 from rclpy.executors import MultiThreadedExecutor
+from rclpy.action import ActionClient
 from std_msgs.msg import String
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import Twist, PoseStamped
 from nav_msgs.msg import OccupancyGrid, Odometry
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformListener
+
+try:
+    from nav2_msgs.action import NavigateToPose as Nav2NavigateToPose
+    HAS_NAV2 = True
+except ImportError:
+    HAS_NAV2 = False
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +117,11 @@ class WebBridgeNode(Node):
         self._prev_mission_state = "UNKNOWN"
         self._last_map_emit = 0.0
         self._last_pose_emit = 0.0
+
+        # ── Nav2 action client (Round 14) ──
+        self._nav_client = None
+        if HAS_NAV2:
+            self._nav_client = ActionClient(self, Nav2NavigateToPose, 'navigate_to_pose')
 
         # ── Periodic pose updater (10 Hz) ──
         self.create_timer(0.1, self._update_pose)
@@ -301,6 +313,48 @@ class WebBridgeNode(Node):
         except (TypeError, ValueError, OverflowError) as e:
             return False, f"JSON serialization error: {e}"
         return True, str(path)
+
+    @staticmethod
+    def rename_room(filename, new_name):
+        """Rename a saved room: update the JSON name field and rename the file."""
+        path = SAVED_ROOMS_DIR / f"{filename}.json"
+        if not path.exists():
+            return False, "Room not found"
+        try:
+            with open(path) as f:
+                d = json.load(f)
+            d["name"] = new_name
+            safe_new = "".join(c if c.isalnum() or c in "-_ " else "" for c in new_name).strip().replace(" ", "_")
+            new_path = SAVED_ROOMS_DIR / f"{safe_new}.json"
+            with open(path, "w") as f:
+                json.dump(d, f)
+            if new_path != path:
+                path.rename(new_path)
+            return True, safe_new
+        except Exception as e:
+            return False, str(e)
+
+    def navigate_to_pose(self, x, y):
+        """Send a NavigateToPose goal via nav2 action client."""
+        if not HAS_NAV2 or self._nav_client is None:
+            self.get_logger().warn("Nav2 action client not available")
+            return False, "Nav2 not available"
+        goal = Nav2NavigateToPose.Goal()
+        goal.pose = PoseStamped()
+        goal.pose.header.frame_id = "map"
+        goal.pose.header.stamp = self.get_clock().now().to_msg()
+        goal.pose.pose.position.x = float(x)
+        goal.pose.pose.position.y = float(y)
+        goal.pose.pose.orientation.w = 1.0
+        if not self._nav_client.wait_for_server(timeout_sec=2.0):
+            return False, "Nav2 action server not available"
+        self._nav_client.send_goal_async(goal)
+        entry = {"time": datetime.now().strftime("%H:%M:%S"),
+                 "event": f"Navigate to ({x:.2f}, {y:.2f})"}
+        self.mission_log.append(entry)
+        self.sio.emit("mission_state", {"state": self.mission_state, "log_entry": entry})
+        self.get_logger().info(f"Navigate to ({x}, {y})")
+        return True, "Goal sent"
 
     @staticmethod
     def list_rooms():
@@ -498,6 +552,32 @@ def api_delete_room(filename):
     return jsonify({"error": "Room not found"}), 404
 
 
+@app.route("/api/rooms/<filename>/rename", methods=["PUT"])
+def api_rename_room(filename):
+    new_name = request.json.get("name", "").strip()
+    if not new_name:
+        return jsonify({"error": "New name required"}), 400
+    ok, info = WebBridgeNode.rename_room(filename, new_name)
+    if ok:
+        return jsonify({"ok": True, "new_filename": info})
+    return jsonify({"error": info}), 404
+
+
+@app.route("/api/navigate", methods=["POST"])
+def api_navigate():
+    if ros_node is None:
+        return jsonify({"error": "ROS not connected"}), 503
+    x = request.json.get("x", 0.0)
+    y = request.json.get("y", 0.0)
+    try:
+        ok, info = ros_node.navigate_to_pose(x, y)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    if ok:
+        return jsonify({"ok": True, "message": info})
+    return jsonify({"error": info}), 400
+
+
 @app.route("/api/log")
 def api_log():
     if ros_node is None:
@@ -529,6 +609,11 @@ def ws_velocity(data):
 def ws_request_map():
     if ros_node:
         ros_node._emit_map()
+
+
+@socketio.on("latency_ping")
+def ws_latency_ping(data):
+    emit("latency_pong", {"ts": data.get("ts", 0)})
 
 
 # ════════════════════════════════════════════════════════════════════

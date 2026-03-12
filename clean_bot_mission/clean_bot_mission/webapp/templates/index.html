@@ -35,6 +35,7 @@ main{
   padding:1rem;flex:1;overflow:hidden;
 }
 @media(max-width:960px){main{grid-template-columns:1fr;overflow:auto}}
+@media(min-width:961px){.estop-btn{position:static}}
 
 /* ── Cards ───────────────────────────────────────── */
 .card{
@@ -197,6 +198,106 @@ main{
 
 /* ── Scan Timer ─────────────────────────────────── */
 .scan-timer{font-size:.85rem;color:var(--accent);font-weight:600;font-family:monospace}
+
+/* ── Round 12: State History Timeline ──────────── */
+.timeline-wrap{margin-top:.5rem}
+.timeline-wrap h3{font-size:.8rem;color:var(--text-dim);margin-bottom:.25rem}
+#stateTimeline{width:100%;height:22px;border-radius:4px;background:#1a1b30;display:block}
+
+/* ── Round 13: Disabled buttons ────────────────── */
+.btn:disabled,.btn.disabled{opacity:.35;cursor:not-allowed;pointer-events:none;filter:none;transform:none}
+
+/* ── Round 14: Navigate marker & popup ─────────── */
+.nav-popup{
+  position:absolute;background:var(--card);border:1px solid var(--accent);border-radius:8px;
+  padding:.4rem .6rem;display:none;z-index:50;box-shadow:var(--shadow);font-size:.78rem;
+  white-space:nowrap;
+}
+.nav-popup button{margin-left:.4rem}
+
+/* ── Round 15: Theme Toggle ────────────────────── */
+.theme-toggle{
+  background:none;border:1px solid #444;border-radius:6px;padding:.25rem .5rem;
+  cursor:pointer;font-size:1.1rem;color:var(--text);transition:background .2s;
+}
+.theme-toggle:hover{background:#333}
+
+/* ── Light theme ── */
+html.light{
+  --bg:#f0f2f5;--card:#ffffff;--card-hover:#f8f9fa;
+  --accent:#2563eb;--text:#1a1b2e;--text-dim:#64748b;
+  --shadow:0 2px 12px rgba(0,0,0,.1);
+}
+html.light header{background:#fff;border-bottom-color:#e0e0e0}
+html.light .map-container{background:#e8eaed;border-color:#ccc}
+html.light .room-item,html.light .log-box,html.light #stateTimeline{background:#f1f3f6}
+html.light .room-save-row input{background:#f8f9fa;border-color:#ccc;color:var(--text)}
+html.light .dpad .btn{background:#e0e3ea}
+html.light .dpad .btn:hover{background:#d0d3da}
+html.light .toast{background:#fff;color:var(--text)}
+html.light .theme-toggle{border-color:#ccc}
+html.light .theme-toggle:hover{background:#e8e8e8}
+
+/* ── Round 16: Fullscreen Map ──────────────────── */
+.fullscreen-btn{
+  background:none;border:1px solid #444;border-radius:6px;padding:.25rem .5rem;
+  cursor:pointer;font-size:1rem;color:var(--text);transition:background .2s;
+}
+.fullscreen-btn:hover{background:#333}
+html.light .fullscreen-btn{border-color:#ccc}
+html.light .fullscreen-btn:hover{background:#e8e8e8}
+.map-wrap.fullscreen{
+  position:fixed;inset:0;z-index:900;background:var(--bg);
+  padding:1rem;display:flex;flex-direction:column;overflow:auto;
+}
+.map-wrap.fullscreen .map-container{flex:1;min-height:0}
+.map-wrap.fullscreen #mapCanvas{max-width:100%;max-height:100%}
+
+/* ── Round 18: Latency Indicator ───────────────── */
+.latency-indicator{font-size:.78rem;color:var(--text-dim);display:flex;align-items:center;gap:.3rem}
+.latency-dot{width:8px;height:8px;border-radius:50%;background:var(--gray);transition:background .3s}
+.latency-dot.good{background:var(--green)}
+.latency-dot.warn{background:var(--yellow)}
+.latency-dot.bad{background:var(--red)}
+
+/* ── Round 19: Mute Toggle ─────────────────────── */
+.mute-toggle{
+  background:none;border:1px solid #444;border-radius:6px;padding:.25rem .5rem;
+  cursor:pointer;font-size:1.1rem;color:var(--text);transition:background .2s;
+}
+.mute-toggle:hover{background:#333}
+html.light .mute-toggle{border-color:#ccc}
+html.light .mute-toggle:hover{background:#e8e8e8}
+
+/* ── Round 20: Mobile Responsive ───────────────── */
+@media(max-width:960px){
+  main{grid-template-columns:1fr;overflow:auto;padding:.5rem}
+  .map-wrap{order:1}
+  .panels{order:2}
+  .map-container{min-height:250px}
+  #mapCanvas{max-width:100%;width:100%}
+  .dpad{max-width:260px}
+  .dpad .btn{min-width:44px;min-height:44px;font-size:1.5rem}
+  .btn{min-height:44px;min-width:44px;padding:.6rem .85rem}
+  .btn-sm{min-height:38px;min-width:38px}
+  .room-item{flex-wrap:wrap;gap:.3rem}
+  .room-actions{margin-left:0;width:100%;justify-content:flex-end}
+  .cmd-grid{gap:.4rem}
+  .estop-btn{position:sticky;bottom:0;z-index:100;margin-top:.5rem}
+  .card{padding:.75rem;overflow:hidden}
+  .status-grid{font-size:.82rem}
+  header{padding:.5rem .75rem;flex-wrap:wrap;gap:.4rem}
+  .header-controls{gap:.3rem}
+  body{overflow-x:hidden}
+}
+@media(max-width:480px){
+  html{font-size:13px}
+  .dpad .btn{font-size:1.6rem;min-width:52px;min-height:52px}
+  .cmd-grid{grid-template-columns:1fr}
+}
+
+/* ── Header controls row ──────────────────────── */
+.header-controls{display:flex;align-items:center;gap:.6rem}
 </style>
 </head>
 <body>
@@ -204,9 +305,17 @@ main{
 <!-- ═══ Header ═══ -->
 <header>
   <h1>🤖 Clean Bot Control Panel</h1>
-  <div class="conn-indicator">
-    <div class="conn-dot" id="connDot"></div>
-    <span id="connLabel">Disconnected</span>
+  <div class="header-controls">
+    <div class="latency-indicator" id="latencyIndicator">
+      <span class="latency-dot" id="latencyDot"></span>
+      <span id="latencyLabel">— ms</span>
+    </div>
+    <button class="mute-toggle" id="muteToggle" title="Toggle notification sound">🔔</button>
+    <button class="theme-toggle" id="themeToggle" title="Toggle dark/light theme">🌙</button>
+    <div class="conn-indicator">
+      <div class="conn-dot" id="connDot"></div>
+      <span id="connLabel">Disconnected</span>
+    </div>
   </div>
 </header>
 
@@ -215,10 +324,18 @@ main{
   <!-- Left: Map -->
   <div class="map-wrap">
     <div class="card" style="flex:1;display:flex;flex-direction:column">
-      <h2>🗺️ Live Map</h2>
+      <h2>🗺️ Live Map
+        <span style="margin-left:auto;display:flex;gap:.3rem">
+          <button class="fullscreen-btn" id="fullscreenBtn" title="Fullscreen map">⛶</button>
+        </span>
+      </h2>
       <div class="map-container" id="mapContainer">
         <canvas id="mapCanvas" width="500" height="500"></canvas>
         <div class="map-placeholder" id="mapPlaceholder">Waiting for map data…</div>
+        <div class="nav-popup" id="navPopup">
+          <span id="navCoords"></span>
+          <button class="btn btn-blue btn-sm" id="navHereBtn">Navigate Here</button>
+        </div>
       </div>
     </div>
     <div class="map-info" id="mapInfo">
@@ -230,6 +347,7 @@ main{
       <button class="btn btn-gray" id="zoomIn">＋</button>
       <button class="btn btn-gray" id="zoomOut">−</button>
       <span class="zoom-level">Zoom: <span id="zoomVal">1.0</span>×</span>
+      <button class="btn btn-gray btn-sm" id="exportMapBtn" style="margin-left:auto">📥 Export Map</button>
     </div>
     <div class="map-legend">
       <span class="map-legend-item"><span class="legend-swatch" style="background:#e6ebf0"></span> Free</span>
@@ -259,20 +377,24 @@ main{
         <div class="progress-label">Coverage</div>
         <div class="progress-bar"><div class="progress-fill" id="coverageFill" style="width:0%"></div></div>
       </div>
+      <div class="timeline-wrap">
+        <h3>State History</h3>
+        <canvas id="stateTimeline" width="400" height="22"></canvas>
+      </div>
     </div>
 
     <!-- Mission Control -->
     <div class="card">
       <h2>🎮 Mission Control</h2>
       <div class="cmd-grid">
-        <button class="btn btn-green" onclick="sendCommand('start_scan')">🔍 Scan Room</button>
-        <button class="btn btn-orange" onclick="sendCommand('stop_scan')">⏹ Stop Scan</button>
-        <button class="btn btn-blue" onclick="sendCommand('start_clean')">🧹 Clean Room</button>
-        <button class="btn btn-orange" onclick="sendCommand('stop_clean')">⏹ Stop Clean</button>
-        <button class="btn btn-purple" onclick="sendCommand('go_home')">🏠 Go Home</button>
+        <button class="btn btn-green" id="btnScan" onclick="sendCommand('start_scan')">🔍 Scan Room</button>
+        <button class="btn btn-orange" id="btnStopScan" onclick="sendCommand('stop_scan')">⏹ Stop Scan</button>
+        <button class="btn btn-blue" id="btnClean" onclick="sendCommand('start_clean')">🧹 Clean Room</button>
+        <button class="btn btn-orange" id="btnStopClean" onclick="sendCommand('stop_clean')">⏹ Stop Clean</button>
+        <button class="btn btn-purple" id="btnHome" onclick="sendCommand('go_home')">🏠 Go Home</button>
         <button class="btn btn-gray" onclick="sendCommand('reset')">🔄 Reset</button>
-        <button class="btn btn-yellow" onclick="sendCommand('pause')">⏸ Pause</button>
-        <button class="btn btn-green" onclick="sendCommand('resume')">▶ Resume</button>
+        <button class="btn btn-yellow" id="btnPause" onclick="sendCommand('pause')">⏸ Pause</button>
+        <button class="btn btn-green" id="btnResume" onclick="sendCommand('resume')">▶ Resume</button>
       </div>
     </div>
 
@@ -384,6 +506,12 @@ document.getElementById('mapContainer').addEventListener('wheel', e => {
 /* ── Velocity tracking for estop pulse & vector ── */
 let currentLinVel = 0, currentAngVel = 0;
 
+/* ── Round 14: Click-to-navigate state ─────────── */
+let navClickTarget = null;
+const navPopup = document.getElementById('navPopup');
+const navCoordsEl = document.getElementById('navCoords');
+const navHereBtn = document.getElementById('navHereBtn');
+
 socket.on('map_update', data => {
   lastMapData = data;
   placeholder.style.display = 'none';
@@ -400,7 +528,6 @@ function drawMap(data) {
   canvas.height = mapImg.naturalHeight;
   ctx.drawImage(mapImg, 0, 0);
 
-  // Scale factor if image was upscaled in backend
   const sx = canvas.width / data.width;
   const sy = canvas.height / data.height;
   const rpx = data.robot_px * sx;
@@ -417,7 +544,7 @@ function drawMap(data) {
   ctx.stroke();
 
   // Direction arrow
-  const yaw = -data.robot_yaw; // canvas Y is flipped
+  const yaw = -data.robot_yaw;
   const len = r * 2.2;
   ctx.beginPath();
   ctx.moveTo(rpx, rpy);
@@ -426,10 +553,9 @@ function drawMap(data) {
   ctx.strokeStyle = '#fff';
   ctx.stroke();
 
-  // Round 8: Velocity vector
+  // Velocity vector
   if (currentLinVel !== 0 || currentAngVel !== 0) {
     const vLen = Math.abs(currentLinVel) * r * 8;
-    const vAng = currentAngVel * 15;
     const vYaw = -data.robot_yaw;
     const ex = rpx + Math.cos(vYaw) * vLen * Math.sign(currentLinVel || 1);
     const ey = rpy + Math.sin(vYaw) * vLen * Math.sign(currentLinVel || 1);
@@ -439,7 +565,6 @@ function drawMap(data) {
     ctx.lineWidth = 3;
     ctx.strokeStyle = '#34d399';
     ctx.stroke();
-    // arrowhead
     const aLen = 8;
     const angle = Math.atan2(ey - rpy, ex - rpx);
     ctx.beginPath();
@@ -451,10 +576,127 @@ function drawMap(data) {
     ctx.strokeStyle = '#34d399';
     ctx.stroke();
   }
+
+  // Round 14: Nav target marker
+  if (navClickTarget && data) {
+    const tx = navClickTarget.canvasX;
+    const ty = navClickTarget.canvasY;
+    ctx.beginPath();
+    ctx.arc(tx, ty, 6, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(239,68,68,0.8)';
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#fff';
+    ctx.stroke();
+    // crosshair
+    ctx.beginPath();
+    ctx.moveTo(tx - 10, ty); ctx.lineTo(tx + 10, ty);
+    ctx.moveTo(tx, ty - 10); ctx.lineTo(tx, ty + 10);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.stroke();
+  }
 }
+
+/* ── Round 14: Map click-to-navigate ───────────── */
+canvas.addEventListener('click', e => {
+  if (!lastMapData) return;
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const cx = (e.clientX - rect.left) * scaleX;
+  const cy = (e.clientY - rect.top) * scaleY;
+  const data = lastMapData;
+  const sx = canvas.width / data.width;
+  const sy = canvas.height / data.height;
+  // Convert pixel to map grid coords, then to world coords
+  const gridX = cx / sx;
+  const gridY = (data.height - 1) - (cy / sy);  // flip Y
+  const worldX = data.origin_x + gridX * data.resolution;
+  const worldY = data.origin_y + gridY * data.resolution;
+  navClickTarget = {canvasX: cx, canvasY: cy, worldX, worldY};
+  navCoordsEl.textContent = '(' + worldX.toFixed(2) + ', ' + worldY.toFixed(2) + ')';
+  // Position popup near click
+  const popX = Math.min(e.offsetX + 10, rect.width - 180);
+  const popY = Math.max(e.offsetY - 35, 5);
+  navPopup.style.left = popX + 'px';
+  navPopup.style.top = popY + 'px';
+  navPopup.style.display = 'block';
+  if (lastMapData && mapImg.complete) drawMap(lastMapData);
+});
+
+navHereBtn.addEventListener('click', () => {
+  if (!navClickTarget) return;
+  fetch('/api/navigate', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({x: navClickTarget.worldX, y: navClickTarget.worldY})
+  }).then(r => r.json()).then(d => {
+    if (d.ok) toast('Navigating to (' + navClickTarget.worldX.toFixed(2) + ', ' + navClickTarget.worldY.toFixed(2) + ')');
+    else toast(d.error || 'Navigation failed');
+  }).catch(() => toast('Navigation failed'));
+  navPopup.style.display = 'none';
+  navClickTarget = null;
+});
 
 /* ── Status ────────────────────────────────────── */
 let prevMissionState = 'UNKNOWN';
+
+/* ── Round 12: State history timeline ──────────── */
+const stateHistory = [];
+const STATE_COLORS = {
+  EXPLORING: '#34d399', COVERAGE: '#3b82f6', PAUSED: '#f59e0b',
+  WAITING: '#6b7280', ERROR: '#ef4444', RETURNING: '#a78bfa',
+  COMPLETE: '#22c55e', UNKNOWN: '#6b7280'
+};
+function getStateColor(state) {
+  const s = (state || '').toUpperCase();
+  for (const key in STATE_COLORS) {
+    if (s.indexOf(key) !== -1) return STATE_COLORS[key];
+  }
+  return STATE_COLORS.UNKNOWN;
+}
+function addStateHistory(state) {
+  const now = Date.now();
+  if (stateHistory.length > 0 && stateHistory[stateHistory.length - 1].state === state) return;
+  stateHistory.push({state, time: now});
+  if (stateHistory.length > 30) stateHistory.shift();
+  drawStateTimeline();
+}
+function drawStateTimeline() {
+  const tc = document.getElementById('stateTimeline');
+  const tctx = tc.getContext('2d');
+  const W = tc.width, H = tc.height;
+  tctx.clearRect(0, 0, W, H);
+  if (stateHistory.length < 1) return;
+  const tStart = stateHistory[0].time;
+  const tEnd = Date.now();
+  const duration = Math.max(tEnd - tStart, 1);
+  for (let i = 0; i < stateHistory.length; i++) {
+    const s = stateHistory[i];
+    const nextTime = (i + 1 < stateHistory.length) ? stateHistory[i + 1].time : tEnd;
+    const x = ((s.time - tStart) / duration) * W;
+    const w = Math.max(((nextTime - s.time) / duration) * W, 2);
+    tctx.fillStyle = getStateColor(s.state);
+    tctx.fillRect(x, 0, w, H);
+  }
+  tctx.strokeStyle = 'rgba(255,255,255,0.1)';
+  tctx.lineWidth = 1;
+  tctx.strokeRect(0, 0, W, H);
+}
+
+/* ── Round 13: Smart button states ─────────────── */
+function updateButtonStates(missionState) {
+  const s = (missionState || 'UNKNOWN').toUpperCase();
+  const btn = id => document.getElementById(id);
+  const setD = (id, disabled) => { const b = btn(id); if (b) b.disabled = disabled; };
+  setD('btnScan', !(s.indexOf('WAIT') !== -1));
+  setD('btnStopScan', s.indexOf('EXPLOR') === -1);
+  setD('btnClean', !(s.indexOf('WAIT') !== -1));
+  setD('btnStopClean', s.indexOf('COVERAGE') === -1 && s.indexOf('CLEAN') === -1);
+  setD('btnPause', s.indexOf('EXPLOR') === -1 && s.indexOf('COVERAGE') === -1 && s.indexOf('CLEAN') === -1);
+  setD('btnResume', s.indexOf('PAUSE') === -1);
+  setD('btnHome', s.indexOf('RETURNING') !== -1 || s.indexOf('COMPLETE') !== -1);
+}
 
 /* ── Scan Timer (Round 5) ─────────────────────── */
 let scanTimerInterval = null;
@@ -485,13 +727,12 @@ socket.on('status', d => {
   document.getElementById('sVel').textContent = d.linear_vel + ' m/s · ' + d.angular_vel + ' rad/s';
   document.getElementById('mapCount').textContent = d.map_updates;
 
-  // Track velocity for estop pulse and velocity vector
   currentLinVel = d.linear_vel;
   currentAngVel = d.angular_vel;
   const isMoving = d.linear_vel !== 0 || d.angular_vel !== 0;
   document.getElementById('estopBtn').classList.toggle('pulsing', isMoving);
 
-  // Round 4: Coverage progress bar
+  // Coverage progress bar
   const coverageWrap = document.getElementById('coverageProgressWrap');
   const coverageFill = document.getElementById('coverageFill');
   const cState = (d.coverage_state || '').toUpperCase();
@@ -509,22 +750,35 @@ socket.on('status', d => {
     coverageFill.style.width = '0%';
   }
 
-  // Round 5: Scan timer
+  // Scan timer
   const mState = (d.mission_state || '').toUpperCase();
   if (/EXPLOR/.test(mState) && !/EXPLOR/.test(prevMissionState.toUpperCase())) {
     startScanTimer();
   } else if (!/EXPLOR/.test(mState) && /EXPLOR/.test(prevMissionState.toUpperCase())) {
     stopScanTimer();
   }
+
+  // Round 12: State history
+  addStateHistory(d.mission_state || 'UNKNOWN');
+
+  // Round 13: Smart button states
+  updateButtonStates(d.mission_state);
+
   prevMissionState = d.mission_state || 'UNKNOWN';
 
-  // Redraw map with velocity vector if available
   if (lastMapData && mapImg.complete) drawMap(lastMapData);
 });
 
 socket.on('mission_state', d => {
   setMissionBadge(d.state);
   if (d.log_entry) addLogEntry(d.log_entry);
+  // Round 12
+  addStateHistory(d.state);
+  // Round 13
+  updateButtonStates(d.state);
+  // Round 19: Notification sound on COMPLETE
+  const s = (d.state || '').toUpperCase();
+  if (s.indexOf('COMPLETE') !== -1) playChime();
 });
 
 function setMissionBadge(state) {
@@ -600,6 +854,11 @@ const keysDown = new Set();
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
   const k = e.key.toLowerCase();
+  // Round 16: Escape exits fullscreen
+  if (k === 'escape') {
+    const mw = document.querySelector('.map-wrap');
+    if (mw.classList.contains('fullscreen')) { mw.classList.remove('fullscreen'); return; }
+  }
   if (!(k in keyMap)) return;
   e.preventDefault();
   if (keysDown.has(k)) return;
@@ -630,12 +889,26 @@ function renderRooms(rooms) {
       '<span class="room-name">' + esc(r.name) + '</span>' +
       '<span class="room-date">' + date + '</span>' +
       '<div class="room-actions">' +
+        '<button class="btn btn-yellow btn-sm" onclick="renameRoom(\'' + esc(r.filename) + '\',\'' + esc(r.name) + '\')">✏️</button>' +
         '<button class="btn btn-blue btn-sm" onclick="previewRoom(\'' + esc(r.filename) + '\',\'' + esc(r.name) + '\')">Preview</button>' +
         '<button class="btn btn-green btn-sm" onclick="cleanRoom(\'' + esc(r.filename) + '\')">Clean</button>' +
         '<button class="btn btn-red btn-sm" onclick="deleteRoom(\'' + esc(r.filename) + '\')">Delete</button>' +
       '</div></div>';
   }).join('');
 }
+
+/* ── Round 11: Room rename ─────────────────────── */
+window.renameRoom = function(filename, currentName) {
+  const newName = prompt('Enter new name for "' + currentName + '":', currentName);
+  if (!newName || newName.trim() === '' || newName.trim() === currentName) return;
+  fetch('/api/rooms/' + filename + '/rename', {
+    method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name: newName.trim()})
+  }).then(r => r.json()).then(d => {
+    if (d.ok) { toast('Room renamed'); fetchRooms(); }
+    else toast(d.error || 'Rename failed');
+  }).catch(() => toast('Rename failed'));
+};
 
 window.saveRoom = function() {
   const name = document.getElementById('roomName').value.trim();
@@ -679,6 +952,84 @@ window.closeModal = function(e) {
 /* ── Auto-refresh room list (Round 9) ─────────── */
 setInterval(fetchRooms, 30000);
 
+/* ── Round 15: Theme toggle ────────────────────── */
+const themeToggle = document.getElementById('themeToggle');
+const savedTheme = localStorage.getItem('cb_theme');
+if (savedTheme === 'light') { document.documentElement.classList.add('light'); themeToggle.textContent = '☀️'; }
+themeToggle.addEventListener('click', () => {
+  const isLight = document.documentElement.classList.toggle('light');
+  themeToggle.textContent = isLight ? '☀️' : '🌙';
+  localStorage.setItem('cb_theme', isLight ? 'light' : 'dark');
+});
+
+/* ── Round 16: Fullscreen map ──────────────────── */
+const fullscreenBtn = document.getElementById('fullscreenBtn');
+fullscreenBtn.addEventListener('click', () => {
+  const mw = document.querySelector('.map-wrap');
+  mw.classList.toggle('fullscreen');
+});
+
+/* ── Round 17: Export map as PNG ────────────────── */
+document.getElementById('exportMapBtn').addEventListener('click', () => {
+  canvas.toBlob(blob => {
+    if (!blob) { toast('No map to export'); return; }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'cleanbot-map-' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.png';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast('Map exported');
+  }, 'image/png');
+});
+
+/* ── Round 18: Connection quality / latency ────── */
+const latencyDot = document.getElementById('latencyDot');
+const latencyLabelEl = document.getElementById('latencyLabel');
+setInterval(() => {
+  socket.emit('latency_ping', {ts: Date.now()});
+}, 5000);
+socket.on('latency_pong', d => {
+  const ms = Date.now() - d.ts;
+  latencyLabelEl.textContent = ms + ' ms';
+  latencyDot.classList.remove('good', 'warn', 'bad');
+  if (ms < 100) latencyDot.classList.add('good');
+  else if (ms < 500) latencyDot.classList.add('warn');
+  else latencyDot.classList.add('bad');
+});
+
+/* ── Round 19: Notification sound ──────────────── */
+let soundMuted = localStorage.getItem('cb_muted') === '1';
+const muteToggle = document.getElementById('muteToggle');
+muteToggle.textContent = soundMuted ? '🔕' : '🔔';
+muteToggle.addEventListener('click', () => {
+  soundMuted = !soundMuted;
+  muteToggle.textContent = soundMuted ? '🔕' : '🔔';
+  localStorage.setItem('cb_muted', soundMuted ? '1' : '0');
+});
+
+function playChime() {
+  if (soundMuted) return;
+  try {
+    const actx = new (window.AudioContext || window.webkitAudioContext)();
+    // Two-note ascending chime
+    [440, 554.37].forEach((freq, i) => {
+      const osc = actx.createOscillator();
+      const gain = actx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.3, actx.currentTime + i * 0.2);
+      gain.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + i * 0.2 + 0.4);
+      osc.connect(gain);
+      gain.connect(actx.destination);
+      osc.start(actx.currentTime + i * 0.2);
+      osc.stop(actx.currentTime + i * 0.2 + 0.5);
+    });
+  } catch (e) { /* Audio not supported */ }
+}
+
 /* ── Log ───────────────────────────────────────── */
 const logBox = document.getElementById('logBox');
 
@@ -710,6 +1061,9 @@ function toast(msg) {
 
 /* ── Helpers ───────────────────────────────────── */
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+/* ── Init: set smart button states ─────────────── */
+updateButtonStates('UNKNOWN');
 
 })();
 </script>
