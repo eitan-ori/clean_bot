@@ -33,11 +33,6 @@ setup(
             'frontier_explorer = clean_bot_mission.frontier_explorer:main',
             'adaptive_coverage = clean_bot_mission.adaptive_coverage:main',
             'simple_coverage = clean_bot_mission.simple_coverage:main',
-            
-            # Legacy nodes (for backward compatibility)
-            'mission_node = clean_bot_mission.mission:main',
-            'exploration_node = clean_bot_mission.exploration:main',
-            'coverage_mission = clean_bot_mission.coverage_mission:main',
         ],
     },
 )
