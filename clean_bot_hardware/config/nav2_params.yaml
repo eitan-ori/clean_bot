@@ -155,37 +155,34 @@ controller_server:
     FollowPath:
       plugin: "dwb_core::DWBLocalPlanner"
       debug_trajectory_details: True
-      # FORCE FORWARD MOTION - no pure rotation!
-      min_vel_x: 0.05        # MINIMUM forward speed - always move forward!
+      min_vel_x: 0.0           # Allow pure rotation (sign fix in arduino_driver handles direction)
       min_vel_y: 0.0
-      max_vel_x: 0.15        # Max forward speed (m/s)
-      max_vel_y: 0.0         # No lateral movement (diff drive)
-      max_vel_theta: 0.25    # VERY SLOW rotation - prevent SLAM drift
-      min_speed_xy: 0.05     # Minimum speed - keep moving!
+      max_vel_x: 0.15          # Max forward speed (m/s)
+      max_vel_y: 0.0           # No lateral movement (diff drive)
+      max_vel_theta: 0.8       # Normal rotation speed for small indoor robot
+      min_speed_xy: 0.0        # Allow stopping for in-place rotation
       max_speed_xy: 0.15
       min_speed_theta: 0.0
       acc_lim_x: 0.5
       acc_lim_y: 0.0
-      acc_lim_theta: 0.5     # Slower angular acceleration
+      acc_lim_theta: 0.5
       decel_lim_x: -0.5
       decel_lim_y: 0.0
       decel_lim_theta: -0.5
       vx_samples: 20
       vy_samples: 0
-      vtheta_samples: 10     # Fewer rotation samples
-      sim_time: 2.0          # Look further ahead
+      vtheta_samples: 20       # Default sample count for rotation trajectories
+      sim_time: 2.0
       linear_granularity: 0.05
       angular_granularity: 0.025
       transform_tolerance: 0.2
-      xy_goal_tolerance: 0.15    # More tolerance
+      xy_goal_tolerance: 0.15
       trans_stopped_velocity: 0.1
       short_circuit_trajectory_evaluation: True
       stateful: True
-      # PREFER FORWARD MOTION over rotation
-      critics: ["Oscillation", "BaseObstacle", "ObstacleFootprint", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
-      # REMOVED RotateToGoal - don't rotate in place!
-      BaseObstacle.scale: 0.1          # INCREASED - avoid obstacles more!
-      ObstacleFootprint.scale: 1.0     # NEW - check robot footprint collision
+      critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "ObstacleFootprint", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
+      BaseObstacle.scale: 0.1
+      ObstacleFootprint.scale: 1.0
       PathAlign.scale: 32.0
       PathAlign.forward_point_distance: 0.2
       GoalAlign.scale: 24.0
@@ -335,9 +332,9 @@ behavior_server:
     transform_tolerance: 0.1
     use_sim_time: False
     simulate_ahead_time: 2.0
-    max_rotational_vel: 0.2    # VERY SLOW spin for recovery only
+    max_rotational_vel: 0.5    # Normal spin speed for recovery
     min_rotational_vel: 0.1
-    rotational_acc_lim: 0.3
+    rotational_acc_lim: 0.5
 
 waypoint_follower:
   ros__parameters:
@@ -356,8 +353,8 @@ velocity_smoother:
     smoothing_frequency: 20.0
     scale_velocities: False
     feedback: "OPEN_LOOP"
-    max_velocity: [0.15, 0.0, 0.25]   # VERY SLOW angular
-    min_velocity: [-0.15, 0.0, -0.25]
+    max_velocity: [0.15, 0.0, 0.8]    # Match controller max_vel_theta
+    min_velocity: [-0.15, 0.0, -0.8]
     max_accel: [0.5, 0.0, 0.5]
     max_decel: [-0.5, 0.0, -0.5]
     odom_topic: "odom"

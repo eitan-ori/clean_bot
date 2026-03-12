@@ -9,30 +9,58 @@
 #
 # MAIN FUNCTIONS:
 # 1. Analyzes the current occupancy grid map and inflates obstacles to 
-#    account for robot footprint.
-# 2. Decomposes the floor into convex or near-convex cells.
-# 3. Calculates a coverage path (zigzag) within each cell, respecting the 
-#    robot's cleaning tool width.
-# 4. Sequences goals to Nav2 to execute the full coverage mission.
+#    account for robot footprint (main body radius: 0.20m).
+# 2. Decomposes the floor into convex or near-convex cells using 
+#    Boustrophedon decomposition.
+# 3. Generates zigzag coverage paths within each cell, respecting the 
+#    robot's effective cleaning width (0.14m main suction + 0.04m side brush).
+# 4. Sequences waypoints to Nav2 (with inflation buffer) OR uses direct 
+#    cmd_vel control for precise following.
+#
+# MOVEMENT CONTROL ARCHITECTURE:
+# Two movement modes available (controlled by 'use_direct_drive' parameter):
+#
+# Mode 1: Nav2 Navigation (use_direct_drive=False, recommended)
+#   Robot pose (map frame) -> send_goal_nav2() -> Nav2 NavigateToPose action
+#   -> Nav2 plans collision-free path -> robot executor follows path
+#   -> Nav2 handles dynamic obstacles and replanning automatically
+#   Uses robot_radius inflation to ensure safe clearance from obstacles.
+#
+# Mode 2: Direct cmd_vel Drive (use_direct_drive=True, for testing)
+#   Robot odometry -> odom_callback() -> drive_to_waypoint()
+#   -> calculate angle/distance errors -> publish Twist to /cmd_vel_nav
+#   -> hardware motor controller executes differential drive commands
+#   Uses tight angle_tolerance for waypoint convergence.
+#
+# PHYSICAL ROBOT PARAMETERS:
+# - Main body radius: 0.20 m (used for obstacle inflation)
+# - Side brush (front-left): 0.04 m radius (reaches edges even with main body)
+# - Effective cleaning width: 0.14 m (main suction footprint)
+# - Coverage overlap: 10% (for redundancy in cleaning)
 #
 # CONTROL (via /coverage_control topic, std_msgs/String):
-# - "start"  : Start/resume coverage
-# - "stop"   : Stop coverage
-# - "pause"  : Pause coverage (can resume)
-# - "resume" : Resume from pause
-# - "reset"  : Reset coverage state
+# - \"start\"  : Start/resume coverage
+# - \"stop\"   : Stop coverage
+# - \"pause\"  : Pause coverage (can resume)
+# - \"resume\" : Resume from pause
+# - \"reset\"  : Reset coverage state
 #
-# PARAMETERS & VALUES:
-# - coverage_width: 0.14 m (Effective cleaning width of the robot).
-# - overlap_ratio: 0.15 (15% overlap between cleaning passes).
-# - robot_radius: 0.12 m (Used to avoid clipping walls/furniture).
-# - min_region_area: 0.1 m² (Ignore very small pockets of space).
-# - start_on_exploration_complete: True (Auto-trigger after mapping).
+# KEY PARAMETERS & VALUES:
+# - coverage_width: 0.14 m (Effective cleaning width).
+# - overlap_ratio: 0.10 (10% overlap between passes).
+# - robot_radius: 0.20 m (Main body radius for inflation).
+# - angle_tolerance: 0.18 rad (~10°) (controls rotation precision).
+# - position_tolerance: 0.08 m (waypoint convergence distance).
+# - max_segment_length: 0.08 m (max distance between intermediate waypoints).
+# - min_region_area: 0.02 m² (minimum cell area to process).
+# - use_direct_drive: False (recomm), True (testing with cmd_vel).
 #
 # ASSUMPTIONS:
-# - Scipy and Numpy are available for image processing/array operations.
-# - The map is accurate and represents the current physical state.
-# - The robot can execute point-to-point navigation reliably.
+# - Scipy and Numpy available for image processing.
+# - Map is accurate and up-to-date (from active SLAM).
+# - Nav2 (if enabled) is properly configured and running.
+# - Odometry provides reasonable pose estimates.
+# - Robot can execute simple point-to-point navigation.
 ###############################################################################
 """
 
@@ -93,18 +121,11 @@ class AdaptiveCoveragePlanner(Node):
         self.declare_parameter('angular_speed', 0.25)            # Turn speed (rad/s) - increased for more power
         self.declare_parameter('angle_tolerance', 0.18)          # Radians (~20°) - don't need precision
         self.declare_parameter('position_tolerance', 0.08)       # Meters (8cm)
+        self.declare_parameter('max_segment_length', 0.08)       # Max distance between waypoints (meters)
 
         # Frames (waypoints are generated in map frame)
         self.declare_parameter('global_frame', 'map')
         self.declare_parameter('base_frame', 'base_link')
-
-        # Predefined square-room path parameters (used by coverage_control: start_square)
-        # Assumes room axes are aligned with the map frame.
-        self.declare_parameter('square_room_side', 4.0)         # meters
-        self.declare_parameter('square_origin_x', 0.0)          # bottom-left corner in map frame
-        self.declare_parameter('square_origin_y', 0.0)          # bottom-left corner in map frame
-        self.declare_parameter('square_margin', 0.15)           # keep away from walls
-        self.declare_parameter('square_step', 0.0)              # 0 => use computed step_size
         
         self.coverage_width = self.get_parameter('coverage_width').value
         self.overlap_ratio = self.get_parameter('overlap_ratio').value
@@ -120,15 +141,9 @@ class AdaptiveCoveragePlanner(Node):
         self.angular_speed = self.get_parameter('angular_speed').value
         self.angle_tolerance = self.get_parameter('angle_tolerance').value
         self.position_tolerance = self.get_parameter('position_tolerance').value
+        self.max_segment_length = self.get_parameter('max_segment_length').value
         self.global_frame = self.get_parameter('global_frame').value
         self.base_frame = self.get_parameter('base_frame').value
-
-        # Square-room parameters
-        self.square_room_side = float(self.get_parameter('square_room_side').value)
-        self.square_origin_x = float(self.get_parameter('square_origin_x').value)
-        self.square_origin_y = float(self.get_parameter('square_origin_y').value)
-        self.square_margin = float(self.get_parameter('square_margin').value)
-        self.square_step = float(self.get_parameter('square_step').value)
         
         # Effective step between lines
         self.step_size = self.coverage_width * (1 - self.overlap_ratio)
@@ -213,7 +228,6 @@ class AdaptiveCoveragePlanner(Node):
         self.last_cmd_time = 0.0
         self.drive_start_time = 0.0
         self.min_drive_time = 0.8  # seconds (drive straight a bit before re-aligning)
-        self.realign_angle = max(self.angle_tolerance * 2.0, 0.18)  # radians
         
         # Statistics
         self.successful_waypoints = 0
@@ -244,8 +258,6 @@ class AdaptiveCoveragePlanner(Node):
         
         if command == 'start':
             self.handle_start()
-        elif command == 'start_square':
-            self.handle_start_square()
         elif command == 'stop':
             self.handle_stop()
         elif command == 'pause':
@@ -256,90 +268,6 @@ class AdaptiveCoveragePlanner(Node):
             self.handle_reset()
         else:
             self.get_logger().warn(f'❓ Unknown command: "{command}"')
-
-    def handle_start_square(self):
-        """Start predefined square-room coverage path (no map required)."""
-        if self.coverage_state in [CoverageState.RUNNING, CoverageState.PAUSED]:
-            self.get_logger().info(f'   Already in state: {self.coverage_state}')
-            return
-
-        if self.coverage_state == CoverageState.STOPPED:
-            # Resume from stopped: continue where we left off
-            self.get_logger().info('▶️ Resuming square coverage from stopped state...')
-            self.coverage_state = CoverageState.RUNNING
-            if self.waypoints and self.current_waypoint_idx < len(self.waypoints):
-                self.send_next_goal()
-            else:
-                self.start_square_coverage_mission()
-            return
-
-        if self.coverage_state == CoverageState.COMPLETE:
-            self.get_logger().info('▶️ Restarting square coverage from complete state...')
-            self.handle_reset()
-
-        self.get_logger().info('▶️ Starting square coverage...')
-        self.start_square_coverage_mission()
-
-    def start_square_coverage_mission(self):
-        """Generate a fixed lawnmower path inside a square room and execute it."""
-        side = float(self.square_room_side)
-        margin = max(0.0, float(self.square_margin))
-        if side <= 0.0:
-            self.get_logger().error('❌ square_room_side must be > 0')
-            return
-        if margin * 2.0 >= side:
-            self.get_logger().error('❌ square_margin too large for square_room_side')
-            return
-
-        step = float(self.square_step) if float(self.square_step) > 0.0 else float(self.step_size)
-        if step <= 0.01:
-            self.get_logger().error('❌ Invalid step size for square path')
-            return
-
-        x_min = self.square_origin_x + margin
-        x_max = self.square_origin_x + side - margin
-        y_min = self.square_origin_y + margin
-        y_max = self.square_origin_y + side - margin
-
-        waypoints = []
-        x = x_min
-        going_up = True
-        while x <= x_max + 1e-6:
-            if going_up:
-                waypoints.append((x, y_min, math.pi / 2))
-                waypoints.append((x, y_max, math.pi / 2))
-            else:
-                waypoints.append((x, y_max, -math.pi / 2))
-                waypoints.append((x, y_min, -math.pi / 2))
-
-            x += step
-            going_up = not going_up
-
-        if len(waypoints) < 2:
-            self.get_logger().error('❌ Could not generate square waypoints')
-            return
-
-        self.waypoints = waypoints
-        self.publish_coverage_path()
-        self.publish_waypoint_markers()
-
-        self.mission_started = True
-        self.mission_complete = False
-        self.coverage_state = CoverageState.RUNNING
-        self.start_time = self.get_clock().now()
-        self.current_waypoint_idx = 0
-        self.retry_count = 0
-        self.missed_waypoints = []
-        self.successful_waypoints = 0
-        self.failed_waypoints = 0
-
-        self.get_logger().info('')
-        self.get_logger().info('🧹 Square-room path ready')
-        self.get_logger().info(f'   Bounds: X[{x_min:.2f}, {x_max:.2f}] Y[{y_min:.2f}, {y_max:.2f}]')
-        self.get_logger().info(f'   Step: {step:.3f} m, Waypoints: {len(self.waypoints)}')
-        self.get_logger().info('')
-
-        self.send_next_goal()
 
     def handle_start(self):
         """Start coverage."""
@@ -472,9 +400,7 @@ class AdaptiveCoveragePlanner(Node):
 
         Falls back to the latest odom-based pose if TF lookup fails.
         """
-        # YAW OFFSET: Robot's physical forward direction is 90° off from expected
-        # Positive = counterclockwise correction
-        YAW_OFFSET = 0#-math.pi / 2  # 90 degrees
+
         
         try:
             tf = self.tf_buffer.lookup_transform(
@@ -488,7 +414,7 @@ class AdaptiveCoveragePlanner(Node):
             siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
             cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
             yaw = math.atan2(siny_cosp, cosy_cosp)
-            yaw = self.normalize_angle(yaw + YAW_OFFSET)
+            yaw = self.normalize_angle(yaw)
             return x, y, yaw
         except Exception as e:
             if not self._tf_pose_warned:
@@ -496,7 +422,7 @@ class AdaptiveCoveragePlanner(Node):
                 self.get_logger().warn(
                     f'⚠️ TF pose lookup failed ({self.global_frame} <- {self.base_frame}); '
                     f'falling back to odom pose. Error: {e}')
-            yaw = self.normalize_angle(self.robot_yaw + YAW_OFFSET)
+            yaw = self.normalize_angle(self.robot_yaw)
             return self.robot_x, self.robot_y, yaw
 
     def normalize_angle(self, angle):
@@ -509,8 +435,44 @@ class AdaptiveCoveragePlanner(Node):
 
     def drive_to_waypoint(self, target_x: float, target_y: float, now: float):
         """
-        Simple waypoint following: drive toward (target_x, target_y).
-        When reached, advance to next waypoint in the ordered list.
+        Direct waypoint following using cmd_vel (ONLY when use_direct_drive=True).
+        Reads robot odometry and commands differential drive to reach waypoints.
+        
+        MOVEMENT CHAIN (via Direct Twist/cmd_vel):
+        1. odom_callback() triggered at ~10 Hz via /odom subscription
+        2. Robot pose (x, y, yaw) extracted from Odometry message
+           - TF lookup preferred (map frame via /tf)
+           - Falls back to odometry if TF unavailable
+        3. Current target from self.waypoints[current_waypoint_idx]
+        4. Calculate error vectors:
+           - Position error: dx, dy (distance to target)
+           - Orientation error: angle_error (rotation needed)
+        5. Generate Twist command:
+           IF angle_error > angle_tolerance * 2.5 (~45°):
+              - Rotate in place (linear.x = 0)
+              - Turn using angular_speed, scaled by error magnitude
+           ELSE:
+              - Drive forward (linear.x = linear_speed)
+              - Steer concurrently (angular.z = steering correction)
+              - Reduce forward speed if severely misaligned (alignment_scale)
+        6. Publish Twist to /cmd_vel_nav (~20 Hz rate-limited)
+        7. Motor controller executes differential drive:
+           - linear.x: forward velocity (m/s)
+           - angular.z: rotation velocity (rad/s)
+           - Hardware mixes to left/right wheel speeds
+        8. Repeat until distance < position_tolerance (0.08m)
+        9. Waypoint reached -> advance to next
+        
+        PHYSICAL MODEL:
+        - Robot uses odometry for self-localization (drift accumulates over time)
+        - Differential drive kinematics: velocity = [linear_x, angular_z]
+        - angle_tolerance (0.18 rad) controls rotation precision
+        - position_tolerance (0.08 m) controls linear convergence
+        
+        Args:
+            target_x (float): Goal X in map frame
+            target_y (float): Goal Y in map frame
+            now (float): Current time (for rate limiting)
         """
         rx, ry, ryaw = self._get_robot_pose_map()
         dx = target_x - rx
@@ -547,14 +509,15 @@ class AdaptiveCoveragePlanner(Node):
         # Send movement command
         cmd = Twist()
         
-        # If misaligned > 25°, rotate in place first
-        if abs(angle_error) > 0.45:
+        # If misaligned > angle_tolerance * 2.5, rotate in place first
+        turn_threshold = self.angle_tolerance * 2.5  # ~45 degrees
+        if abs(angle_error) > turn_threshold:
             cmd.linear.x = 0.0
             turn_speed = min(0.8, max(0.3, abs(angle_error) * 0.8))
             cmd.angular.z = turn_speed if angle_error > 0 else -turn_speed
         else:
             # Drive forward with steering correction
-            alignment_scale = max(0.25, 1.0 - abs(angle_error) / 0.45)
+            alignment_scale = max(0.25, 1.0 - abs(angle_error) / turn_threshold)
             cmd.linear.x = self.linear_speed * alignment_scale
             ang = min(0.8, max(0.15, abs(angle_error) * 1.5))
             cmd.angular.z = ang if angle_error > 0 else -ang
@@ -655,7 +618,7 @@ class AdaptiveCoveragePlanner(Node):
             return
         
         # Step 2.5: Densify waypoints - add intermediate points on each segment
-        self.waypoints = self.densify_waypoints(self.waypoints, max_segment_length=0.08)
+        self.waypoints = self.densify_waypoints(self.waypoints, max_segment_length=self.max_segment_length)
         
         # Step 2.6: Orient waypoints - each waypoint yaw points toward the NEXT waypoint
         self.waypoints = self.orient_waypoints(self.waypoints)
@@ -1253,7 +1216,34 @@ class AdaptiveCoveragePlanner(Node):
             self.send_next_goal()
 
     def send_goal_nav2(self, x, y, yaw):
-        """Send goal using Nav2 NavigateToPose action."""
+        """
+        Send a navigation goal to Nav2's NavigateToPose action server.
+        
+        MOVEMENT CHAIN (via Nav2):
+        1. Robot pose (from odometry/TF) in map frame
+        2. Goal (x, y, yaw) sent to Nav2 NavigateToPose
+        3. Nav2 planner generates collision-free path considering:
+           - Inflated costmap (obstacles expanded by robot_radius: 0.20m)
+           - Robot's differential drive kinematics
+           - Dynamic obstacle avoidance with local costmap
+        4. Nav2 extracts via-points from planned path
+        5. Robot executor (DWB controller) follows path with:
+           - Collision checking against local sensor data
+           - Real-time obstacle replanning if needed
+           - Velocity scaling based on curvature and safety margins
+        6. Robot reaches goal within Nav2's xy_goal_tolerance and yaw_goal_tolerance
+        
+        PHYSICAL MODEL CONSIDERATIONS:
+        - Robot main body radius (0.20m) is used for costmap inflation
+        - This ensures robot doesn't collide even with rounded corners
+        - Side brush (0.04m) provides extra reach for edge cleaning
+        - Twist commands use differential drive: (linear_x, angular_z)
+        
+        Args:
+            x (float): Goal X position in map frame (meters)
+            y (float): Goal Y position in map frame (meters)
+            yaw (float): Goal orientation in map frame (radians)
+        """
         if not self.nav_client.wait_for_server(timeout_sec=5.0):
             self.get_logger().error('❌ Nav2 action server not available!')
             return
@@ -1263,6 +1253,7 @@ class AdaptiveCoveragePlanner(Node):
         goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
         goal_msg.pose.pose.position.x = x
         goal_msg.pose.pose.position.y = y
+        # Convert yaw to quaternion (w, x, y, z)
         goal_msg.pose.pose.orientation.z = math.sin(yaw / 2.0)
         goal_msg.pose.pose.orientation.w = math.cos(yaw / 2.0)
 
