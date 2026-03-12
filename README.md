@@ -126,8 +126,9 @@ This single command brings up the entire stack:
 
 ```bash
 export ROS_DOMAIN_ID=<same as Pi>
+export CLEANBOT_TELEGRAM_TOKEN='your_token_from_botfather'
 source ~/robot_ws/install/setup.bash
-python3 telegram_bridge.py
+ros2 run clean_bot_mission telegram_bridge
 ```
 
 ### 3. In Telegram — Control the robot
@@ -140,11 +141,20 @@ Send commands to your bot. The robot handles the rest.
 
 | Command | Description |
 |---------|-------------|
+| `/start` | Show welcome message and available commands |
 | `/scan` | Explore the room — frontier-based exploration builds a SLAM map |
+| `/stopscan` | Stop exploration and wait for cleaning command |
 | `/clean` | Clean the room — adaptive coverage path over the mapped area |
+| `/stopclean` | Stop cleaning |
+| `/home` | Return to starting position |
+| `/reset` | Reset mission to initial state |
+| `/pause` | Pause current operation |
+| `/resume` | Resume paused operation |
+| `/status` | Get the current mission state and sensor info |
 | `/map` | Get the current map as an image with the robot's position marked |
-| `/stop` | Cancel the current mission |
-| `/status` | Get the current mission state |
+| `/help` | Show help |
+
+After cleaning completes (or the robot returns home), the bot automatically sends the final map to all users who have interacted with it.
 
 ---
 
@@ -155,8 +165,10 @@ Send commands to your bot. The robot handles the rest.
 | `/mission_command` | `std_msgs/String` | Commands from Telegram bridge → mission controller |
 | `/mission_state` | `std_msgs/String` | Current state published by mission controller |
 | `/map` | `nav_msgs/OccupancyGrid` | SLAM Toolbox map |
-| `/cmd_vel` | `geometry_msgs/Twist` | Velocity commands → Arduino |
-| `/scan` | `sensor_msgs/LaserScan` | RPLidar laser scans |
+| `/cmd_vel_nav` | `geometry_msgs/Twist` | Nav2 velocity commands → emergency stop filter |
+| `/cmd_vel` | `geometry_msgs/Twist` | Filtered velocity commands → Arduino |
+| `/scan` | `sensor_msgs/LaserScan` | RPLidar laser scans (10 Hz) |
+| `/scan_throttled` | `sensor_msgs/LaserScan` | Throttled scans for rf2o (5 Hz) |
 | `/odom` | `nav_msgs/Odometry` | rf2o laser-based odometry |
 
 ---
@@ -228,6 +240,7 @@ ros2 topic echo /mission_state          # Monitor mission progress
 │       ├── robot_core.xacro    # Chassis, wheels, caster
 │       ├── lidar.xacro         # RPLidar frame
 │       ├── imu.xacro           # IMU frame
+│       ├── ultrasonic.xacro    # Ultrasonic sensor frame
 │       └── inertial_macros.xacro
 │
 ├── clean_bot_hardware/          # Hardware drivers & configs
@@ -237,9 +250,10 @@ ros2 topic echo /mission_state          # Monitor mission progress
 │
 ├── clean_bot_mission/           # Mission control & Telegram
 │   ├── clean_bot_mission/
-│   │   ├── frontier_explorer.py
-│   │   ├── coverage_planner.py
-│   │   └── full_mission_controller.py
+│   │   ├── frontier_explorer.py     # Autonomous frontier-based exploration
+│   │   ├── adaptive_coverage.py     # Map-based coverage planner
+│   │   ├── simple_coverage.py       # Fallback boustrophedon coverage
+│   │   └── full_mission.py          # Mission state machine (scan→clean→home)
 │   ├── launch/
 │   │   └── cleaning_mission.launch.py
 │   └── scripts/

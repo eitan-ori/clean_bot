@@ -69,8 +69,14 @@ ros2 topic pub --once /mission_command std_msgs/msg/String "data: 'resume'"
            │ auto-complete                     │
            ▼                                   │
 ┌─────────────────────┐                        │
+│     RETURNING       │ (Nav2 go-home)         │
+└──────────┬──────────┘                        │
+           │                                   │
+           ▼                                   │
+┌─────────────────────┐                        │
 │      COMPLETE       │────────────────────────┘
 └─────────────────────┘
+  (auto-sends map via Telegram)
 ```
 
 ## 🚀 Quick Start
@@ -281,6 +287,9 @@ clean_bot_mission/
 │   ├── adaptive_coverage.py    # Coverage path planning
 │   ├── full_mission.py         # Combined controller
 │   └── simple_coverage.py      # Simple boustrophedon fallback
+├── scripts/
+│   ├── telegram_bridge.py      # Telegram bot ↔ ROS 2 bridge
+│   └── TELEGRAM_README.md      # Telegram setup guide
 ├── launch/
 │   └── cleaning_mission.launch.py  # Main launch file
 ├── package.xml

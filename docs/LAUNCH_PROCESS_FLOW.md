@@ -317,8 +317,7 @@ Commands are sent via `/mission_command` topic (String):
 |---------|--------|
 | `start_scan` | Begin exploration phase |
 | `stop_scan` | Stop exploration, wait for clean command |
-| `start_clean` | Start cleaning (random walk mode) |
-| `start_clean_coverage` | Start cleaning (map-based coverage) |
+| `start_clean` | Start cleaning (map-based adaptive coverage) |
 | `stop_clean` | Stop cleaning |
 | `go_home` | Return to starting position |
 | `pause` | Pause current operation |
