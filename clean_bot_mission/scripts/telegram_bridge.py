@@ -46,7 +46,7 @@ import io
 import math
 import threading
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 # --- Telegram Imports ---
 try:
@@ -113,17 +113,24 @@ class RobotBridgeNode(Node):
         
         # State
         self.mission_state = "UNKNOWN"
+        self._prev_mission_state = "UNKNOWN"
         self.exploration_state = "UNKNOWN"
         self.coverage_state = "UNKNOWN"
         self.map_data = None
         self.last_map_time = None
+        self._notify_chat_ids = set()  # Chat IDs to notify on mission complete
+        self._pending_completion = False  # Flag for mission completion notification
         
         self.get_logger().info('🤖 Telegram Bridge Node initialized')
         self.get_logger().info('   Publishing to: /mission_command')
         self.get_logger().info('   Subscribing to: /mission_state, /map, /exploration_state, /coverage_state')
 
     def state_callback(self, msg: String):
+        self._prev_mission_state = self.mission_state
         self.mission_state = msg.data
+        # Flag mission completion for auto-notification
+        if self._prev_mission_state != 'COMPLETE' and msg.data == 'COMPLETE':
+            self._pending_completion = True
 
     def exploration_state_callback(self, msg: String):
         self.exploration_state = msg.data
@@ -269,6 +276,9 @@ async def check_auth(update: Update) -> bool:
     if ALLOWED_USER_IDS and user_id not in ALLOWED_USER_IDS:
         await update.message.reply_text(f"⛔ Access denied. Your ID: {user_id}")
         return False
+    # Track chat ID for auto-notifications (e.g., mission complete map)
+    if ros_node is not None:
+        ros_node._notify_chat_ids.add(update.effective_chat.id)
     return True
 
 
@@ -487,7 +497,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def post_init(application):
-    """Set up bot commands menu."""
+    """Set up bot commands menu and periodic tasks."""
     commands = [
         BotCommand("start", "Show welcome and commands"),
         BotCommand("scan", "Start exploration"),
@@ -503,6 +513,35 @@ async def post_init(application):
         BotCommand("help", "Show help"),
     ]
     await application.bot.set_my_commands(commands)
+    
+    # Schedule periodic check for mission completion auto-notifications
+    application.job_queue.run_repeating(
+        _check_mission_complete, interval=3.0, first=5.0)
+
+
+async def _check_mission_complete(context: ContextTypes.DEFAULT_TYPE):
+    """Auto-send map to all tracked chats when mission completes."""
+    if ros_node is None or not ros_node._pending_completion:
+        return
+    ros_node._pending_completion = False
+    
+    for chat_id in list(ros_node._notify_chat_ids):
+        try:
+            img_bytes, info = ros_node.create_map_image()
+            if img_bytes:
+                bio = io.BytesIO(img_bytes)
+                bio.name = 'final_map.png'
+                caption = f"🎉 *Mission Complete!*\n🗺️ Final map:\n{info}"
+                await context.bot.send_photo(
+                    chat_id=chat_id, photo=bio,
+                    caption=caption, parse_mode='Markdown')
+            else:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"🎉 *Mission Complete!*\n⚠️ Could not generate map: {info}",
+                    parse_mode='Markdown')
+        except Exception as e:
+            logger.warning(f"Failed to send completion notification to {chat_id}: {e}")
 
 
 def main():

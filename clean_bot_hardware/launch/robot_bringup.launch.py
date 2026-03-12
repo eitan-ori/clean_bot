@@ -67,7 +67,6 @@ def generate_launch_description():
 
     # ==================== Config Files ====================
     slam_config = os.path.join(hardware_pkg, 'config', 'mapper_params_online_async.yaml')
-    ekf_config = os.path.join(hardware_pkg, 'config', 'ekf.yaml')
     
     return LaunchDescription([
         # ==================== Declare Arguments ====================

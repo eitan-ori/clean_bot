@@ -116,8 +116,8 @@ class SimpleCoverage(Node):
         if num_readings == 0:
             return
             
-        # Front is at index num_readings/2 for 360° scan
-        # Or index 0 for forward-facing scan
+        # Front is approximately at center index for 360° lidar
+        # For RPLidar A1: angle_min=-π, angle_max=π, so center ≈ front
         center = num_readings // 2
         
         # Check front 60° (30° each side)
