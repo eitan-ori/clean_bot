@@ -546,6 +546,12 @@ class WebBridgeNode(Node):
                 if not sched.get("enabled", True):
                     continue
                 if current_day in sched.get("days", []) and sched.get("time") == current_time:
+                    # Prevent double-triggering within the same minute
+                    last = sched.get("_last_triggered", "")
+                    trigger_key = f"{current_day}_{current_time}"
+                    if last == trigger_key:
+                        continue
+                    sched["_last_triggered"] = trigger_key
                     self.get_logger().info(f"Scheduled clean triggered: {sched}")
                     self.send_command("start_clean")
 

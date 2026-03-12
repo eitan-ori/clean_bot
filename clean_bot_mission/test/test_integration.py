@@ -87,6 +87,9 @@ def mock_ros_node(tmp_path):
     node.map_msg = None
     node.mission_log = []
     node.path_trail = []
+    node._trail_lock = MagicMock()
+    node._trail_lock.__enter__ = MagicMock(return_value=None)
+    node._trail_lock.__exit__ = MagicMock(return_value=False)
     node.battery_level = 100.0
     node._arduino_battery = None
     node._schedules = []
@@ -493,6 +496,14 @@ class TestScheduleOps:
         sid = resp.get_json()["schedule"]["id"]
         resp = client.delete(f'/api/schedules/{sid}')
         assert resp.status_code == 200
+
+    def test_schedule_double_trigger_prevention(self, client, node):
+        """Schedule should not trigger twice in the same minute."""
+        resp = client.post('/api/schedules',
+                           json={"time": "08:00", "days": ["mon"]})
+        sched = resp.get_json()["schedule"]
+        # Verify schedule was created without _last_triggered
+        assert "_last_triggered" not in sched or sched.get("_last_triggered", "") == ""
 
 
 # ════════════════════════════════════════════════════════════════════
