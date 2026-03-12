@@ -7,26 +7,27 @@ This document explains exactly what happens under the hood when you run the Clea
 When you run `ros2 launch clean_bot_hardware robot_bringup.launch.py`, the following sequence starts:
 
 ### A. Hardware Communication
-- **Arduino Driver**: Opens the serial port (default: `/dev/ttyUSB0`). It starts requesting encoder counts from the Arduino and sending them out as `wheel_odom`.
-- **LiDAR Driver**: Starts the laser scanner (default: `/dev/ttyUSB1`). It spins up the motor and begins broadcasting 360° distance measurements on the `/scan` topic.
+- **Arduino Driver**: Opens the serial port (default: `/dev/ttyUSB0`). It reads ultrasonic range data and controls the motors, cleaning relay, and servo.
+- **LiDAR Driver**: Starts the RPLidar A1M8 scanner (default: `/dev/ttyUSB1`). It spins up the motor and begins broadcasting 360° distance measurements on the `/scan` topic.
 - **IMU Node**: Accesses the I2C bus to read the ICM20600 (motion) and AK09918 (magnetometer) sensors. It publishes raw acceleration and angular rates.
+- **Scan Throttler**: Reduces the `/scan` topic rate from 10Hz to 5Hz, publishing `/scan_throttled` for use by rf2o laser odometry.
 
 ### B. Structural Definition
 - **Robot State Publisher**: Reads the Xacro files (URDF) and compiles them into a description. It calculates the fixed transforms (e.g., where the LiDAR is relative to the chassis) and publishes the TF tree.
 
 ---
 
-## 2. Perception & Sensor Fusion
+## 2. Perception & Sensor Processing
 
-Raw data is noisy and insufficient on its own. The system processes it through two main filters:
+Raw data is noisy and insufficient on its own. The system processes it through two main stages:
 
 1.  **Orientation Filtering (Madgwick)**:
     - The raw IMU and Magnetometer data are fused.
     - **Result**: A stable estimate of the robot's heading (Absolute orientation) is published to `/imu/data`.
-2.  **State Estimation (EKF)**:
-    - The `robot_localization` EKF node listens to `wheel_odom` (positional change) and `/imu/data` (accurate heading).
-    - It uses a Kalman filter to predict the robot's state and correct it with sensor inputs.
-    - **Result**: It publishes the transform between the `odom` frame and the `base_link` frame. This tells the system where the robot is relative to its starting point.
+2.  **Laser Odometry (rf2o)**:
+    - The `rf2o_laser_odometry` node subscribes to `/scan_throttled` (5Hz laser scans).
+    - It uses consecutive scan matching to estimate the robot's motion.
+    - **Result**: It publishes the `/odom` topic and the transform between the `odom` frame and the `base_link` frame. This tells the system where the robot is relative to its starting point.
 
 ---
 
@@ -43,7 +44,7 @@ With a filtered odometry (`odom` -> `base_link`) and a LiDAR scan (`/scan`), the
 
 ## 4. Navigation & Obstacle Avoidance
 
-When a mission is started (e.g., `coverage_mission.py`), the system uses **Nav2**:
+When a mission is started, the system uses **Nav2**:
 
 ### A. Planning
 - **Global Planner**: Uses the map to find the shortest path to the target waypoint.
@@ -67,14 +68,27 @@ Before a command reaches the motors, it passes through the **Emergency Stop (E-S
 
 ---
 
+## 6. Telegram Control Flow
+
+The robot is controlled remotely via Telegram:
+
+1.  **Telegram Bridge** (`telegram_bridge.py`): Runs on a PC and connects to both the Telegram Bot API and ROS2 topics.
+2.  **Commands**: User sends commands (e.g., `start_scan`, `start_clean`) via Telegram chat. The bridge publishes these to `/mission_command`.
+3.  **Mission Controller** (`full_mission.py`): Receives commands and transitions through states (EXPLORING → COVERAGE → RETURNING).
+4.  **Status Feedback**: The mission controller publishes state updates to `/mission_state`, which the Telegram bridge relays back to the user.
+
+---
+
 ## Summary of the Data Loop
 
 | Source | Topic | Destination | Purpose |
 | :--- | :--- | :--- | :--- |
-| **Sensors** | `/scan` | Nav2 / SLAM | Obstacle detection & mapping |
-| **Encoders** | `/wheel_odom` | EKF | Calculating movement |
-| **IMU** | `/imu/data` | EKF | High-accuracy rotation data |
-| **EKF** | `odom -> base_link` | System | Where am I relative to start? |
+| **LiDAR** | `/scan` | Nav2 / SLAM / Throttle | Obstacle detection & mapping |
+| **Throttle** | `/scan_throttled` | rf2o | Reduced-rate scans for odometry |
+| **IMU** | `/imu/data` | Nav2 | High-accuracy rotation data |
+| **rf2o** | `/odom`, `odom -> base_link` | Nav2 | Where am I relative to start? |
 | **SLAM** | `map -> odom` | System | Where am I in the world map? |
 | **Nav2** | `/cmd_vel_nav` | E-Stop Node | Desired movement path |
 | **E-Stop** | `/cmd_vel` | Arduino Driver | Safe movement command |
+| **Telegram** | `/mission_command` | Mission Controller | User commands from Telegram |
+| **Mission** | `/mission_state` | Telegram Bridge | Status updates to user |

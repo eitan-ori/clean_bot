@@ -14,7 +14,6 @@
 ### 2. Robot Physical Definition
 - **clean_bot_description/urdf/robot.urdf.xacro** - Main robot assembly (5 lines - includes other files)
 - **clean_bot_description/urdf/robot_core.xacro** - Physical body, wheels, dimensions
-- **clean_bot_description/urdf/gazebo_control.xacro** - Differential drive controller
 - **clean_bot_description/urdf/inertial_macros.xacro** - Physics calculations helpers
 
 ---
@@ -27,7 +26,7 @@
 - **clean_bot_description/urdf/ultrasonic.xacro** - Distance sensor for obstacles
 
 ### 4. Core Hardware Drivers
-- **clean_bot_hardware/clean_bot_hardware/arduino_driver.py** - ⭐ **CRITICAL** - Motors, encoder, ultrasonic interface
+- **clean_bot_hardware/clean_bot_hardware/arduino_driver.py** - ⭐ **CRITICAL** - Motors, ultrasonic, cleaning relay interface
 - **clean_bot_hardware/clean_bot_hardware/simple_imu_driver.py** - Low-level I2C IMU communication
 - **clean_bot_hardware/clean_bot_hardware/imu_publisher_node.py** - IMU ROS publisher
 
@@ -41,7 +40,6 @@
 - **clean_bot_hardware/launch/robot_bringup.launch.py** - ⭐ **MASTER LAUNCH** - Full system
 
 ### 6. Configuration Files
-- **clean_bot_hardware/config/ekf.yaml** - Sensor fusion parameters
 - **clean_bot_hardware/config/nav2_params.yaml** - Navigation behavior
 - **clean_bot_hardware/config/mapper_params_online_async.yaml** - SLAM settings
 
@@ -51,7 +49,6 @@
 
 ### 7. Advanced Sensor Processing
 - **clean_bot_hardware/clean_bot_hardware/low_obstacle_detector.py** - Converts ultrasonic to point cloud
-- **clean_bot_hardware/clean_bot_hardware/imu_odom_broadcaster.py** - TF transforms from IMU
 
 ### 8. Safety Systems
 - **clean_bot_hardware/clean_bot_hardware/emergency_stop.py** - Collision avoidance velocity filter
@@ -60,14 +57,14 @@
 
 ## 🎯 **Phase 5: High-Level Mission Control**
 
-### 9. Basic Mission Framework
-- **clean_bot_mission/clean_bot_mission/mission.py** - Simple square patrol mission
+### 9. Mission Framework
+- **clean_bot_mission/clean_bot_mission/full_mission.py** - ⭐ **MAIN** - State machine for full mission
 - **clean_bot_mission/launch/cleaning_mission.launch.py** - Mission launcher
 
 ### 10. Advanced Coverage Algorithms
 - **clean_bot_mission/clean_bot_mission/simple_coverage.py** - Basic lawnmower pattern
 - **clean_bot_mission/clean_bot_mission/adaptive_coverage.py** - ⭐ **MOST COMPLEX** - Intelligent room decomposition
-- **clean_bot_mission/clean_bot_mission/coverage_mission.py** - Coverage mission executor
+- **clean_bot_mission/clean_bot_mission/frontier_explorer.py** - Frontier-based exploration
 
 ---
 
@@ -96,7 +93,7 @@
 1. Start with README.md and HOW_IT_WORKS.md
 2. Read robot definition files (Phase 1-2) 
 3. Try clean_bot_hardware/launch/sensors.launch.py
-4. Read mission.py for simple navigation
+4. Read full_mission.py for mission state machine
 
 ## **For Intermediate Users:**
 1. Complete Phases 1-4
@@ -128,7 +125,6 @@
 | robot_core.xacro | Physical structure | Low |
 | lidar.xacro | Laser scanner config | Low |
 | imu.xacro | IMU sensor config | Low |
-| gazebo_control.xacro | Simulation physics | Medium |
 
 ### **Launch & Config**
 | File | Purpose | Complexity |
@@ -136,16 +132,15 @@
 | robot_bringup.launch.py | Complete system startup | High |
 | sensors.launch.py | Hardware drivers only | Medium |
 | rsp.launch.py | Robot description only | Low |
-| ekf.yaml | Sensor fusion parameters | Medium |
 | nav2_params.yaml | Navigation behavior | High |
 
 ### **Mission Control**
 | File | Purpose | Complexity |
 |------|---------|------------|
-| mission.py | Basic waypoint navigation | Medium |
+| full_mission.py | Main mission state machine | High |
+| frontier_explorer.py | Frontier-based exploration | High |
 | simple_coverage.py | Rectangular area coverage | Medium |
 | adaptive_coverage.py | Advanced room decomposition | Very High |
-| coverage_mission.py | Mission execution framework | High |
 
 ---
 
@@ -163,11 +158,11 @@
 
 ### **Navigation Issues**
 - **Robot doesn't move**: Check `/cmd_vel` topic and emergency stop
-- **Poor mapping**: Calibrate wheel odometry and IMU
+- **Poor mapping**: Verify rf2o laser odometry and LiDAR data quality
 - **Path planning fails**: Adjust costmap parameters
 
 ---
 
 **🎯 KEY INSIGHT:** The robot works in layers - **Hardware → Sensors → SLAM → Navigation → Mission**. Each layer depends on the ones below it, so follow this order for the easiest understanding!
 
-**📝 NOTE:** This is a ROS2 Humble project designed for both simulation (Gazebo) and real hardware (Raspberry Pi + Arduino).
+**📝 NOTE:** This is a ROS2 Humble project designed for real hardware (Raspberry Pi + Arduino). The robot uses rf2o laser odometry (not wheel encoders) and is controlled via a Telegram bot interface.

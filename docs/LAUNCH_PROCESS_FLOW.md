@@ -62,7 +62,6 @@ ros2 launch clean_bot_mission cleaning_mission.launch.py
 | `lidar.xacro` | `clean_bot_description/urdf/` | LiDAR mount and frame |
 | `imu.xacro` | `clean_bot_description/urdf/` | IMU mount and frame |
 | `ultrasonic.xacro` | `clean_bot_description/urdf/` | Ultrasonic sensor frame |
-| `gazebo_control.xacro` | `clean_bot_description/urdf/` | Simulation plugins (not used on real robot) |
 | `inertial_macros.xacro` | `clean_bot_description/urdf/` | Physics calculation helpers |
 
 ---
@@ -193,9 +192,19 @@ clean_bot_mission/clean_bot_mission/
 ├── adaptive_coverage.py      ← Coverage path planning (zigzag patterns)
 │                                Used during COVERAGE state
 │
-├── simple_coverage.py        ← Simple lawnmower pattern (backup)
-│
-└── coverage_mission.py       ← Alternative mission executor
+└── simple_coverage.py        ← Simple lawnmower pattern (backup)
+```
+
+### **Telegram Bridge (External Control)**
+
+| Script | Package | Location | Purpose |
+|--------|---------|----------|---------|
+| `telegram_bridge.py` | clean_bot_mission | `scripts/` | Telegram bot for remote control (runs on PC) |
+
+**Telegram Flow:**
+```
+Telegram User → telegram_bridge.py → /mission_command → full_mission_controller
+full_mission_controller → /mission_state → telegram_bridge.py → Telegram User
 ```
 
 ---
@@ -297,7 +306,6 @@ clean_bot_mission/clean_bot_mission/
 |------|----------|---------|---------|
 | `mapper_params_online_async.yaml` | `clean_bot_hardware/config/` | slam_toolbox | SLAM parameters |
 | `nav2_params.yaml` | `clean_bot_hardware/config/` | Nav2 | Navigation tuning |
-| `ekf.yaml` | `clean_bot_hardware/config/` | robot_localization | Sensor fusion (currently unused) |
 
 ---
 
@@ -352,13 +360,11 @@ URDF Files (loaded by robot_state_publisher):
 ├── clean_bot_description/urdf/lidar.xacro                  ← LiDAR frame
 ├── clean_bot_description/urdf/imu.xacro                    ← IMU frame
 ├── clean_bot_description/urdf/ultrasonic.xacro             ← Ultrasonic frame
-├── clean_bot_description/urdf/gazebo_control.xacro         ← Sim plugins
 └── clean_bot_description/urdf/inertial_macros.xacro        ← Physics helpers
 
 Config Files:
 ├── clean_bot_hardware/config/mapper_params_online_async.yaml ← SLAM config
-├── clean_bot_hardware/config/nav2_params.yaml                ← Nav2 config
-└── clean_bot_hardware/config/ekf.yaml                        ← EKF config
+└── clean_bot_hardware/config/nav2_params.yaml                ← Nav2 config
 
 External Packages (system-installed):
 ├── sllidar_ros2                                            ← LiDAR driver

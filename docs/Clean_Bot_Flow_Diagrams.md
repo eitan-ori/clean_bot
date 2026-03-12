@@ -317,7 +317,6 @@ flowchart TD
         imu_xacro["imu.xacro"]
         ultra_xacro["ultrasonic.xacro"]
         inertial["inertial_macros.xacro"]
-        gazebo_ctrl["gazebo_control.xacro"]
     end
     
     subgraph PKG_HW["clean_bot_hardware"]
@@ -344,7 +343,6 @@ flowchart TD
     robot_xacro --> lidar_xacro
     robot_xacro --> imu_xacro
     robot_xacro --> ultra_xacro
-    robot_xacro --> gazebo_ctrl
     robot_core --> inertial
     
     imu_pub_py --> simple_imu
