@@ -80,6 +80,13 @@ class WebBridgeNode(Node):
         # ── Publishers ──
         self.cmd_pub = self.create_publisher(String, "mission_command", 10)
         self.vel_pub = self.create_publisher(Twist, "cmd_vel_nav", 10)
+        # Publisher for injecting saved room maps
+        map_pub_qos = QoSProfile(
+            depth=1,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            reliability=ReliabilityPolicy.RELIABLE,
+        )
+        self.map_pub = self.create_publisher(OccupancyGrid, "map", map_pub_qos)
 
         # ── QoS for map ──
         map_qos = QoSProfile(
@@ -445,10 +452,14 @@ class WebBridgeNode(Node):
 
     # ── Room save / load ──────────────────────────────────────────
     def save_room(self, name):
-        """Save current map data to a JSON file."""
+        """Save current map data to a JSON file (walls only — obstacles excluded)."""
         if self.map_msg is None:
             return False, "No map available"
         m = self.map_msg
+        # Save only structural walls: occupancy >= 50 → 100 (wall), else → 0 (free)
+        # This lets movable obstacles be re-detected on next clean
+        raw = list(m.data)
+        walls_only = [100 if v >= 50 else 0 for v in raw]
         room = {
             "name": name,
             "saved_at": datetime.now().isoformat(),
@@ -457,7 +468,7 @@ class WebBridgeNode(Node):
             "resolution": m.info.resolution,
             "origin_x": m.info.origin.position.x,
             "origin_y": m.info.origin.position.y,
-            "data": list(m.data),
+            "data": walls_only,
         }
         safe_name = "".join(c if c.isalnum() or c in "-_ " else "" for c in name).strip().replace(" ", "_")
         if not safe_name:
@@ -494,6 +505,48 @@ class WebBridgeNode(Node):
             return True, safe_new
         except Exception as e:
             return False, str(e)
+
+    def load_and_clean_room(self, filename):
+        """Load a saved room map (walls only), publish it, and start cleaning."""
+        path = WebBridgeNode._safe_room_path(filename)
+        if path is None or not path.exists():
+            return False, "Room not found"
+        try:
+            with open(path) as f:
+                d = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return False, "Cannot read room file"
+        for field in ("width", "height", "data", "resolution"):
+            if field not in d:
+                return False, f"Room file missing '{field}'"
+        w, h = d["width"], d["height"]
+        if w <= 0 or h <= 0 or len(d["data"]) != w * h:
+            return False, "Invalid room data dimensions"
+        # Build an OccupancyGrid from the saved walls-only data
+        from nav_msgs.msg import OccupancyGrid as OG
+        from geometry_msgs.msg import Pose
+        from std_msgs.msg import Header
+        msg = OG()
+        msg.header = Header()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = "map"
+        msg.info.width = w
+        msg.info.height = h
+        msg.info.resolution = float(d["resolution"])
+        msg.info.origin = Pose()
+        msg.info.origin.position.x = float(d.get("origin_x", 0.0))
+        msg.info.origin.position.y = float(d.get("origin_y", 0.0))
+        msg.info.origin.orientation.w = 1.0
+        msg.data = [int(v) for v in d["data"]]
+        # Update internal map state
+        self.map_msg = msg
+        self.map_update_counter += 1
+        # Publish to ROS so SLAM/Nav2/coverage planner pick it up
+        self.map_pub.publish(msg)
+        self.get_logger().info(f"Published saved room map '{d.get('name', filename)}' ({w}x{h})")
+        # Send start_clean command
+        self.send_command("start_clean")
+        return True, f"Loaded room '{d.get('name', filename)}' and started cleaning"
 
     def navigate_to_pose(self, x, y):
         """Send a NavigateToPose goal via nav2 action client."""
@@ -810,6 +863,19 @@ def api_rename_room(filename):
     if ok:
         return jsonify({"ok": True, "new_filename": info})
     return jsonify({"error": info}), 404
+
+
+@app.route("/api/rooms/<filename>/load_and_clean", methods=["POST"])
+def api_load_and_clean(filename):
+    if ros_node is None:
+        return jsonify({"error": "ROS not connected"}), 503
+    try:
+        ok, info = ros_node.load_and_clean_room(filename)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    if ok:
+        return jsonify({"ok": True, "message": info})
+    return jsonify({"error": info}), 400
 
 
 @app.route("/api/navigate", methods=["POST"])

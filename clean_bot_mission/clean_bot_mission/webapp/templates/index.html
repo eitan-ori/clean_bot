@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#1a1b2e">
 <title>Clean Bot Control Panel</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -95,7 +98,7 @@ main{
 .cmd-grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
 
 /* ── D-Pad ───────────────────────────────────────── */
-.dpad{display:grid;grid-template-columns:repeat(3,1fr);gap:.35rem;max-width:200px;margin:0 auto}
+.dpad{display:grid;grid-template-columns:repeat(3,1fr);gap:.35rem;max-width:200px;margin:0 auto;touch-action:none}
 .dpad .btn{aspect-ratio:1;font-size:1.2rem;border-radius:10px;background:#353660}
 .dpad .btn:hover{background:#4a4b78}
 .dpad .btn.stop-btn{background:var(--red);font-size:.7rem;font-weight:700}
@@ -287,13 +290,29 @@ html.light .mute-toggle:hover{background:#e8e8e8}
   .card{padding:.75rem;overflow:hidden}
   .status-grid{font-size:.82rem}
   header{padding:.5rem .75rem;flex-wrap:wrap;gap:.4rem}
-  .header-controls{gap:.3rem}
+  header h1{font-size:1.05rem;width:100%;text-align:center}
+  .header-controls{width:100%;justify-content:center;gap:.3rem;flex-wrap:wrap}
   body{overflow-x:hidden}
+  .map-info{font-size:.72rem;gap:.75rem}
+  .zoom-controls{flex-wrap:wrap;gap:.3rem}
+  .map-legend{font-size:.7rem;gap:.5rem}
+  .map-toggles{font-size:.75rem;gap:.5rem}
+  .stats-grid{font-size:.78rem}
+  .sched-form{flex-direction:column;align-items:stretch}
+  .sched-days{justify-content:center}
+  .modal{min-width:auto;width:92vw}
 }
 @media(max-width:480px){
   html{font-size:13px}
-  .dpad .btn{font-size:1.6rem;min-width:52px;min-height:52px}
+  .dpad .btn{font-size:1.6rem;min-width:56px;min-height:56px}
   .cmd-grid{grid-template-columns:1fr}
+  .speed-row{flex-wrap:wrap;justify-content:center}
+  .status-grid{grid-template-columns:1fr;gap:.3rem}
+  header h1{font-size:1rem}
+  .card h2{font-size:.9rem}
+  .estop-btn{font-size:1rem;padding:.75rem}
+  .room-item{font-size:.78rem}
+  .log-box{max-height:120px;font-size:.72rem}
 }
 
 /* ── Header controls row ──────────────────────── */
@@ -406,30 +425,30 @@ html.light .settings-btn:hover{background:#e8e8e8}
   <!-- Left: Map -->
   <div class="map-wrap">
     <div class="card" style="flex:1;display:flex;flex-direction:column">
-      <h2>🗺️ Live Map
+      <h2>🗺️ <span data-i18n="live_map">Live Map</span>
         <span style="margin-left:auto;display:flex;gap:.3rem">
           <button class="fullscreen-btn" id="fullscreenBtn" title="Fullscreen map">⛶</button>
         </span>
       </h2>
       <div class="map-container" id="mapContainer">
         <canvas id="mapCanvas" width="500" height="500"></canvas>
-        <div class="map-placeholder" id="mapPlaceholder">Waiting for map data…</div>
+        <div class="map-placeholder" id="mapPlaceholder" data-i18n="waiting_for_map">Waiting for map data…</div>
         <div class="nav-popup" id="navPopup">
           <span id="navCoords"></span>
-          <button class="btn btn-blue btn-sm" id="navHereBtn">Navigate Here</button>
+          <button class="btn btn-blue btn-sm" id="navHereBtn"><span data-i18n="navigate_here">Navigate Here</span></button>
         </div>
       </div>
     </div>
     <div class="map-info" id="mapInfo">
-      <span>Resolution: <b id="mapRes">—</b> m/px</span>
-      <span>Size: <b id="mapDims">—</b></span>
-      <span>Updates: <b id="mapCount">0</b></span>
+      <span><span data-i18n="resolution">Resolution</span>: <b id="mapRes">—</b> m/px</span>
+      <span><span data-i18n="size">Size</span>: <b id="mapDims">—</b></span>
+      <span><span data-i18n="updates">Updates</span>: <b id="mapCount">0</b></span>
     </div>
     <div class="zoom-controls">
       <button class="btn btn-gray" id="zoomIn">＋</button>
       <button class="btn btn-gray" id="zoomOut">−</button>
-      <span class="zoom-level">Zoom: <span id="zoomVal">1.0</span>×</span>
-      <button class="btn btn-gray btn-sm" id="exportMapBtn" style="margin-left:auto">📥 Export Map</button>
+      <span class="zoom-level"><span data-i18n="zoom">Zoom</span>: <span id="zoomVal">1.0</span>×</span>
+      <button class="btn btn-gray btn-sm" id="exportMapBtn" style="margin-left:auto">📥 <span data-i18n="export_map">Export Map</span></button>
     </div>
     <div class="map-legend">
       <span class="map-legend-item"><span class="legend-swatch" style="background:#e6ebf0"></span> <span data-i18n="free">Free</span></span>
@@ -452,19 +471,19 @@ html.light .settings-btn:hover{background:#e8e8e8}
     <div class="card" role="status" aria-live="polite" aria-label="Robot status">
       <h2>📊 <span data-i18n="status">Status</span></h2>
       <div class="status-grid">
-        <span class="label">Mission</span><span id="sMission"><span class="badge badge-gray">UNKNOWN</span></span>
-        <span class="label">Exploration</span><span id="sExplore">UNKNOWN</span>
-        <span class="label">Coverage</span><span id="sCoverage">UNKNOWN</span>
-        <span class="label">Position</span><span id="sPos">0, 0</span>
-        <span class="label">Velocity</span><span id="sVel">0 m/s</span>
-        <span class="label">Scan Time</span><span id="sScanTimer" class="scan-timer">—</span>
+        <span class="label" data-i18n="mission">Mission</span><span id="sMission"><span class="badge badge-gray">UNKNOWN</span></span>
+        <span class="label" data-i18n="exploration">Exploration</span><span id="sExplore">UNKNOWN</span>
+        <span class="label" data-i18n="coverage">Coverage</span><span id="sCoverage">UNKNOWN</span>
+        <span class="label" data-i18n="position">Position</span><span id="sPos">0, 0</span>
+        <span class="label" data-i18n="velocity">Velocity</span><span id="sVel">0 m/s</span>
+        <span class="label" data-i18n="scan_time">Scan Time</span><span id="sScanTimer" class="scan-timer">—</span>
       </div>
       <div class="progress-wrap" id="coverageProgressWrap" style="display:none">
-        <div class="progress-label">Coverage</div>
+        <div class="progress-label" data-i18n="coverage">Coverage</div>
         <div class="progress-bar"><div class="progress-fill" id="coverageFill" style="width:0%"></div></div>
       </div>
       <div class="timeline-wrap">
-        <h3>State History</h3>
+        <h3 data-i18n="state_history">State History</h3>
         <canvas id="stateTimeline" width="400" height="22"></canvas>
       </div>
     </div>
@@ -510,7 +529,7 @@ html.light .settings-btn:hover{background:#e8e8e8}
     <div class="card">
       <h2>🏠 <span data-i18n="room_manager">Room Manager</span></h2>
       <div class="room-save-row">
-        <input type="text" id="roomName" placeholder="Room name…" aria-label="Room name">
+        <input type="text" id="roomName" placeholder="Room name…" data-i18n-placeholder="room_name_placeholder" aria-label="Room name">
         <button class="btn btn-blue btn-sm" onclick="saveRoom()" aria-label="Save room"><span data-i18n="save_room">Save Room</span></button>
       </div>
       <div class="room-list" id="roomList" role="list" aria-label="Saved rooms"></div>
@@ -558,12 +577,12 @@ html.light .settings-btn:hover{background:#e8e8e8}
       <h2 class="diag-section" id="diagToggle" tabindex="0" role="button" aria-expanded="false" aria-controls="diagContent">🔧 <span data-i18n="diagnostics">Diagnostics</span> ▸</h2>
       <div class="diag-content" id="diagContent" role="region">
         <div class="diag-grid">
-          <span class="diag-label">LiDAR Hz</span><span class="diag-val" id="diagScanHz">—</span>
+          <span class="diag-label" data-i18n="lidar_hz">LiDAR Hz</span><span class="diag-val" id="diagScanHz">—</span>
           <span class="diag-label" data-i18n="valid_readings">Valid Readings</span><span class="diag-val" id="diagValidReadings">—</span>
           <span class="diag-label" data-i18n="linear_vel">Linear Vel</span><span class="diag-val" id="diagLinVel">—</span>
           <span class="diag-label" data-i18n="angular_vel">Angular Vel</span><span class="diag-val" id="diagAngVel">—</span>
           <span class="diag-label" data-i18n="cumulative_dist">Cumulative Dist</span><span class="diag-val" id="diagDistance">—</span>
-          <span class="diag-label">TF Chain</span><span class="diag-val" id="diagTF">—</span>
+          <span class="diag-label" data-i18n="tf_chain">TF Chain</span><span class="diag-val" id="diagTF">—</span>
           <span class="diag-label" data-i18n="socket_status">Socket Status</span><span class="diag-val" id="diagSocket">—</span>
           <span class="diag-label" data-i18n="latency">Latency</span><span class="diag-val" id="diagLatency">—</span>
         </div>
@@ -633,7 +652,7 @@ const connLabel = document.getElementById('connLabel');
 
 socket.on('connect', () => {
   connDot.classList.add('connected');
-  connLabel.textContent = 'Connected';
+  connLabel.textContent = t('connected');
   socket.emit('request_map');
   fetchLog();
   fetchRooms();
@@ -645,7 +664,7 @@ socket.on('connect', () => {
 });
 socket.on('disconnect', () => {
   connDot.classList.remove('connected');
-  connLabel.textContent = 'Disconnected';
+  connLabel.textContent = t('disconnected');
 });
 
 /* ── Map Rendering ─────────────────────────────── */
@@ -1044,7 +1063,7 @@ function fetchRooms() {
 
 function renderRooms(rooms) {
   const el = document.getElementById('roomList');
-  if (!rooms.length) { el.innerHTML = '<div style="color:var(--text-dim);font-size:.82rem;padding:.3rem">No saved rooms</div>'; return; }
+  if (!rooms.length) { el.innerHTML = '<div style="color:var(--text-dim);font-size:.82rem;padding:.3rem">' + t('no_saved_rooms') + '</div>'; return; }
   el.innerHTML = rooms.map(r => {
     const date = r.saved_at ? new Date(r.saved_at).toLocaleDateString() : '';
     return '<div class="room-item">' +
@@ -1052,9 +1071,9 @@ function renderRooms(rooms) {
       '<span class="room-date">' + date + '</span>' +
       '<div class="room-actions">' +
         '<button class="btn btn-yellow btn-sm" onclick="renameRoom(\'' + esc(r.filename) + '\',\'' + esc(r.name) + '\')">✏️</button>' +
-        '<button class="btn btn-blue btn-sm" onclick="previewRoom(\'' + esc(r.filename) + '\',\'' + esc(r.name) + '\')">Preview</button>' +
-        '<button class="btn btn-green btn-sm" onclick="cleanRoom(\'' + esc(r.filename) + '\')">Clean</button>' +
-        '<button class="btn btn-red btn-sm" onclick="deleteRoom(\'' + esc(r.filename) + '\')">Delete</button>' +
+        '<button class="btn btn-blue btn-sm" onclick="previewRoom(\'' + esc(r.filename) + '\',\'' + esc(r.name) + '\')">' + t('preview') + '</button>' +
+        '<button class="btn btn-green btn-sm" onclick="cleanRoom(\'' + esc(r.filename) + '\')">' + t('clean') + '</button>' +
+        '<button class="btn btn-red btn-sm" onclick="deleteRoom(\'' + esc(r.filename) + '\')">' + t('delete') + '</button>' +
       '</div></div>';
   }).join('');
 }
@@ -1094,12 +1113,16 @@ window.previewRoom = function(filename, name) {
 };
 
 window.cleanRoom = function(filename) {
-  sendCommand('start_clean');
-  toast('Cleaning room…');
+  toast(t('clean_saved_room'));
+  fetch('/api/rooms/' + filename + '/load_and_clean', {method:'POST'})
+    .then(r => r.json()).then(d => {
+      if (d.ok) toast(d.message || t('clean_room'));
+      else toast(d.error || 'Failed');
+    }).catch(() => toast('Failed'));
 };
 
 window.deleteRoom = function(filename) {
-  if (!confirm('Delete this room?')) return;
+  if (!confirm(t('delete_confirm'))) return;
   fetch('/api/rooms/' + filename, {method:'DELETE'}).then(r => r.json()).then(d => {
     if (d.ok) { toast('Room deleted'); fetchRooms(); }
     else toast(d.error || 'Delete failed');
@@ -1331,6 +1354,14 @@ const LANG = {
     no_schedules:'No scheduled cleanings',select_time:'Select a time',select_days:'Select at least one day',
     schedule_added:'Schedule added',schedule_deleted:'Schedule deleted',
     mon:'Mo',tue:'Tu',wed:'We',thu:'Th',fri:'Fr',sat:'Sa',sun:'Su',
+    live_map:'Live Map',waiting_for_map:'Waiting for map data…',navigate_here:'Navigate Here',
+    export_map:'Export Map',zoom:'Zoom',resolution:'Resolution',size:'Size',updates:'Updates',
+    mission:'Mission',exploration:'Exploration',coverage:'Coverage',position:'Position',
+    velocity:'Velocity',scan_time:'Scan Time',state_history:'State History',
+    lidar_hz:'LiDAR Hz',tf_chain:'TF Chain',no_saved_rooms:'No saved rooms',
+    preview:'Preview',clean:'Clean',delete:'Delete',connected:'Connected',disconnected:'Disconnected',
+    delete_confirm:'Delete this room?',room_name_placeholder:'Room name…',
+    clean_saved_room:'Loading room for cleaning…',
   },
   he: {
     emergency_stop:'עצירת חירום',status:'סטטוס',mission_control:'בקרת משימה',
@@ -1350,6 +1381,14 @@ const LANG = {
     no_schedules:'אין ניקויים מתוזמנים',select_time:'בחר שעה',select_days:'בחר לפחות יום אחד',
     schedule_added:'תזמון נוסף',schedule_deleted:'תזמון הוסר',
     mon:'ב׳',tue:'ג׳',wed:'ד׳',thu:'ה׳',fri:'ו׳',sat:'ש׳',sun:'א׳',
+    live_map:'מפה חיה',waiting_for_map:'ממתין לנתוני מפה…',navigate_here:'נווט לכאן',
+    export_map:'ייצוא מפה',zoom:'זום',resolution:'רזולוציה',size:'גודל',updates:'עדכונים',
+    mission:'משימה',exploration:'חקירה',coverage:'כיסוי',position:'מיקום',
+    velocity:'מהירות',scan_time:'זמן סריקה',state_history:'היסטוריית מצבים',
+    lidar_hz:'תדירות לידר',tf_chain:'שרשרת TF',no_saved_rooms:'אין חדרים שמורים',
+    preview:'תצוגה מקדימה',clean:'נקה',delete:'מחק',connected:'מחובר',disconnected:'מנותק',
+    delete_confirm:'למחוק את החדר?',room_name_placeholder:'שם החדר…',
+    clean_saved_room:'טוען חדר לניקוי…',
   }
 };
 let currentLang = localStorage.getItem('cb_lang') || 'en';
@@ -1359,9 +1398,10 @@ function applyLanguage() {
     const key = el.getAttribute('data-i18n');
     el.textContent = t(key);
   });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+    el.placeholder = t(el.getAttribute('data-i18n-placeholder'));
+  });
   document.documentElement.lang = currentLang;
-  if (currentLang === 'he') document.documentElement.dir = 'rtl';
-  else document.documentElement.dir = 'ltr';
   document.getElementById('langToggle').textContent = currentLang.toUpperCase();
 }
 document.getElementById('langToggle').addEventListener('click', () => {
@@ -1522,7 +1562,7 @@ socket.on('status', d => {
   document.getElementById('diagDistance').textContent = d.total_distance + ' m';
   document.getElementById('diagTF').textContent = d.tf_healthy ? 'OK' : 'BROKEN';
   document.getElementById('diagTF').className = 'diag-val ' + (d.tf_healthy ? 'diag-ok' : 'diag-err');
-  document.getElementById('diagSocket').textContent = socket.connected ? 'Connected' : 'Disconnected';
+  document.getElementById('diagSocket').textContent = socket.connected ? t('connected') : t('disconnected');
   document.getElementById('diagSocket').className = 'diag-val ' + (socket.connected ? 'diag-ok' : 'diag-err');
   document.getElementById('diagLatency').textContent = latencyLabelEl.textContent;
 
