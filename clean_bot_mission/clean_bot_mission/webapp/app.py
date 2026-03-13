@@ -47,7 +47,7 @@ from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.action import ActionClient
 from std_msgs.msg import String
-from geometry_msgs.msg import Twist, PoseStamped
+from geometry_msgs.msg import Twist, PoseStamped, PoseWithCovarianceStamped
 from nav_msgs.msg import OccupancyGrid, Odometry
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformListener
@@ -172,6 +172,12 @@ class WebBridgeNode(Node):
         # ── No-go zones ──
         self._no_go_zones = self._load_no_go_zones()
         self._nogo_pub = self.create_publisher(String, "no_go_zones", 10)
+
+        # ── Localization: publish initial pose for AMCL/SLAM + coverage planner ──
+        self._initialpose_pub = self.create_publisher(
+            PoseWithCovarianceStamped, "initialpose", 10)
+        self._robot_map_pose_pub = self.create_publisher(
+            PoseStamped, "robot_map_pose", 10)
 
         # ── Nav2 action client (Round 14) ──
         self._nav_client = None
@@ -576,14 +582,33 @@ class WebBridgeNode(Node):
         # Publish to ROS so SLAM/Nav2/coverage planner pick it up.
         # Our own _on_map callback will update internal state (map_msg, counter, heatmap).
         self.map_pub.publish(msg)
-        self.get_logger().info(f"Published saved room map '{d.get('name', filename)}' ({w}x{h})")
+        room_name = d.get('name', filename)
+        self.get_logger().info(f"Published saved room map '{room_name}' ({w}x{h})")
+
+        # ── Localize robot on the saved map using LiDAR scan matching ──
+        loc_result = self.localize_on_saved_map(
+            d["data"], w, h, float(d["resolution"]),
+            float(d.get("origin_x", 0.0)), float(d.get("origin_y", 0.0)))
+
+        loc_msg = ""
+        if loc_result is not None:
+            lx, ly, lyaw, score, total = loc_result
+            match_pct = (score / total * 100) if total > 0 else 0
+            self._publish_localized_pose(lx, ly, lyaw)
+            loc_msg = (f" Localized at ({lx:.2f}, {ly:.2f}, "
+                       f"{math.degrees(lyaw):.0f}°) [{match_pct:.0f}% match]")
+            self.get_logger().info(f"🎯 Scan matching: {score}/{total} hits ({match_pct:.0f}%)")
+        else:
+            self.get_logger().warn("⚠️ Scan matching failed — no LiDAR data or poor match")
+            loc_msg = " (localization skipped — ensure robot is near walls)"
+
         # Brief delay to let the map propagate through DDS to the coverage planner
         # before sending start_clean (Bug 68: avoid race where planner uses stale map)
         import time as _time
         _time.sleep(0.5)
         # Send start_clean command
         self.send_command("start_clean")
-        return True, f"Loaded room '{d.get('name', filename)}' and started cleaning"
+        return True, f"Loaded room '{room_name}' and started cleaning.{loc_msg}"
 
     def navigate_to_pose(self, x, y):
         """Send a NavigateToPose goal via nav2 action client."""
@@ -722,6 +747,129 @@ class WebBridgeNode(Node):
         self._no_go_zones = []
         self._save_no_go_zones()
         self._publish_no_go_zones()
+
+    # ── Scan-to-Map Localization ─────────────────────────────────
+    def _scan_to_points(self):
+        """Convert current LiDAR scan to 2D point list in robot frame."""
+        if not self.scan_ranges or len(self.scan_ranges) < 10:
+            return None
+        points = []
+        angle = self.scan_angle_min
+        for r in self.scan_ranges:
+            if math.isfinite(r) and 0.12 < r < 10.0:
+                points.append((r * math.cos(angle), r * math.sin(angle)))
+            angle += self.scan_angle_increment
+        return points if len(points) >= 30 else None
+
+    def _score_pose(self, pts_x, pts_y, cx, cy, theta, wall_mask, ox, oy, res, w, h):
+        """Score a candidate pose by counting scan points that match wall cells."""
+        cos_t, sin_t = math.cos(theta), math.sin(theta)
+        wx = pts_x * cos_t - pts_y * sin_t + cx
+        wy = pts_x * sin_t + pts_y * cos_t + cy
+        gc = ((wx - ox) / res).astype(int)
+        gr = ((wy - oy) / res).astype(int)
+        valid = (gr >= 0) & (gr < h) & (gc >= 0) & (gc < w)
+        return int(np.sum(wall_mask[gr[valid], gc[valid]]))
+
+    def localize_on_saved_map(self, map_data, w, h, resolution, origin_x, origin_y):
+        """Match current LiDAR scan against a saved map to find robot pose.
+
+        Uses a coarse-to-fine grid search: first checks sampled free-space
+        positions at 30° angle steps, then refines the best match.
+
+        Returns (x, y, yaw, score, total_points) or None on failure.
+        """
+        points = self._scan_to_points()
+        if points is None:
+            return None
+
+        grid = np.array(map_data, dtype=np.int8).reshape((h, w))
+        wall_mask = grid >= 50
+        free_mask = grid == 0
+
+        pts = np.array(points, dtype=np.float64)
+        pts_x = pts[:, 0]
+        pts_y = pts[:, 1]
+        total_pts = len(pts_x)
+        ox, oy, res = origin_x, origin_y, resolution
+
+        # ── Coarse search: sample free cells ──
+        free_rows, free_cols = np.where(free_mask)
+        if len(free_rows) == 0:
+            return None
+        step = max(1, len(free_rows) // 400)
+        sample_idx = np.arange(0, len(free_rows), step)
+        cxs = ox + (free_cols[sample_idx] + 0.5) * res
+        cys = oy + (free_rows[sample_idx] + 0.5) * res
+
+        angles_coarse = np.linspace(-math.pi, math.pi, 12, endpoint=False)
+
+        best_score = -1
+        best_pose = None
+
+        # Vectorized coarse search: for each angle, score all positions at once
+        for theta in angles_coarse:
+            cos_t, sin_t = np.cos(theta), np.sin(theta)
+            rot_x = pts_x * cos_t - pts_y * sin_t  # (N,)
+            rot_y = pts_x * sin_t + pts_y * cos_t
+            # Broadcast: (M,1) + (1,N) → (M,N)
+            wx = cxs[:, None] + rot_x[None, :]
+            wy = cys[:, None] + rot_y[None, :]
+            gc = ((wx - ox) / res).astype(np.int32)
+            gr = ((wy - oy) / res).astype(np.int32)
+            valid = (gr >= 0) & (gr < h) & (gc >= 0) & (gc < w)
+            gc_safe = np.clip(gc, 0, w - 1)
+            gr_safe = np.clip(gr, 0, h - 1)
+            hits = wall_mask[gr_safe, gc_safe] & valid
+            scores = hits.sum(axis=1)
+            idx = int(scores.argmax())
+            if scores[idx] > best_score:
+                best_score = int(scores[idx])
+                best_pose = (float(cxs[idx]), float(cys[idx]), float(theta))
+
+        if best_pose is None:
+            return None
+
+        # ── Fine refinement around best pose ──
+        bx, by, bth = best_pose
+        for dx in np.linspace(-0.3, 0.3, 7):
+            for dy in np.linspace(-0.3, 0.3, 7):
+                for dth in np.linspace(-0.3, 0.3, 13):
+                    sc = self._score_pose(
+                        pts_x, pts_y, bx + dx, by + dy, bth + dth,
+                        wall_mask, ox, oy, res, w, h)
+                    if sc > best_score:
+                        best_score = sc
+                        best_pose = (bx + dx, by + dy, bth + dth)
+
+        return (*best_pose, best_score, total_pts)
+
+    def _publish_localized_pose(self, x, y, yaw):
+        """Publish the localized pose to /initialpose and /robot_map_pose."""
+        # Standard /initialpose for AMCL / SLAM Toolbox
+        ip = PoseWithCovarianceStamped()
+        ip.header.stamp = self.get_clock().now().to_msg()
+        ip.header.frame_id = "map"
+        ip.pose.pose.position.x = float(x)
+        ip.pose.pose.position.y = float(y)
+        ip.pose.pose.orientation.z = math.sin(yaw / 2.0)
+        ip.pose.pose.orientation.w = math.cos(yaw / 2.0)
+        # Set reasonable covariance (diagonal)
+        cov = [0.0] * 36
+        cov[0] = 0.25   # x variance
+        cov[7] = 0.25   # y variance
+        cov[35] = 0.07   # yaw variance
+        ip.pose.covariance = cov
+        self._initialpose_pub.publish(ip)
+
+        # Custom topic for our coverage planner
+        ps = PoseStamped()
+        ps.header = ip.header
+        ps.pose = ip.pose.pose
+        self._robot_map_pose_pub.publish(ps)
+
+        self.get_logger().info(
+            f"📍 Published localized pose: ({x:.2f}, {y:.2f}, {math.degrees(yaw):.0f}°)")
 
     @staticmethod
     def list_rooms():

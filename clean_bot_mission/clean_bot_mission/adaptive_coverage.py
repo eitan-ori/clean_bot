@@ -169,6 +169,10 @@ class AdaptiveCoveragePlanner(Node):
         # No-go zones subscriber
         self.create_subscription(String, 'no_go_zones', self._on_no_go_zones, 10)
 
+        # Localization: initial pose from scan matching (for saved room cleaning)
+        self.create_subscription(PoseStamped, 'robot_map_pose',
+                                 self._on_robot_map_pose, 10)
+
         # ===================== Publishers =====================
         self.coverage_complete_pub = self.create_publisher(Bool, 'coverage_complete', 10)
         
@@ -217,6 +221,9 @@ class AdaptiveCoveragePlanner(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self._tf_pose_warned = False
+
+        # Map↔odom offset from scan-matching localization (saved rooms)
+        self._map_odom_offset = None  # (dx, dy, dyaw) or None
         
         # Movement state for direct drive
         self.movement_phase = 'idle'  # 'idle', 'turning', 'driving'
@@ -401,7 +408,8 @@ class AdaptiveCoveragePlanner(Node):
     def _get_robot_pose_map(self):
         """Return (x, y, yaw) in map frame when TF is available.
 
-        Falls back to the latest odom-based pose if TF lookup fails.
+        Falls back to the latest odom-based pose (with localization offset
+        correction if scan-to-map matching was performed).
         """
 
         
@@ -425,8 +433,12 @@ class AdaptiveCoveragePlanner(Node):
                 self.get_logger().warn(
                     f'⚠️ TF pose lookup failed ({self.global_frame} <- {self.base_frame}); '
                     f'falling back to odom pose. Error: {e}')
-            yaw = self.normalize_angle(self.robot_yaw)
-            return self.robot_x, self.robot_y, yaw
+            ox, oy = self.robot_x, self.robot_y
+            oyaw = self.normalize_angle(self.robot_yaw)
+            if self._map_odom_offset is not None:
+                dx, dy, dyaw = self._map_odom_offset
+                return ox + dx, oy + dy, self.normalize_angle(oyaw + dyaw)
+            return ox, oy, oyaw
 
     def normalize_angle(self, angle):
         """Normalize angle to [-pi, pi]."""
@@ -574,6 +586,26 @@ class AdaptiveCoveragePlanner(Node):
             self._no_go_zones = json.loads(msg.data)
         except (json.JSONDecodeError, TypeError):
             pass
+
+    def _on_robot_map_pose(self, msg: PoseStamped):
+        """Receive localized robot pose from scan-to-map matching.
+
+        Computes the offset between the localized map-frame pose and the
+        current odom-frame pose so that ``_get_robot_pose_map`` can correct
+        the odom fallback when TF is unavailable (saved-room cleaning).
+        """
+        q = msg.pose.orientation
+        siny = 2.0 * (q.w * q.z + q.x * q.y)
+        cosy = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+        map_yaw = math.atan2(siny, cosy)
+
+        dx = msg.pose.position.x - self.robot_x
+        dy = msg.pose.position.y - self.robot_y
+        dyaw = self.normalize_angle(map_yaw - self.robot_yaw)
+        self._map_odom_offset = (dx, dy, dyaw)
+        self.get_logger().info(
+            f"📍 Localization offset set: dx={dx:.2f}, dy={dy:.2f}, "
+            f"dyaw={math.degrees(dyaw):.1f}°")
 
     def exploration_complete_callback(self, msg: Bool):
         """Triggered when exploration finishes."""

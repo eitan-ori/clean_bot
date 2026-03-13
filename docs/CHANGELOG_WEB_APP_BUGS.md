@@ -348,3 +348,16 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`_on_odom`)
 - **Problem:** The distance integrator added `sqrt(dx² + dy²)` for every odom callback without filtering. If odometry had a gap (robot moved physically, SLAM correction, or odom reset), a single large jump would inflate `total_distance_traveled` unrealistically.
 - **Fix:** Added per-step cap: only accumulate distance if the step is less than 0.5m (well above the max possible movement between 10Hz callbacks at robot's max speed).
+
+## Feature: Scan-to-Map Localization for Saved Rooms
+
+### Implementation
+- **Files:** `webapp/app.py`, `adaptive_coverage.py`, `test/test_mission_logic.py`
+- **Problem:** When loading a saved room for cleaning, the robot had no way to determine its position on the saved map. It would start at odom origin (0,0) which doesn't correspond to its real position in the room, causing the coverage planner to navigate to wrong locations.
+- **Solution:** Added a scan-to-map matching algorithm that uses the current LiDAR scan to localize the robot on the saved occupancy grid before starting coverage.
+- **Algorithm:** Coarse-to-fine grid search — samples ~400 free-space positions × 12 angles (30° steps), then refines the best match over a ±0.3m / ±17° window with 637 evaluations. Fully numpy-vectorized for speed (<2s).
+- **Integration:**
+  1. `webapp/app.py`: Added `_scan_to_points()`, `_score_pose()`, `localize_on_saved_map()`, `_publish_localized_pose()` methods. Modified `load_and_clean_room()` to localize before sending `start_clean`.
+  2. Publishes to `/initialpose` (PoseWithCovarianceStamped) for AMCL/SLAM Toolbox and `/robot_map_pose` (PoseStamped) for coverage planner.
+  3. `adaptive_coverage.py`: Subscribes to `/robot_map_pose`, computes map↔odom offset, applies it in `_get_robot_pose_map()` when TF is unavailable.
+- **Tests:** 19 new tests covering scan-to-points conversion, pose scoring, full localization on synthetic box rooms, and coverage planner offset handling.

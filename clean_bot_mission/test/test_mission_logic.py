@@ -1448,3 +1448,316 @@ class TestOrientWaypoints:
         result = coverage.orient_waypoints(wps)
         # Last waypoint should have same yaw as second-to-last
         assert abs(result[-1][2] - result[-2][2]) < 0.01
+
+
+# ════════════════════════════════════════════════════════════════════
+# Scan-to-Map Localization Tests
+# ════════════════════════════════════════════════════════════════════
+
+class TestScanToPoints:
+    """Test _scan_to_points in WebBridgeNode."""
+
+    @pytest.fixture
+    def web_node(self):
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        node = WebBridgeNode.__new__(WebBridgeNode)
+        node.scan_ranges = []
+        node.scan_angle_min = 0.0
+        node.scan_angle_max = 2 * math.pi
+        node.scan_angle_increment = math.pi / 180
+        return node
+
+    def test_empty_scan(self, web_node):
+        web_node.scan_ranges = []
+        assert web_node._scan_to_points() is None
+
+    def test_too_few_valid_points(self, web_node):
+        web_node.scan_ranges = [1.0] * 10 + [float('inf')] * 350
+        assert web_node._scan_to_points() is None
+
+    def test_valid_scan_returns_points(self, web_node):
+        web_node.scan_ranges = [2.0] * 360
+        pts = web_node._scan_to_points()
+        assert pts is not None
+        assert len(pts) == 360
+
+    def test_filters_nan_and_inf(self, web_node):
+        web_node.scan_ranges = [1.5] * 200 + [float('nan')] * 80 + [float('inf')] * 80
+        pts = web_node._scan_to_points()
+        assert pts is not None
+        assert len(pts) == 200
+
+    def test_filters_too_close_ranges(self, web_node):
+        web_node.scan_ranges = [0.05] * 100 + [2.0] * 260
+        pts = web_node._scan_to_points()
+        assert pts is not None
+        assert len(pts) == 260
+
+    def test_point_coordinates(self, web_node):
+        """Scan at angle=0 with range=1 should give (1, 0)."""
+        web_node.scan_ranges = [1.0]
+        web_node.scan_angle_min = 0.0
+        web_node.scan_angle_increment = 0.1
+        pts = web_node._scan_to_points()
+        # Only 1 point, too few for the threshold
+        assert pts is None
+
+    def test_point_directions(self, web_node):
+        """Forward (0°) and left (90°) scan points."""
+        web_node.scan_angle_min = 0.0
+        web_node.scan_angle_increment = math.pi / 2
+        web_node.scan_ranges = [1.0] * 40  # Need >=30 valid points
+        pts = web_node._scan_to_points()
+        assert pts is not None
+        # First point at angle 0: (1, 0)
+        assert abs(pts[0][0] - 1.0) < 0.01
+        assert abs(pts[0][1] - 0.0) < 0.01
+        # Second point at pi/2: (0, 1)
+        assert abs(pts[1][0] - 0.0) < 0.01
+        assert abs(pts[1][1] - 1.0) < 0.01
+
+
+class TestScorePose:
+    """Test _score_pose in WebBridgeNode."""
+
+    @pytest.fixture
+    def web_node(self):
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        node = WebBridgeNode.__new__(WebBridgeNode)
+        return node
+
+    def test_perfect_match(self, web_node):
+        """All scan points land on wall cells → max score."""
+        # Simple 10x10 grid with walls on right edge (col 9)
+        w, h, res = 10, 10, 1.0
+        wall_mask = np.zeros((h, w), dtype=bool)
+        wall_mask[:, 9] = True  # wall at x=9.5
+        ox, oy = 0.0, 0.0
+        # Robot at (5, 5) facing right (theta=0), scan points at (4, 0) → world (9, 5)
+        pts_x = np.array([4.0])
+        pts_y = np.array([0.0])
+        score = web_node._score_pose(pts_x, pts_y, 5.0, 5.0, 0.0,
+                                     wall_mask, ox, oy, res, w, h)
+        assert score == 1
+
+    def test_no_match(self, web_node):
+        """Scan points land in free space → score 0."""
+        w, h, res = 10, 10, 1.0
+        wall_mask = np.zeros((h, w), dtype=bool)
+        wall_mask[:, 9] = True
+        pts_x = np.array([1.0])
+        pts_y = np.array([0.0])
+        score = web_node._score_pose(pts_x, pts_y, 2.0, 5.0, 0.0,
+                                     wall_mask, 0.0, 0.0, res, w, h)
+        assert score == 0
+
+    def test_out_of_bounds_ignored(self, web_node):
+        """Points outside the grid don't count."""
+        w, h, res = 5, 5, 1.0
+        wall_mask = np.ones((h, w), dtype=bool)
+        pts_x = np.array([10.0])
+        pts_y = np.array([0.0])
+        score = web_node._score_pose(pts_x, pts_y, 2.0, 2.0, 0.0,
+                                     wall_mask, 0.0, 0.0, res, w, h)
+        assert score == 0
+
+    def test_rotation_affects_hits(self, web_node):
+        """Rotating the pose changes which cells the scan hits."""
+        w, h, res = 10, 10, 1.0
+        wall_mask = np.zeros((h, w), dtype=bool)
+        wall_mask[:, 9] = True  # wall at right edge
+        pts_x = np.array([4.0])
+        pts_y = np.array([0.0])
+        # theta=0: point at (4+5,0+5)=(9,5) → hits wall
+        s0 = web_node._score_pose(pts_x, pts_y, 5.0, 5.0, 0.0,
+                                  wall_mask, 0.0, 0.0, res, w, h)
+        # theta=pi/2: point rotated to (0, 4), world (5, 9) → free (col 5)
+        s90 = web_node._score_pose(pts_x, pts_y, 5.0, 5.0, math.pi / 2,
+                                   wall_mask, 0.0, 0.0, res, w, h)
+        assert s0 == 1
+        assert s90 == 0
+
+
+class TestLocalizeOnSavedMap:
+    """Test localize_on_saved_map with synthetic maps and scans."""
+
+    @pytest.fixture
+    def web_node(self):
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        node = WebBridgeNode.__new__(WebBridgeNode)
+        node.scan_ranges = []
+        node.scan_angle_min = 0.0
+        node.scan_angle_max = 2 * math.pi
+        node.scan_angle_increment = 2 * math.pi / 360
+        node.get_logger = MagicMock(return_value=MagicMock())
+        return node
+
+    def _make_box_map(self, size=50, res=0.05):
+        """Create a box-shaped room (walls on all edges)."""
+        data = [0] * (size * size)
+        for r in range(size):
+            for c in range(size):
+                if r == 0 or r == size - 1 or c == 0 or c == size - 1:
+                    data[r * size + c] = 100
+        return data, size, size, res
+
+    def _make_scan_for_box(self, robot_x, robot_y, robot_yaw, size, res, n_rays=360):
+        """Simulate a LiDAR scan of a box room from a given position."""
+        ranges = []
+        half = size * res / 2.0
+        ox = -half  # map origin
+        # Walls at world coords: x in [ox, ox+size*res], y in [oy, oy+size*res]
+        min_x, max_x = ox, ox + size * res
+        min_y, max_y = ox, ox + size * res
+        for i in range(n_rays):
+            angle = robot_yaw + (2 * math.pi / n_rays) * i
+            dx, dy = math.cos(angle), math.sin(angle)
+            best_r = 10.0  # max range
+            # Check intersection with 4 walls
+            for wall_val, is_x, coord in [
+                (min_x, True, min_x), (max_x, True, max_x),
+                (min_y, False, min_y), (max_y, False, max_y),
+            ]:
+                if is_x and abs(dx) > 1e-9:
+                    t = (coord - robot_x) / dx
+                    if t > 0:
+                        hit_y = robot_y + t * dy
+                        if min_y <= hit_y <= max_y:
+                            best_r = min(best_r, t)
+                elif not is_x and abs(dy) > 1e-9:
+                    t = (coord - robot_y) / dy
+                    if t > 0:
+                        hit_x = robot_x + t * dx
+                        if min_x <= hit_x <= max_x:
+                            best_r = min(best_r, t)
+            ranges.append(max(0.12, best_r))
+        return ranges
+
+    def test_no_scan_returns_none(self, web_node):
+        data, w, h, res = self._make_box_map()
+        result = web_node.localize_on_saved_map(data, w, h, res, 0.0, 0.0)
+        assert result is None
+
+    def test_localizes_center_of_box(self, web_node):
+        """Robot at center of box should be localized near center."""
+        size, res = 50, 0.05
+        data, w, h, _ = self._make_box_map(size, res)
+        origin = -(size * res / 2.0)
+        # Robot at world (0, 0) = center of the box, facing right
+        web_node.scan_ranges = self._make_scan_for_box(0.0, 0.0, 0.0, size, res)
+        web_node.scan_angle_min = 0.0
+        web_node.scan_angle_increment = 2 * math.pi / 360
+        result = web_node.localize_on_saved_map(data, w, h, res, origin, origin)
+        assert result is not None
+        x, y, yaw, score, total = result
+        # Should be near center (0, 0) within 0.4m
+        assert abs(x) < 0.4, f"x={x} too far from center"
+        assert abs(y) < 0.4, f"y={y} too far from center"
+        assert score > total * 0.3, f"score {score}/{total} too low"
+
+    def test_localizes_off_center(self, web_node):
+        """Robot at (0.5, 0.3) in box should be localized reasonably close."""
+        size, res = 60, 0.05
+        data, w, h, _ = self._make_box_map(size, res)
+        origin = -(size * res / 2.0)
+        rx, ry = 0.5, 0.3
+        web_node.scan_ranges = self._make_scan_for_box(rx, ry, 0.5, size, res)
+        web_node.scan_angle_min = 0.5
+        web_node.scan_angle_increment = 2 * math.pi / 360
+        result = web_node.localize_on_saved_map(data, w, h, res, origin, origin)
+        assert result is not None
+        x, y, yaw, score, total = result
+        # Symmetric box may have multiple valid matches; check distance is reasonable
+        dist = math.sqrt((x - rx) ** 2 + (y - ry) ** 2)
+        assert dist < 1.0, f"Localized at ({x:.2f},{y:.2f}), {dist:.2f}m from ({rx},{ry})"
+        assert score > total * 0.25
+
+    def test_score_reflects_match_quality(self, web_node):
+        """A well-placed scan should have high score."""
+        size, res = 40, 0.05
+        data, w, h, _ = self._make_box_map(size, res)
+        origin = -(size * res / 2.0)
+        web_node.scan_ranges = self._make_scan_for_box(0.0, 0.0, 0.0, size, res)
+        web_node.scan_angle_min = 0.0
+        web_node.scan_angle_increment = 2 * math.pi / 360
+        result = web_node.localize_on_saved_map(data, w, h, res, origin, origin)
+        assert result is not None
+        _, _, _, score, total = result
+        # With a perfect scan match, score should be at least 50% of total
+        assert score >= total * 0.3
+
+
+class TestCoveragePlannerLocalizationOffset:
+    """Test the map↔odom offset in _get_robot_pose_map."""
+
+    @pytest.fixture
+    def coverage(self):
+        planner = AdaptiveCoveragePlanner()
+        planner.robot_x = 0.0
+        planner.robot_y = 0.0
+        planner.robot_yaw = 0.0
+        planner.odom_received = True
+        planner._map_odom_offset = None
+        planner._tf_pose_warned = False
+        # Make TF fail
+        planner.tf_buffer = MagicMock()
+        planner.tf_buffer.lookup_transform.side_effect = Exception("no TF")
+        return planner
+
+    def test_fallback_without_offset(self, coverage):
+        """Without localization offset, fallback returns raw odom."""
+        coverage.robot_x = 1.0
+        coverage.robot_y = 2.0
+        coverage.robot_yaw = 0.5
+        x, y, yaw = coverage._get_robot_pose_map()
+        assert abs(x - 1.0) < 0.01
+        assert abs(y - 2.0) < 0.01
+        assert abs(yaw - 0.5) < 0.01
+
+    def test_fallback_with_offset(self, coverage):
+        """With localization offset, fallback applies it to odom."""
+        coverage.robot_x = 0.1
+        coverage.robot_y = 0.2
+        coverage.robot_yaw = 0.0
+        coverage._map_odom_offset = (3.0, 4.0, math.pi / 4)
+        x, y, yaw = coverage._get_robot_pose_map()
+        assert abs(x - 3.1) < 0.01
+        assert abs(y - 4.2) < 0.01
+        assert abs(yaw - math.pi / 4) < 0.01
+
+    def test_offset_updated_by_callback(self, coverage):
+        """_on_robot_map_pose should compute offset from localized - odom."""
+        coverage.robot_x = 0.5
+        coverage.robot_y = 0.5
+        coverage.robot_yaw = 0.0
+        msg = MagicMock()
+        msg.pose.position.x = 3.5
+        msg.pose.position.y = 2.5
+        # yaw = pi/2 via quaternion
+        msg.pose.orientation.w = math.cos(math.pi / 4)
+        msg.pose.orientation.z = math.sin(math.pi / 4)
+        msg.pose.orientation.x = 0.0
+        msg.pose.orientation.y = 0.0
+        coverage._on_robot_map_pose(msg)
+        assert coverage._map_odom_offset is not None
+        dx, dy, dyaw = coverage._map_odom_offset
+        assert abs(dx - 3.0) < 0.01
+        assert abs(dy - 2.0) < 0.01
+        assert abs(dyaw - math.pi / 2) < 0.15
+
+    def test_tf_success_ignores_offset(self, coverage):
+        """When TF works, offset is not applied."""
+        coverage._map_odom_offset = (10.0, 10.0, 1.0)
+        # Make TF succeed
+        tf_mock = MagicMock()
+        tf_mock.transform.translation.x = 5.0
+        tf_mock.transform.translation.y = 6.0
+        tf_mock.transform.rotation.w = 1.0
+        tf_mock.transform.rotation.x = 0.0
+        tf_mock.transform.rotation.y = 0.0
+        tf_mock.transform.rotation.z = 0.0
+        coverage.tf_buffer.lookup_transform.side_effect = None
+        coverage.tf_buffer.lookup_transform.return_value = tf_mock
+        x, y, yaw = coverage._get_robot_pose_map()
+        assert abs(x - 5.0) < 0.01
+        assert abs(y - 6.0) < 0.01
