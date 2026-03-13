@@ -64,6 +64,7 @@
 ###############################################################################
 """
 
+import json
 import math
 import numpy as np
 import rclpy
@@ -165,6 +166,9 @@ class AdaptiveCoveragePlanner(Node):
         self.control_sub = self.create_subscription(
             String, 'coverage_control', self.control_callback, 10)
 
+        # No-go zones subscriber
+        self.create_subscription(String, 'no_go_zones', self._on_no_go_zones, 10)
+
         # ===================== Publishers =====================
         self.coverage_complete_pub = self.create_publisher(Bool, 'coverage_complete', 10)
         
@@ -190,6 +194,7 @@ class AdaptiveCoveragePlanner(Node):
         self.map_array = None
         self.map_info = None
         self.inflated_map = None
+        self._no_go_zones = []
         
         self.waypoints = []
         self.current_waypoint_idx = 0
@@ -556,6 +561,13 @@ class AdaptiveCoveragePlanner(Node):
         self.map_info = msg.info
         self.map_array = np.array(msg.data, dtype=np.int8).reshape((h, w))
 
+    def _on_no_go_zones(self, msg: String):
+        """Receive no-go zones from the web app."""
+        try:
+            self._no_go_zones = json.loads(msg.data)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
     def exploration_complete_callback(self, msg: Bool):
         """Triggered when exploration finishes."""
         if msg.data and self.auto_start and not self.mission_started:
@@ -740,6 +752,27 @@ class AdaptiveCoveragePlanner(Node):
         """Inflate obstacles by robot radius for safe navigation."""
         # Create obstacle mask
         obstacle_mask = self.map_array >= OCCUPIED_THRESHOLD
+        
+        # Apply no-go zones as obstacles before inflation
+        if self._no_go_zones and self.map_info:
+            res = self.map_info.resolution
+            ox = self.map_info.origin.position.x
+            oy = self.map_info.origin.position.y
+            h, w = self.map_array.shape
+            for zone in self._no_go_zones:
+                try:
+                    zx1, zy1 = float(zone["x1"]), float(zone["y1"])
+                    zx2, zy2 = float(zone["x2"]), float(zone["y2"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                c1 = int((min(zx1, zx2) - ox) / res)
+                c2 = int((max(zx1, zx2) - ox) / res)
+                r1 = int((min(zy1, zy2) - oy) / res)
+                r2 = int((max(zy1, zy2) - oy) / res)
+                r1, r2 = max(0, r1), min(h, r2 + 1)
+                c1, c2 = max(0, c1), min(w, c2 + 1)
+                obstacle_mask[r1:r2, c1:c2] = True
+            self.get_logger().info(f'Applied {len(self._no_go_zones)} no-go zone(s) to obstacle mask')
         
         # Calculate inflation in cells
         inflation_cells = int(self.robot_radius / self.map_info.resolution) + 3

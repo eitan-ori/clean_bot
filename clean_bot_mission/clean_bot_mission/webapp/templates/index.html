@@ -233,6 +233,16 @@ main{
 }
 .theme-toggle:hover{background:var(--card-hover)}
 
+/* ── No-Go Zones ──────────────────────────────── */
+.nogo-active{outline:3px solid var(--red);outline-offset:-3px;cursor:crosshair!important}
+.nogo-toolbar{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin-top:.4rem}
+.nogo-toolbar .btn.active{background:var(--red);color:#fff}
+.nogo-zone-list{max-height:120px;overflow-y:auto;font-size:.78rem;margin-top:.3rem}
+.nogo-zone-item{display:flex;align-items:center;gap:.4rem;padding:.2rem .4rem;border-radius:4px;background:var(--input-bg)}
+.nogo-zone-item+.nogo-zone-item{margin-top:.2rem}
+.nogo-zone-item .nogo-del{background:none;border:none;color:var(--red);cursor:pointer;font-size:.9rem;padding:0 .2rem}
+.nogo-zone-item .nogo-label{flex:1;color:var(--text-dim)}
+
 /* ── Light theme ── */
 html.light{
   --bg:#f0f2f5;--card:#ffffff;--card-hover:#f8f9fa;
@@ -455,11 +465,18 @@ html.light .toast{background:#fff;color:var(--text)}
       <span class="map-legend-item"><span class="legend-swatch" style="background:#dc3232"></span> <span data-i18n="obstacle">Obstacle</span></span>
       <span class="map-legend-item"><span class="legend-swatch" style="background:var(--swatch-unknown)"></span> <span data-i18n="unknown">Unknown</span></span>
       <span class="map-legend-item"><span class="legend-swatch" style="background:#4a9eff"></span> <span data-i18n="robot">Robot</span></span>
+      <span class="map-legend-item"><span class="legend-swatch" style="background:rgba(239,68,68,0.35);border:1px dashed #ef4444"></span> <span data-i18n="no_go">No-Go</span></span>
     </div>
     <div class="map-toggles">
       <label><input type="checkbox" id="heatmapToggle"> <span data-i18n="heatmap_overlay">Heatmap Overlay</span></label>
       <label><input type="checkbox" id="trailToggle" checked> <span data-i18n="path_trail">Path Trail</span></label>
     </div>
+    <div class="nogo-toolbar">
+      <button class="btn btn-sm" id="nogoDrawBtn" title="Draw no-go zone">🚫 <span data-i18n="draw_no_go_zone">Draw No-Go Zone</span></button>
+      <button class="btn btn-sm btn-gray" id="nogoClearBtn" title="Clear all no-go zones"><span data-i18n="clear_all">Clear All</span></button>
+      <span id="nogoCount" style="font-size:.78rem;color:var(--text-dim)"></span>
+    </div>
+    <div class="nogo-zone-list" id="nogoZoneList"></div>
   </div>
 
   <!-- Right: Panels -->
@@ -659,6 +676,7 @@ socket.on('connect', () => {
   fetchSchedules();
   fetchStats();
   fetchTrail();
+  fetchNoGoZones();
   const savedRate = localStorage.getItem('cb_mapRate');
   if (savedRate) socket.emit('set_map_rate', {rate: parseFloat(savedRate)});
 });
@@ -714,6 +732,7 @@ socket.on('map_update', data => {
   document.getElementById('mapRes').textContent = data.resolution.toFixed(3);
   document.getElementById('mapDims').textContent = data.width + ' × ' + data.height;
   document.getElementById('mapCount').textContent = data.map_updates;
+  if (data.no_go_zones) { noGoZones = data.no_go_zones; renderNoGoZones(); }
 });
 
 function drawMap(data) {
@@ -759,6 +778,41 @@ function drawMap(data) {
         ctx.moveTo(px, py);
       }
     }
+  }
+
+  // No-go zones
+  const zones = data.no_go_zones || noGoZones;
+  if (zones.length > 0 && data.resolution > 0) {
+    for (const z of zones) {
+      const cx1 = ((z.x1 - data.origin_x) / data.resolution) * sx;
+      const cy1 = (data.height - 1 - (z.y1 - data.origin_y) / data.resolution) * sy;
+      const cx2 = ((z.x2 - data.origin_x) / data.resolution) * sx;
+      const cy2 = (data.height - 1 - (z.y2 - data.origin_y) / data.resolution) * sy;
+      const rx = Math.min(cx1, cx2), ry = Math.min(cy1, cy2);
+      const rw = Math.abs(cx2 - cx1), rh = Math.abs(cy2 - cy1);
+      ctx.fillStyle = 'rgba(239,68,68,0.25)';
+      ctx.fillRect(rx, ry, rw, rh);
+      ctx.strokeStyle = 'rgba(239,68,68,0.8)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 3]);
+      ctx.strokeRect(rx, ry, rw, rh);
+      ctx.setLineDash([]);
+    }
+  }
+
+  // Active drawing rectangle
+  if (nogoStart && nogoCurrent) {
+    const rx = Math.min(nogoStart.cx, nogoCurrent.cx);
+    const ry = Math.min(nogoStart.cy, nogoCurrent.cy);
+    const rw = Math.abs(nogoCurrent.cx - nogoStart.cx);
+    const rh = Math.abs(nogoCurrent.cy - nogoStart.cy);
+    ctx.fillStyle = 'rgba(239,68,68,0.15)';
+    ctx.fillRect(rx, ry, rw, rh);
+    ctx.strokeStyle = 'rgba(239,68,68,0.9)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeRect(rx, ry, rw, rh);
+    ctx.setLineDash([]);
   }
 
   // Robot circle
@@ -827,7 +881,7 @@ function drawMap(data) {
 
 /* ── Round 14: Map click-to-navigate ───────────── */
 canvas.addEventListener('click', e => {
-  if (!lastMapData) return;
+  if (!lastMapData || nogoDrawing) return;
   const rect = canvas.getBoundingClientRect();
   const scaleX = canvas.width / rect.width;
   const scaleY = canvas.height / rect.height;
@@ -1333,6 +1387,130 @@ function fetchTrail() {
   }).catch(() => {});
 }
 
+/* ── No-Go Zones ──────────────────────────────── */
+let noGoZones = [];
+let nogoDrawing = false;
+let nogoStart = null;
+let nogoCurrent = null;
+
+const nogoDrawBtn = document.getElementById('nogoDrawBtn');
+const nogoClearBtn = document.getElementById('nogoClearBtn');
+const nogoCountEl = document.getElementById('nogoCount');
+const nogoListEl = document.getElementById('nogoZoneList');
+
+nogoDrawBtn.addEventListener('click', () => {
+  nogoDrawing = !nogoDrawing;
+  nogoDrawBtn.classList.toggle('active', nogoDrawing);
+  canvas.classList.toggle('nogo-active', nogoDrawing);
+  nogoStart = null;
+  nogoCurrent = null;
+});
+
+canvas.addEventListener('mousedown', e => {
+  if (!nogoDrawing || !lastMapData) return;
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  nogoStart = {cx: (e.clientX - rect.left) * scaleX, cy: (e.clientY - rect.top) * scaleY};
+  nogoCurrent = {...nogoStart};
+});
+
+canvas.addEventListener('mousemove', e => {
+  if (!nogoStart) return;
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  nogoCurrent = {cx: (e.clientX - rect.left) * scaleX, cy: (e.clientY - rect.top) * scaleY};
+  if (lastMapData && mapImg.complete) drawMap(lastMapData);
+});
+
+canvas.addEventListener('mouseup', e => {
+  if (!nogoStart || !nogoCurrent || !lastMapData) return;
+  const data = lastMapData;
+  const sx = canvas.width / data.width;
+  const sy = canvas.height / data.height;
+  // Convert canvas coords to world coords
+  function canvasToWorld(cx, cy) {
+    const gx = cx / sx;
+    const gy = (data.height - 1) - (cy / sy);
+    return {x: data.origin_x + gx * data.resolution, y: data.origin_y + gy * data.resolution};
+  }
+  const p1 = canvasToWorld(nogoStart.cx, nogoStart.cy);
+  const p2 = canvasToWorld(nogoCurrent.cx, nogoCurrent.cy);
+  // Minimum 5cm zone
+  if (Math.abs(p1.x - p2.x) < 0.05 && Math.abs(p1.y - p2.y) < 0.05) {
+    nogoStart = null; nogoCurrent = null; return;
+  }
+  fetch('/api/no_go_zones', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y})
+  }).then(r => r.json()).then(d => {
+    if (d.ok && d.zone) { noGoZones.push(d.zone); renderNoGoZones(); toast(t('nogo_zone_added')); }
+    else toast(d.error || t('failed'));
+  }).catch(() => toast(t('failed')));
+  nogoStart = null; nogoCurrent = null;
+});
+
+// Touch support for mobile drawing
+canvas.addEventListener('touchstart', e => {
+  if (!nogoDrawing || !lastMapData) return;
+  e.preventDefault();
+  const touch = e.touches[0];
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  nogoStart = {cx: (touch.clientX - rect.left) * scaleX, cy: (touch.clientY - rect.top) * scaleY};
+  nogoCurrent = {...nogoStart};
+}, {passive: false});
+
+canvas.addEventListener('touchmove', e => {
+  if (!nogoStart) return;
+  e.preventDefault();
+  const touch = e.touches[0];
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  nogoCurrent = {cx: (touch.clientX - rect.left) * scaleX, cy: (touch.clientY - rect.top) * scaleY};
+  if (lastMapData && mapImg.complete) drawMap(lastMapData);
+}, {passive: false});
+
+canvas.addEventListener('touchend', e => {
+  if (!nogoStart || !nogoCurrent || !lastMapData) return;
+  // Reuse the mouseup logic: fire a synthetic mouseup
+  canvas.dispatchEvent(new MouseEvent('mouseup', {clientX: 0, clientY: 0}));
+});
+
+nogoClearBtn.addEventListener('click', () => {
+  if (!noGoZones.length) return;
+  fetch('/api/no_go_zones/clear', {method: 'POST'}).then(r => r.json()).then(d => {
+    if (d.ok) { noGoZones = []; renderNoGoZones(); toast(t('nogo_zones_cleared')); }
+  }).catch(() => toast(t('failed')));
+});
+
+function renderNoGoZones() {
+  nogoCountEl.textContent = noGoZones.length ? '(' + noGoZones.length + ')' : '';
+  if (!noGoZones.length) { nogoListEl.innerHTML = ''; return; }
+  nogoListEl.innerHTML = noGoZones.map((z, i) => {
+    const label = z.name || (t('zone') + ' ' + (i + 1));
+    return '<div class="nogo-zone-item"><span class="nogo-label">🚫 ' + esc(label) + '</span>' +
+      '<button class="nogo-del" onclick="deleteNoGoZone(\'' + esc(z.id) + '\')" title="' + t('delete') + '">✕</button></div>';
+  }).join('');
+}
+
+window.deleteNoGoZone = function(id) {
+  fetch('/api/no_go_zones/' + id, {method: 'DELETE'}).then(r => r.json()).then(d => {
+    if (d.ok) { noGoZones = noGoZones.filter(z => z.id !== id); renderNoGoZones(); toast(t('nogo_zone_deleted')); }
+  }).catch(() => toast(t('failed')));
+};
+
+function fetchNoGoZones() {
+  fetch('/api/no_go_zones').then(r => r.json()).then(zones => {
+    noGoZones = zones || [];
+    renderNoGoZones();
+  }).catch(() => {});
+}
+
 /* ── Round 36: Internationalization (i18n) ─────── */
 const LANG = {
   en: {
@@ -1346,7 +1524,7 @@ const LANG = {
     schedule:'Schedule',add:'Add',diagnostics:'Diagnostics',
     settings:'⚙️ Settings',map_update_rate:'Map Update Rate',default_drive_speed:'Default Drive Speed (m/s)',
     notification_sound:'Notification Sound',theme:'Theme',language:'Language',save_settings:'Save Settings',
-    free:'Free',obstacle:'Obstacle',unknown:'Unknown',robot:'Robot',
+    free:'Free',obstacle:'Obstacle',unknown:'Unknown',robot:'Robot',no_go:'No-Go',
     heatmap_overlay:'Heatmap Overlay',path_trail:'Path Trail',
     valid_readings:'Valid Readings',linear_vel:'Linear Vel',angular_vel:'Angular Vel',
     cumulative_dist:'Cumulative Dist',socket_status:'Socket Status',latency:'Latency',
@@ -1368,6 +1546,9 @@ const LANG = {
     emergency_activated:'Emergency stop activated!',navigating_to:'Navigating to',
     nav_failed:'Navigation failed',map_exported:'Map exported',no_map_export:'No map to export',
     failed:'Failed',
+    draw_no_go_zone:'Draw No-Go Zone',clear_all:'Clear All',zone:'Zone',
+    nogo_zone_added:'No-go zone added',nogo_zone_deleted:'No-go zone deleted',
+    nogo_zones_cleared:'All no-go zones cleared',
   },
   he: {
     emergency_stop:'עצירת חירום',status:'סטטוס',mission_control:'בקרת משימה',
@@ -1380,7 +1561,7 @@ const LANG = {
     schedule:'תזמון',add:'הוסף',diagnostics:'אבחון',
     settings:'⚙️ הגדרות',map_update_rate:'קצב עדכון מפה',default_drive_speed:'מהירות נהיגה (מ/ש)',
     notification_sound:'צליל התראה',theme:'ערכת נושא',language:'שפה',save_settings:'שמור הגדרות',
-    free:'פנוי',obstacle:'מכשול',unknown:'לא ידוע',robot:'רובוט',
+    free:'פנוי',obstacle:'מכשול',unknown:'לא ידוע',robot:'רובוט',no_go:'אסור',
     heatmap_overlay:'שכבת חום',path_trail:'מסלול',
     valid_readings:'קריאות תקינות',linear_vel:'מהירות קווית',angular_vel:'מהירות זוויתית',
     cumulative_dist:'מרחק מצטבר',socket_status:'סטטוס חיבור',latency:'השהיה',
@@ -1402,6 +1583,9 @@ const LANG = {
     emergency_activated:'עצירת חירום הופעלה!',navigating_to:'מנווט אל',
     nav_failed:'הניווט נכשל',map_exported:'המפה יוצאה',no_map_export:'אין מפה לייצוא',
     failed:'נכשל',
+    draw_no_go_zone:'סמן אזור אסור',clear_all:'נקה הכל',zone:'אזור',
+    nogo_zone_added:'אזור אסור נוסף',nogo_zone_deleted:'אזור אסור הוסר',
+    nogo_zones_cleared:'כל האזורים האסורים נוקו',
   }
 };
 let currentLang = localStorage.getItem('cb_lang') || 'en';

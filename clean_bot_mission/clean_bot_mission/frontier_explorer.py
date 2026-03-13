@@ -31,6 +31,7 @@ Topics Published:
 Author: Clean Bot Team
 """
 
+import json
 import math
 import time
 import numpy as np
@@ -103,6 +104,9 @@ class FrontierExplorer(Node):
         self.control_sub = self.create_subscription(
             String, 'exploration_control', self.control_callback, 10)
 
+        # No-go zones subscriber
+        self.create_subscription(String, 'no_go_zones', self._on_no_go_zones, 10)
+
         # ===================== Publishers =====================
         self.exploration_complete_pub = self.create_publisher(
             Bool, 'exploration_complete', 10)
@@ -116,6 +120,7 @@ class FrontierExplorer(Node):
         self.map_data = None
         self.map_info = None
         self.map_array = None
+        self._no_go_zones = []
         
         self.robot_pose = None  # Best-effort (x, y) in map frame
         self.current_goal = None
@@ -257,6 +262,25 @@ class FrontierExplorer(Node):
             self.get_logger().info(f'📍 First map received: {msg.info.width}x{msg.info.height}')
             self.get_logger().info('   Auto-starting exploration...')
 
+    def _on_no_go_zones(self, msg: String):
+        """Receive no-go zones from the web app."""
+        try:
+            self._no_go_zones = json.loads(msg.data)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    def _point_in_no_go_zone(self, x, y):
+        """Check if a world coordinate falls inside any no-go zone."""
+        for zone in self._no_go_zones:
+            try:
+                zx1, zx2 = sorted([float(zone["x1"]), float(zone["x2"])])
+                zy1, zy2 = sorted([float(zone["y1"]), float(zone["y2"])])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if zx1 <= x <= zx2 and zy1 <= y <= zy2:
+                return True
+        return False
+
     def exploration_loop(self):
         """Main exploration state machine."""
         # Only explore if in EXPLORING state
@@ -392,8 +416,14 @@ class FrontierExplorer(Node):
         best_score = float('-inf')
         skipped_failed = 0
         skipped_too_close = 0
+        skipped_nogo = 0
         
         for frontier in self.frontiers:
+            # Skip frontiers inside no-go zones
+            if self._point_in_no_go_zone(frontier['x'], frontier['y']):
+                skipped_nogo += 1
+                continue
+
             # Skip if we've failed to reach this area before
             key = (round(frontier['x'], 1), round(frontier['y'], 1))
             if key in self.failed_goals:

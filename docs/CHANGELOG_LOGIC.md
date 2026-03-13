@@ -94,3 +94,40 @@ WAITING_FOR_SCAN → EXPLORING → WAITING_FOR_CLEAN → COVERAGE → RETURNING 
 
 ### Removed commands
 - `/coverage` — merged into `/clean` (which now always does map-based coverage)
+
+---
+
+## Feature: No-Go Zones (Banned Areas)
+
+### Overview
+Users can draw rectangular no-go zones on the live map. The robot will not enter these areas during scanning or cleaning.
+
+### Frontend
+- **Draw mode:** Toggle button ("🚫 Draw No-Go Zone") activates crosshair cursor. Click-and-drag draws a rectangle.
+- **Zone rendering:** Red semi-transparent rectangles with dashed borders overlaid on the map canvas.
+- **Zone list:** Below the map, showing all zones with delete buttons.
+- **Clear all:** Button to remove all zones at once.
+- **Touch support:** Works on mobile with touchstart/touchmove/touchend.
+- **Map legend:** Added "No-Go" swatch.
+- **i18n:** English and Hebrew translations.
+
+### Backend
+- **Storage:** No-go zones saved to `no_go_zones.json` (persists across restarts).
+- **API:** `GET/POST /api/no_go_zones`, `DELETE /api/no_go_zones/<id>`, `POST /api/no_go_zones/clear`.
+- **ROS publishing:** Zones published on `/no_go_zones` topic (String/JSON) every 10 seconds.
+- **Map data:** Zones included in `map_update` WebSocket events for frontend rendering.
+
+### Coverage Planner (adaptive_coverage.py)
+- Subscribes to `/no_go_zones` topic.
+- Before generating coverage path, no-go zone rectangles are converted to grid cells and marked as occupied in the obstacle mask (before inflation). This ensures the robot's path never enters the zone.
+
+### Frontier Explorer (frontier_explorer.py)
+- Subscribes to `/no_go_zones` topic.
+- `select_best_frontier()` skips any frontier whose centroid falls inside a no-go zone.
+
+### Files Changed
+- `clean_bot_mission/clean_bot_mission/webapp/app.py` — Zone storage, API, ROS publisher
+- `clean_bot_mission/clean_bot_mission/webapp/templates/index.html` — Drawing UI, rendering, CSS, i18n
+- `clean_bot_mission/clean_bot_mission/adaptive_coverage.py` — Zone subscription, obstacle injection
+- `clean_bot_mission/clean_bot_mission/frontier_explorer.py` — Zone subscription, frontier filtering
+- `clean_bot_mission/test/test_webapp.py` — 13 new tests for zone API and HTML

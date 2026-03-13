@@ -65,6 +65,7 @@ WEBAPP_DIR = Path(__file__).parent
 SAVED_ROOMS_DIR = WEBAPP_DIR / "saved_rooms"
 SAVED_ROOMS_DIR.mkdir(exist_ok=True)
 SCHEDULES_FILE = WEBAPP_DIR / "schedules.json"
+NOGO_ZONES_FILE = WEBAPP_DIR / "no_go_zones.json"
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -168,6 +169,10 @@ class WebBridgeNode(Node):
         self._tf_healthy = False
         self._missed_updates = 0
 
+        # ── No-go zones ──
+        self._no_go_zones = self._load_no_go_zones()
+        self._nogo_pub = self.create_publisher(String, "no_go_zones", 10)
+
         # ── Nav2 action client (Round 14) ──
         self._nav_client = None
         if HAS_NAV2:
@@ -181,6 +186,8 @@ class WebBridgeNode(Node):
         self.create_timer(60.0, self._check_schedules)
         # ── Round 40: Scan Hz calculator (every 1s) ──
         self.create_timer(1.0, self._calc_scan_hz)
+        # ── No-go zones: re-publish periodically (10s) ──
+        self.create_timer(10.0, self._publish_no_go_zones)
 
         self.get_logger().info("Web control panel ROS bridge started")
 
@@ -432,6 +439,7 @@ class WebBridgeNode(Node):
             "obstacles": obs_world,
             "map_updates": self.map_update_counter,
             "heatmap_b64": heatmap_b64,
+            "no_go_zones": self._no_go_zones,
         }
 
     def _emit_map(self):
@@ -644,6 +652,55 @@ class WebBridgeNode(Node):
             "rooms_cleaned": self.rooms_cleaned,
             "total_distance": round(self.total_distance_traveled, 2),
         }
+
+    # ── No-go zones ──────────────────────────────────────────────
+    @staticmethod
+    def _load_no_go_zones():
+        if NOGO_ZONES_FILE.exists():
+            try:
+                with open(NOGO_ZONES_FILE) as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return []
+
+    def _save_no_go_zones(self):
+        try:
+            with open(NOGO_ZONES_FILE, "w") as f:
+                json.dump(self._no_go_zones, f)
+        except Exception as e:
+            self.get_logger().warn(f"Failed to save no-go zones: {e}")
+
+    def _publish_no_go_zones(self):
+        """Publish zones to ROS so coverage/explorer nodes can respect them."""
+        msg = String()
+        msg.data = json.dumps(self._no_go_zones)
+        self._nogo_pub.publish(msg)
+
+    def add_no_go_zone(self, zone):
+        """Add a no-go zone. zone = {x1, y1, x2, y2, name?}."""
+        import uuid
+        zone["id"] = str(uuid.uuid4())[:8]
+        self._no_go_zones.append(zone)
+        self._save_no_go_zones()
+        self._publish_no_go_zones()
+        return zone
+
+    def remove_no_go_zone(self, zone_id):
+        """Remove a no-go zone by id."""
+        before = len(self._no_go_zones)
+        self._no_go_zones = [z for z in self._no_go_zones if z.get("id") != zone_id]
+        if len(self._no_go_zones) < before:
+            self._save_no_go_zones()
+            self._publish_no_go_zones()
+            return True
+        return False
+
+    def clear_no_go_zones(self):
+        """Remove all no-go zones."""
+        self._no_go_zones = []
+        self._save_no_go_zones()
+        self._publish_no_go_zones()
 
     @staticmethod
     def list_rooms():
@@ -961,6 +1018,53 @@ def api_delete_schedule(schedule_id):
     with ros_node._schedule_lock:
         ros_node._schedules = [s for s in ros_node._schedules if s.get("id") != schedule_id]
     ros_node._save_schedules()
+    return jsonify({"ok": True})
+
+
+# ── No-Go Zones API ──────────────────────────────────────────────
+@app.route("/api/no_go_zones", methods=["GET"])
+def api_get_no_go_zones():
+    if ros_node is None:
+        return jsonify({"error": "ROS not connected"}), 503
+    return jsonify(ros_node._no_go_zones)
+
+
+@app.route("/api/no_go_zones", methods=["POST"])
+def api_add_no_go_zone():
+    if ros_node is None:
+        return jsonify({"error": "ROS not connected"}), 503
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "No data"}), 400
+    for key in ("x1", "y1", "x2", "y2"):
+        if key not in data:
+            return jsonify({"error": f"Missing '{key}'"}), 400
+        try:
+            data[key] = float(data[key])
+        except (TypeError, ValueError):
+            return jsonify({"error": f"Invalid '{key}'"}), 400
+    zone = ros_node.add_no_go_zone({
+        "x1": data["x1"], "y1": data["y1"],
+        "x2": data["x2"], "y2": data["y2"],
+        "name": str(data.get("name", ""))[:60],
+    })
+    return jsonify({"ok": True, "zone": zone})
+
+
+@app.route("/api/no_go_zones/<zone_id>", methods=["DELETE"])
+def api_delete_no_go_zone(zone_id):
+    if ros_node is None:
+        return jsonify({"error": "ROS not connected"}), 503
+    if ros_node.remove_no_go_zone(zone_id):
+        return jsonify({"ok": True})
+    return jsonify({"error": "Zone not found"}), 404
+
+
+@app.route("/api/no_go_zones/clear", methods=["POST"])
+def api_clear_no_go_zones():
+    if ros_node is None:
+        return jsonify({"error": "ROS not connected"}), 503
+    ros_node.clear_no_go_zones()
     return jsonify({"ok": True})
 
 

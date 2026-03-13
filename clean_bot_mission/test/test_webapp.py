@@ -158,12 +158,39 @@ def flask_client(temp_rooms_dir):
     original_sched_file = webapp_module.SCHEDULES_FILE
     webapp_module.SCHEDULES_FILE = temp_rooms_dir / "schedules.json"
 
+    # Patch NOGO_ZONES_FILE
+    original_nogo_file = webapp_module.NOGO_ZONES_FILE
+    webapp_module.NOGO_ZONES_FILE = temp_rooms_dir / "no_go_zones.json"
+
+    # Mock no-go zone methods on node
+    mock_node._no_go_zones = []
+    mock_node._save_no_go_zones = MagicMock()
+    mock_node._publish_no_go_zones = MagicMock()
+
+    def _add_zone(zone):
+        import uuid
+        zone["id"] = str(uuid.uuid4())[:8]
+        mock_node._no_go_zones.append(zone)
+        return zone
+    mock_node.add_no_go_zone = MagicMock(side_effect=_add_zone)
+
+    def _remove_zone(zone_id):
+        before = len(mock_node._no_go_zones)
+        mock_node._no_go_zones = [z for z in mock_node._no_go_zones if z.get("id") != zone_id]
+        return len(mock_node._no_go_zones) < before
+    mock_node.remove_no_go_zone = MagicMock(side_effect=_remove_zone)
+
+    def _clear_zones():
+        mock_node._no_go_zones = []
+    mock_node.clear_no_go_zones = MagicMock(side_effect=_clear_zones)
+
     with webapp_module.app.test_client() as client:
         yield client, mock_node
 
     webapp_module.ros_node = original_node
     webapp_module.SAVED_ROOMS_DIR = original_rooms_dir
     webapp_module.SCHEDULES_FILE = original_sched_file
+    webapp_module.NOGO_ZONES_FILE = original_nogo_file
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -966,3 +993,106 @@ class TestRenameRoomOverwrite:
         with open(temp_rooms_dir / "room_b.json") as f:
             d = json.load(f)
         assert d["name"] == "room_b"
+
+
+# ════════════════════════════════════════════════════════════════════
+# Test: No-Go Zones API
+# ════════════════════════════════════════════════════════════════════
+
+class TestNoGoZonesAPI:
+    def test_get_empty_zones(self, flask_client):
+        client, _ = flask_client
+        resp = client.get('/api/no_go_zones')
+        assert resp.status_code == 200
+        assert resp.get_json() == []
+
+    def test_add_zone(self, flask_client):
+        client, node = flask_client
+        resp = client.post('/api/no_go_zones',
+                           json={"x1": 1.0, "y1": 2.0, "x2": 3.0, "y2": 4.0})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["ok"]
+        assert "id" in data["zone"]
+        assert data["zone"]["x1"] == 1.0
+        node.add_no_go_zone.assert_called_once()
+
+    def test_add_zone_missing_field(self, flask_client):
+        client, _ = flask_client
+        resp = client.post('/api/no_go_zones', json={"x1": 1.0, "y1": 2.0})
+        assert resp.status_code == 400
+
+    def test_add_zone_invalid_value(self, flask_client):
+        client, _ = flask_client
+        resp = client.post('/api/no_go_zones',
+                           json={"x1": "abc", "y1": 2.0, "x2": 3.0, "y2": 4.0})
+        assert resp.status_code == 400
+
+    def test_add_zone_with_name(self, flask_client):
+        client, _ = flask_client
+        resp = client.post('/api/no_go_zones',
+                           json={"x1": 0, "y1": 0, "x2": 1, "y2": 1, "name": "Under table"})
+        data = resp.get_json()
+        assert data["ok"]
+        assert data["zone"]["name"] == "Under table"
+
+    def test_delete_zone(self, flask_client):
+        client, node = flask_client
+        # Add a zone first
+        resp = client.post('/api/no_go_zones',
+                           json={"x1": 0, "y1": 0, "x2": 1, "y2": 1})
+        zone_id = resp.get_json()["zone"]["id"]
+        # Delete it
+        resp = client.delete(f'/api/no_go_zones/{zone_id}')
+        assert resp.status_code == 200
+        assert resp.get_json()["ok"]
+
+    def test_delete_nonexistent_zone(self, flask_client):
+        client, _ = flask_client
+        resp = client.delete('/api/no_go_zones/nonexistent')
+        assert resp.status_code == 404
+
+    def test_clear_zones(self, flask_client):
+        client, node = flask_client
+        # Add two zones
+        client.post('/api/no_go_zones', json={"x1": 0, "y1": 0, "x2": 1, "y2": 1})
+        client.post('/api/no_go_zones', json={"x1": 2, "y1": 2, "x2": 3, "y2": 3})
+        assert len(node._no_go_zones) == 2
+        # Clear all
+        resp = client.post('/api/no_go_zones/clear')
+        assert resp.status_code == 200
+        assert resp.get_json()["ok"]
+        assert len(node._no_go_zones) == 0
+
+    def test_get_zones_after_add(self, flask_client):
+        client, node = flask_client
+        client.post('/api/no_go_zones', json={"x1": 1, "y1": 1, "x2": 2, "y2": 2})
+        resp = client.get('/api/no_go_zones')
+        zones = resp.get_json()
+        assert len(zones) == 1
+        assert zones[0]["x1"] == 1.0
+
+    def test_zones_no_ros(self, flask_client):
+        client, _ = flask_client
+        webapp_module.ros_node = None
+        resp = client.get('/api/no_go_zones')
+        assert resp.status_code == 503
+
+
+class TestNoGoZonesHTML:
+    def test_nogo_button_in_page(self, flask_client):
+        client, _ = flask_client
+        resp = client.get('/')
+        assert b'nogoDrawBtn' in resp.data
+        assert b'draw_no_go_zone' in resp.data
+
+    def test_nogo_legend_in_page(self, flask_client):
+        client, _ = flask_client
+        resp = client.get('/')
+        assert b'no_go' in resp.data
+
+    def test_nogo_css_in_page(self, flask_client):
+        client, _ = flask_client
+        resp = client.get('/')
+        assert b'nogo-active' in resp.data
+        assert b'nogo-toolbar' in resp.data
