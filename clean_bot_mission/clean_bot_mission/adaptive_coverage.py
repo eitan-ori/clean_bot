@@ -352,6 +352,7 @@ class AdaptiveCoveragePlanner(Node):
         self.start_time = None
         self.movement_phase = 'idle'
         self.last_turn_direction = 1  # Reset to default (counter-clockwise)
+        self._map_odom_offset = None  # Clear localization offset
 
     def cancel_current_goal(self):
         """Cancel the current navigation goal and stop robot."""
@@ -774,14 +775,11 @@ class AdaptiveCoveragePlanner(Node):
         # Get robot's current position in map frame
         rx, ry, ryaw = self._get_robot_pose_map()
         
-        min_dist = float('inf')
-        nearest_idx = 0
-        
-        for i, (wx, wy, wyaw) in enumerate(self.waypoints):
-            dist = math.sqrt((wx - rx)**2 + (wy - ry)**2)
-            if dist < min_dist:
-                min_dist = dist
-                nearest_idx = i
+        # Vectorized distance calculation
+        wp_arr = np.array([(wx, wy) for wx, wy, _ in self.waypoints])
+        dists = np.sqrt((wp_arr[:, 0] - rx) ** 2 + (wp_arr[:, 1] - ry) ** 2)
+        nearest_idx = int(np.argmin(dists))
+        min_dist = float(dists[nearest_idx])
         
         self.get_logger().info(f'🎯 Robot at ({rx:.2f}, {ry:.2f}), nearest waypoint {nearest_idx + 1} at ({self.waypoints[nearest_idx][0]:.2f}, {self.waypoints[nearest_idx][1]:.2f}), distance: {min_dist:.2f}m')
         

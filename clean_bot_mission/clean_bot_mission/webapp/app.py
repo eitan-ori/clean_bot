@@ -35,6 +35,9 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+import base64
+import io
+from PIL import Image
 
 # Flask
 from flask import Flask, render_template, request, jsonify
@@ -47,7 +50,7 @@ from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.action import ActionClient
 from std_msgs.msg import String
-from geometry_msgs.msg import Twist, PoseStamped, PoseWithCovarianceStamped
+from geometry_msgs.msg import Twist, PoseStamped, PoseWithCovarianceStamped, Pose
 from nav_msgs.msg import OccupancyGrid, Odometry
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformListener
@@ -266,13 +269,18 @@ class WebBridgeNode(Node):
         self.battery_level = max(0.0, self.battery_level - drain)
 
     def _on_scan(self, msg):
-        self.scan_ranges = list(msg.ranges)
+        # Store raw tuple (avoid list copy; immutable is fine for read-only use)
+        self.scan_ranges = msg.ranges
         self.scan_angle_min = msg.angle_min
         self.scan_angle_max = msg.angle_max
         self.scan_angle_increment = msg.angle_increment
         # Round 40: Track scan frequency
         self._scan_callback_count += 1
-        self._scan_valid_count = sum(1 for r in msg.ranges if math.isfinite(r) and r > 0)
+        if msg.ranges:
+            arr = np.array(msg.ranges, dtype=np.float32)
+            self._scan_valid_count = int(np.count_nonzero(np.isfinite(arr) & (arr > 0)))
+        else:
+            self._scan_valid_count = 0
 
     def _on_map(self, msg):
         w, h = msg.info.width, msg.info.height
@@ -281,13 +289,15 @@ class WebBridgeNode(Node):
         self.map_msg = msg
         self.map_update_counter += 1
         # Round 32: Update obstacle heatmap
-        w, h = msg.info.width, msg.info.height
         data = np.array(msg.data, dtype=np.int8).reshape((h, w))
         if self.obstacle_heatmap is None or self._heatmap_width != w or self._heatmap_height != h:
             self.obstacle_heatmap = np.zeros((h, w), dtype=np.float32)
             self._heatmap_width = w
             self._heatmap_height = h
         self.obstacle_heatmap[data >= 50] += 1.0
+        # Decay old values to prevent unbounded growth
+        if self.obstacle_heatmap.max() >= 1000.0:
+            self.obstacle_heatmap *= 0.5
         # Rate-limit map emission
         now = time.monotonic()
         if now - self._last_map_emit >= self._map_rate_interval:
@@ -388,19 +398,15 @@ class WebBridgeNode(Node):
             idx = np.random.choice(len(occ_x), 2000, replace=False)
             occ_x, occ_y = occ_x[idx], occ_y[idx]
 
-        # Convert to world coords
-        obs_world = []
-        for px_x, px_y in zip(occ_x.tolist(), occ_y.tolist()):
-            wx = ox + px_x * res
-            wy = oy + px_y * res
-            obs_world.append([round(wx, 3), round(wy, 3)])
+        # Convert to world coords (vectorized)
+        obs_world_x = (ox + occ_x * res).round(3)
+        obs_world_y = (oy + occ_y * res).round(3)
+        obs_world = np.column_stack((obs_world_x, obs_world_y)).tolist()
 
         # Robot pixel position
         rpx = (self.robot_x - ox) / res if res > 0 else 0
         rpy = h - 1 - (self.robot_y - oy) / res if res > 0 else 0
 
-        import base64, io
-        from PIL import Image
         img = Image.fromarray(rgba, "RGBA")
         # Scale up small maps for clarity
         min_dim = 500
@@ -564,11 +570,7 @@ class WebBridgeNode(Node):
         if w <= 0 or h <= 0 or len(d["data"]) != w * h:
             return False, "Invalid room data dimensions"
         # Build an OccupancyGrid from the saved walls-only data
-        from nav_msgs.msg import OccupancyGrid as OG
-        from geometry_msgs.msg import Pose
-        from std_msgs.msg import Header
-        msg = OG()
-        msg.header = Header()
+        msg = OccupancyGrid()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = "map"
         msg.info.width = w
@@ -830,17 +832,37 @@ class WebBridgeNode(Node):
         if best_pose is None:
             return None
 
-        # ── Fine refinement around best pose ──
+        # ── Fine refinement around best pose (vectorized) ──
         bx, by, bth = best_pose
-        for dx in np.linspace(-0.3, 0.3, 7):
-            for dy in np.linspace(-0.3, 0.3, 7):
-                for dth in np.linspace(-0.3, 0.3, 13):
-                    sc = self._score_pose(
-                        pts_x, pts_y, bx + dx, by + dy, bth + dth,
-                        wall_mask, ox, oy, res, w, h)
-                    if sc > best_score:
-                        best_score = sc
-                        best_pose = (bx + dx, by + dy, bth + dth)
+        dxs = np.linspace(-0.3, 0.3, 7)
+        dys = np.linspace(-0.3, 0.3, 7)
+        dths = np.linspace(-0.3, 0.3, 13)
+        # Build grid of all candidate offsets
+        grid_dx, grid_dy, grid_dth = np.meshgrid(dxs, dys, dths, indexing='ij')
+        fine_xs = (bx + grid_dx).ravel()
+        fine_ys = (by + grid_dy).ravel()
+        fine_ths = (bth + grid_dth).ravel()
+        # Score each candidate angle (batch positions per angle for efficiency)
+        for theta_val in np.unique(fine_ths):
+            mask_th = fine_ths == theta_val
+            cand_x = fine_xs[mask_th]
+            cand_y = fine_ys[mask_th]
+            cos_t, sin_t = np.cos(theta_val), np.sin(theta_val)
+            rot_x = pts_x * cos_t - pts_y * sin_t
+            rot_y = pts_x * sin_t + pts_y * cos_t
+            wx = cand_x[:, None] + rot_x[None, :]
+            wy = cand_y[:, None] + rot_y[None, :]
+            gc = ((wx - ox) / res).astype(np.int32)
+            gr = ((wy - oy) / res).astype(np.int32)
+            v = (gr >= 0) & (gr < h) & (gc >= 0) & (gc < w)
+            gc_s = np.clip(gc, 0, w - 1)
+            gr_s = np.clip(gr, 0, h - 1)
+            hits = wall_mask[gr_s, gc_s] & v
+            scores = hits.sum(axis=1)
+            best_idx = int(scores.argmax())
+            if scores[best_idx] > best_score:
+                best_score = int(scores[best_idx])
+                best_pose = (float(cand_x[best_idx]), float(cand_y[best_idx]), float(theta_val))
 
         return (*best_pose, best_score, total_pts)
 
@@ -943,8 +965,6 @@ class WebBridgeNode(Node):
             rgba[partial, 2] = g
         rgba = rgba[::-1]
 
-        import base64, io
-        from PIL import Image
         img = Image.fromarray(rgba, "RGBA")
         min_dim = 400
         if w < min_dim or h < min_dim:

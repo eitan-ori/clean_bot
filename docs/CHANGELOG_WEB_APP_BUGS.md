@@ -361,3 +361,60 @@
   2. Publishes to `/initialpose` (PoseWithCovarianceStamped) for AMCL/SLAM Toolbox and `/robot_map_pose` (PoseStamped) for coverage planner.
   3. `adaptive_coverage.py`: Subscribes to `/robot_map_pose`, computes map↔odom offset, applies it in `_get_robot_pose_map()` when TF is unavailable.
 - **Tests:** 19 new tests covering scan-to-points conversion, pose scoring, full localization on synthetic box rooms, and coverage planner offset handling.
+
+## Performance Optimizations & Bug Fixes (Bugs 71–84)
+
+### Bug 71: `_on_scan` wasteful list conversion
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** `_on_scan` converted `msg.ranges` to a Python list on every callback (5–10 Hz), then used a slow comprehension to count valid ranges.
+- **Fix:** Store raw `tuple(msg.ranges)` and use numpy for valid-range counting.
+
+### Bug 72: `get_map_data()` slow obstacle conversion
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** `obs_world` conversion used a Python for-loop to transform grid indices to world coordinates — O(n) with thousands of cells.
+- **Fix:** Vectorized with `numpy.column_stack` and array arithmetic.
+
+### Bug 73: `find_nearest_waypoint_index()` O(n) Python loop
+- **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py`
+- **Problem:** Finding the nearest waypoint iterated all waypoints in pure Python.
+- **Fix:** Vectorized with numpy array difference and `argmin`.
+
+### Bug 74: Localization fine refinement triple nested loops
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** Fine pose refinement used 3 nested Python for-loops (7×7×13 = 637 iterations), each calling `_score_pose`.
+- **Fix:** Vectorized per-angle with numpy meshgrid — 13 batch operations instead of 637 individual calls.
+
+### Bug 76: Repeated module imports on every call
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** `get_map_data()` and `load_room_preview()` imported `base64`, `io`, `PIL.Image` on every invocation.
+- **Fix:** Moved all to top-level imports.
+
+### Bug 77: JS pathTrail shift-loop is O(n²)
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/templates/index.html`
+- **Problem:** `while (pathTrail.length > 500) pathTrail.shift()` is O(n²) because each `shift()` copies the entire array.
+- **Fix:** Changed to `pathTrail.splice(0, pathTrail.length - 500)` — single O(n) operation.
+
+### Bug 78: JS map_update creates Image on every frame
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/templates/index.html`
+- **Problem:** Every `map_update` SocketIO event created a new `Image` object and decoded the base64, even when the map image hadn't changed.
+- **Fix:** Added a `_b64key` cache; only create a new `Image` when the base64 data actually changes.
+
+### Bug 79: Heatmap values grow unbounded
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** `obstacle_heatmap` values accumulated without bound over long runs, causing potential overflow.
+- **Fix:** When max value reaches 1000, multiply all values by 0.5 (decay).
+
+### Bug 82: Frontier stores full cell list
+- **File:** `clean_bot_mission/clean_bot_mission/frontier_explorer.py`
+- **Problem:** Each frontier dict stored a `cells` list of all grid coordinates, but only `size` and centroid were used downstream.
+- **Fix:** Removed `cells` field; frontiers only store `size`, `x`, `y`.
+
+### Bug 83: Redundant inline imports in `load_and_clean_room`
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** `load_and_clean_room` had inline imports for `OccupancyGrid`, `Pose`, `Header` that were already available at module level.
+- **Fix:** Added `Pose` to top-level geometry_msgs import; removed all inline imports.
+
+### Bug 84: Reset doesn't clear localization offset
+- **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py`
+- **Problem:** `handle_reset()` didn't clear `_map_odom_offset`, so a stale localization offset could persist after a mission reset.
+- **Fix:** Added `self._map_odom_offset = None` to `handle_reset()`.

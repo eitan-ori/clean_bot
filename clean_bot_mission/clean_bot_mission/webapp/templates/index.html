@@ -726,9 +726,15 @@ const navHereBtn = document.getElementById('navHereBtn');
 socket.on('map_update', data => {
   lastMapData = data;
   placeholder.style.display = 'none';
-  mapImg = new Image();
-  mapImg.onload = () => drawMap(data);
-  mapImg.src = 'data:image/png;base64,' + data.image_b64;
+  // Only create new Image if the base64 data changed
+  if (!mapImg._b64key || mapImg._b64key !== data.image_b64) {
+    mapImg = new Image();
+    mapImg._b64key = data.image_b64;
+    mapImg.onload = () => drawMap(data);
+    mapImg.src = 'data:image/png;base64,' + data.image_b64;
+  } else {
+    drawMap(data);
+  }
   document.getElementById('mapRes').textContent = data.resolution.toFixed(3);
   document.getElementById('mapDims').textContent = data.width + ' × ' + data.height;
   document.getElementById('mapCount').textContent = data.map_updates;
@@ -1747,7 +1753,7 @@ socket.on('status', d => {
   // Round 35: Incremental trail
   if (d.new_trail && d.new_trail.length > 0) {
     d.new_trail.forEach(p => pathTrail.push(p));
-    while (pathTrail.length > 500) pathTrail.shift();
+    if (pathTrail.length > 500) pathTrail.splice(0, pathTrail.length - 500);
   }
 
   // Round 40: Diagnostics

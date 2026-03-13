@@ -1761,3 +1761,99 @@ class TestCoveragePlannerLocalizationOffset:
         x, y, yaw = coverage._get_robot_pose_map()
         assert abs(x - 5.0) < 0.01
         assert abs(y - 6.0) < 0.01
+
+    def test_reset_clears_offset(self, coverage):
+        """Bug 84 regression: handle_reset should clear _map_odom_offset."""
+        coverage._map_odom_offset = (1.0, 2.0, 0.5)
+        coverage.handle_reset()
+        assert coverage._map_odom_offset is None
+
+
+class TestCoveragePlannerNearestWaypoint:
+    """Test vectorized find_nearest_waypoint_index."""
+
+    @pytest.fixture
+    def coverage(self):
+        planner = AdaptiveCoveragePlanner()
+        planner.robot_x = 0.0
+        planner.robot_y = 0.0
+        planner.robot_yaw = 0.0
+        planner.odom_received = True
+        planner._map_odom_offset = None
+        planner._tf_pose_warned = False
+        planner.tf_buffer = MagicMock()
+        planner.tf_buffer.lookup_transform.side_effect = Exception("no TF")
+        return planner
+
+    def test_nearest_at_origin(self, coverage):
+        coverage.waypoints = [(1.0, 0.0, 0.0), (0.1, 0.1, 0.0), (5.0, 5.0, 0.0)]
+        idx = coverage.find_nearest_waypoint_index()
+        assert idx == 1
+
+    def test_nearest_with_offset(self, coverage):
+        coverage._map_odom_offset = (10.0, 10.0, 0.0)
+        coverage.waypoints = [(10.1, 10.0, 0.0), (0.0, 0.0, 0.0), (20.0, 20.0, 0.0)]
+        idx = coverage.find_nearest_waypoint_index()
+        assert idx == 0
+
+    def test_single_waypoint(self, coverage):
+        coverage.waypoints = [(3.0, 4.0, 0.0)]
+        idx = coverage.find_nearest_waypoint_index()
+        assert idx == 0
+
+
+class TestFrontierMemoryOptimization:
+    """Test that frontiers don't store unnecessary cell lists (Bug 82)."""
+
+    @pytest.fixture
+    def explorer(self):
+        exp = FrontierExplorer()
+        return exp
+
+    def test_frontier_no_cells_key(self, explorer):
+        """Frontiers should not have 'cells' key (memory optimization)."""
+        explorer.map_info = MagicMock()
+        explorer.map_info.width = 20
+        explorer.map_info.height = 20
+        explorer.map_info.resolution = 0.05
+        explorer.map_info.origin.position.x = 0.0
+        explorer.map_info.origin.position.y = 0.0
+        # Create a map with a frontier
+        grid = np.zeros((20, 20), dtype=np.int8)
+        grid[:, :10] = 0   # free
+        grid[:, 10:] = -1  # unknown
+        explorer.map_array = grid
+        explorer.min_frontier_size = 1
+        frontiers = explorer.find_frontiers()
+        for f in frontiers:
+            assert 'cells' not in f, "Frontier should not store cell list"
+            assert 'size' in f
+            assert 'x' in f
+            assert 'y' in f
+
+
+class TestHeatmapDecay:
+    """Test heatmap doesn't grow unbounded (Bug 80)."""
+
+    def test_heatmap_decays_at_threshold(self):
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        node = WebBridgeNode.__new__(WebBridgeNode)
+        node.map_msg = None
+        node.map_update_counter = 0
+        node.obstacle_heatmap = np.full((10, 10), 999.0, dtype=np.float32)
+        node._heatmap_width = 10
+        node._heatmap_height = 10
+        node._last_map_emit = time.monotonic() + 999  # far future, prevent emission
+        node._map_rate_interval = 999
+        node.sio = MagicMock()
+        node.get_logger = MagicMock(return_value=MagicMock())
+
+        # Create a map message mock with all occupied cells
+        msg = MagicMock()
+        msg.info.width = 10
+        msg.info.height = 10
+        msg.data = [100] * 100
+
+        node._on_map(msg)
+        # After adding 1.0 to all cells (999→1000), should trigger decay (* 0.5)
+        assert node.obstacle_heatmap.max() <= 501.0

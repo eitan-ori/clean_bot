@@ -395,7 +395,6 @@ class FrontierExplorer(Node):
                 'x': x,
                 'y': y,
                 'size': size,
-                'cells': list(zip(cells[0], cells[1]))
             })
 
         self.get_logger().debug(f'Found {len(frontiers)} frontiers')
