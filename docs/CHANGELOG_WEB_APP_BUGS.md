@@ -206,3 +206,13 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/templates/index.html` (`playChime`)
 - **Problem:** A new `AudioContext` was created every time `playChime()` was called. AudioContexts are limited browser resources (browsers cap at ~6-8 per page) and creating too many causes silent failure or console warnings.
 - **Fix:** Changed to singleton pattern: store `_audioCtx` in module scope, create on first use, reuse for subsequent calls.
+
+### Bug 42: Banner alignment in full_mission.py uses hardcoded spaces
+- **File:** `clean_bot_mission/clean_bot_mission/full_mission.py` (`print_banner`, `finish_mission`)
+- **Problem:** Banner text was padded with hardcoded spaces, causing misaligned borders when text content had different widths. The right-edge `║` characters didn't line up.
+- **Fix:** Added `pad(text)` helper that uses `ljust()` to dynamically pad each line to the banner width, ensuring consistent alignment.
+
+### Bug 43: CRITICAL — arduino_driver.py missing `def _wheel_speed_to_pwm(` line
+- **File:** `clean_bot_hardware/clean_bot_hardware/arduino_driver.py`
+- **Problem:** The `def _wheel_speed_to_pwm(` method definition line was completely missing. The method's parameters (`self, wheel_speed_mps: float, ...`) were orphaned inside the body of `cmd_vel_callback`, causing a **syntax error** (`unmatched ')'`). The file could not be imported at all, meaning the Arduino motor driver node could not start on the robot.
+- **Fix:** Restored the missing `def _wheel_speed_to_pwm(` line and proper blank-line separator between `cmd_vel_callback` and the new method.

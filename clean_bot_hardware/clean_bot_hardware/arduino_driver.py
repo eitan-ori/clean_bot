@@ -204,6 +204,8 @@ class ArduinoDriver(Node):
         
         self.last_cmd_time = self.get_clock().now()
         self._motors_stopped = (left_pwm == 0 and right_pwm == 0)
+
+    def _wheel_speed_to_pwm(
         self,
         wheel_speed_mps: float,
         linear_mps: float,

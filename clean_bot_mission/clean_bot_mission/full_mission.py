@@ -156,29 +156,33 @@ class FullMissionController(Node):
 
     def print_banner(self):
         """Print startup banner."""
+        W = 58  # inner width between ║ borders
+        def pad(s):
+            # ljust won't handle emojis perfectly but close enough for logs
+            return '║' + s.ljust(W)[:W] + '║'
         self.get_logger().info('')
-        self.get_logger().info('╔' + '═' * 58 + '╗')
-        self.get_logger().info('║' + ' ' * 15 + '🤖 CLEAN BOT MISSION' + ' ' * 23 + '║')
-        self.get_logger().info('╠' + '═' * 58 + '╣')
-        self.get_logger().info('║  Phase 1: Wait for scan command' + ' ' * 25 + '║')
-        self.get_logger().info('║  Phase 2: Explore unknown environment' + ' ' * 19 + '║')
-        self.get_logger().info('║  Phase 3: Wait for clean command' + ' ' * 24 + '║')
-        self.get_logger().info('║  Phase 4: Cover all free space (clean)' + ' ' * 18 + '║')
-        self.get_logger().info('║  Phase 5: Return home' + ' ' * 36 + '║')
-        self.get_logger().info('╠' + '═' * 58 + '╣')
-        self.get_logger().info(f'║  Coverage width: {self.coverage_width * 100:.0f}cm' + ' ' * 37 + '║')
-        self.get_logger().info(f'║  Auto-start: {self.auto_start}' + ' ' * 39 + '║')
-        self.get_logger().info('╠' + '═' * 58 + '╣')
-        self.get_logger().info('║  Commands (publish to /mission_command):' + ' ' * 16 + '║')
-        self.get_logger().info('║    start_scan  - Begin exploration' + ' ' * 22 + '║')
-        self.get_logger().info('║    stop_scan   - Stop exploration' + ' ' * 23 + '║')
-        self.get_logger().info('║    start_clean - Begin cleaning (coverage)' + ' ' * 14 + '║')
-        self.get_logger().info('║    stop_clean  - Stop cleaning' + ' ' * 26 + '║')
-        self.get_logger().info('║    go_home     - Return to home' + ' ' * 25 + '║')
-        self.get_logger().info('║    reset       - Reset to initial state' + ' ' * 17 + '║')
-        self.get_logger().info('║    pause       - Pause current operation' + ' ' * 16 + '║')
-        self.get_logger().info('║    resume      - Resume paused operation' + ' ' * 15 + '║')
-        self.get_logger().info('╚' + '═' * 58 + '╝')
+        self.get_logger().info('╔' + '═' * W + '╗')
+        self.get_logger().info(pad('         🤖 CLEAN BOT MISSION'))
+        self.get_logger().info('╠' + '═' * W + '╣')
+        self.get_logger().info(pad('  Phase 1: Wait for scan command'))
+        self.get_logger().info(pad('  Phase 2: Explore unknown environment'))
+        self.get_logger().info(pad('  Phase 3: Wait for clean command'))
+        self.get_logger().info(pad('  Phase 4: Cover all free space (clean)'))
+        self.get_logger().info(pad('  Phase 5: Return home'))
+        self.get_logger().info('╠' + '═' * W + '╣')
+        self.get_logger().info(pad(f'  Coverage width: {self.coverage_width * 100:.0f}cm'))
+        self.get_logger().info(pad(f'  Auto-start: {self.auto_start}'))
+        self.get_logger().info('╠' + '═' * W + '╣')
+        self.get_logger().info(pad('  Commands (publish to /mission_command):'))
+        self.get_logger().info(pad('    start_scan  - Begin exploration'))
+        self.get_logger().info(pad('    stop_scan   - Stop exploration'))
+        self.get_logger().info(pad('    start_clean - Begin cleaning (coverage)'))
+        self.get_logger().info(pad('    stop_clean  - Stop cleaning'))
+        self.get_logger().info(pad('    go_home     - Return to home'))
+        self.get_logger().info(pad('    reset       - Reset to initial state'))
+        self.get_logger().info(pad('    pause       - Pause current operation'))
+        self.get_logger().info(pad('    resume      - Resume paused operation'))
+        self.get_logger().info('╚' + '═' * W + '╝')
         self.get_logger().info('')
         self.get_logger().info('⏳ Waiting for "start_scan" command...')
         self.get_logger().info('   Send: ros2 topic pub --once /mission_command std_msgs/msg/String "data: \'start_scan\'"')
@@ -490,12 +494,15 @@ class FullMissionController(Node):
         stop_cmd = Twist()
         self.cmd_vel_pub.publish(stop_cmd)
         
+        W = 58
+        def pad(s):
+            return '║' + s.ljust(W)[:W] + '║'
         self.get_logger().info('')
-        self.get_logger().info('╔' + '═' * 58 + '╗')
-        self.get_logger().info('║' + ' ' * 18 + '🎉 MISSION COMPLETE!' + ' ' * 20 + '║')
-        self.get_logger().info('╠' + '═' * 58 + '╣')
-        self.get_logger().info(f'║  Total time: {elapsed / 60:.1f} minutes' + ' ' * 35 + '║')
-        self.get_logger().info('╚' + '═' * 58 + '╝')
+        self.get_logger().info('╔' + '═' * W + '╗')
+        self.get_logger().info(pad('            🎉 MISSION COMPLETE!'))
+        self.get_logger().info('╠' + '═' * W + '╣')
+        self.get_logger().info(pad(f'  Total time: {elapsed / 60:.1f} minutes'))
+        self.get_logger().info('╚' + '═' * W + '╝')
         self.get_logger().info('')
 
     def publish_state(self):

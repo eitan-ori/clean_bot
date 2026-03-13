@@ -559,3 +559,36 @@ class TestSafetyTopicNaming:
                 params = yaml.safe_load(f)
         frame_id = params['rplidar_node']['ros__parameters']['frame_id']
         assert frame_id == 'laser', f"rplidar_a1.yaml frame_id is '{frame_id}', expected 'laser'"
+
+
+class TestArduinoDriverSyntax:
+    """Bug 42: Verify arduino_driver.py parses and _wheel_speed_to_pwm is defined."""
+
+    def _find_file(self):
+        import os
+        for p in ['clean_bot_hardware/arduino_driver.py', 'clean_bot_hardware/clean_bot_hardware/arduino_driver.py']:
+            if os.path.exists(p):
+                return p
+        pytest.skip('arduino_driver.py not found')
+
+    def test_file_parses(self):
+        """arduino_driver.py must be valid Python."""
+        import ast
+        path = self._find_file()
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_wheel_speed_to_pwm_defined(self):
+        """_wheel_speed_to_pwm must be a method of ArduinoDriver."""
+        import ast
+        path = self._find_file()
+        with open(path) as f:
+            tree = ast.parse(f.read())
+        methods = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name == 'ArduinoDriver':
+                for item in node.body:
+                    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        methods.append(item.name)
+        assert '_wheel_speed_to_pwm' in methods, \
+            f"_wheel_speed_to_pwm not found in ArduinoDriver. Methods: {methods}"
