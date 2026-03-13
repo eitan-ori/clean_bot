@@ -823,6 +823,46 @@ class TestExplorerNoGoZones:
         assert explorer._point_in_no_go_zone(1.0, 1.0) is False
 
 
+class TestExplorerCancelGoal:
+    """Test cancel_current_goal (Bug 62 regression)."""
+
+    def test_cancel_clears_navigating_immediately(self, explorer):
+        """Bug 62: is_navigating should be cleared immediately, not in callback."""
+        explorer.is_navigating = True
+        explorer.navigation_start_time = MagicMock()
+        handle = MagicMock()
+        explorer.current_goal_handle = handle
+        explorer.current_goal = {'x': 1.0, 'y': 2.0}
+
+        explorer.cancel_current_goal()
+
+        assert explorer.is_navigating is False
+        assert explorer.navigation_start_time is None
+        assert explorer.current_goal_handle is None
+        handle.cancel_goal_async.assert_called_once()
+
+    def test_cancel_without_handle(self, explorer):
+        """Cancel without a goal handle still clears state."""
+        explorer.is_navigating = True
+        explorer.navigation_start_time = MagicMock()
+        explorer.current_goal_handle = None
+        explorer.current_goal = {'x': 1.0, 'y': 2.0}
+
+        explorer.cancel_current_goal()
+
+        assert explorer.is_navigating is False
+        assert explorer.navigation_start_time is None
+        assert (1.0, 2.0) in explorer.failed_goals
+
+    def test_cancel_done_callback_idempotent(self, explorer):
+        """cancel_done_callback should be safe even if state already cleared."""
+        explorer.is_navigating = False
+        explorer.current_goal = {'x': 1.0, 'y': 2.0}
+
+        explorer.cancel_done_callback(MagicMock())
+        assert (1.0, 2.0) in explorer.failed_goals
+
+
 # ════════════════════════════════════════════════════════════════════
 # Webapp Stat Tracking Tests (Bug 54)
 # ════════════════════════════════════════════════════════════════════

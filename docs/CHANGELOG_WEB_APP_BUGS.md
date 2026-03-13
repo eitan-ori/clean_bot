@@ -303,3 +303,8 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`_on_mission_state`)
 - **Problem:** When resuming from PAUSED → EXPLORING, the scan timer was reset to current time because the start-tracking condition (`'EXPLOR' in new_u and 'EXPLOR' not in old_u`) matched. This discarded all time accumulated before the pause.
 - **Fix:** Added guard: only set timer if not already tracking (`if not self._scan_start_time`). Same fix applied to clean timer.
+
+### Bug 62: Multiple cancellation requests on navigation timeout
+- **File:** `clean_bot_mission/clean_bot_mission/frontier_explorer.py` (`cancel_current_goal`)
+- **Problem:** When navigation timed out, `cancel_current_goal()` sent an async cancel but didn't immediately clear `is_navigating` or `current_goal_handle`. Since the exploration_loop fires every 2 seconds, it would detect the timeout again and send another cancel request, causing repeated cancel messages and potential race conditions.
+- **Fix:** Clear `is_navigating`, `navigation_start_time`, and `current_goal_handle` immediately in `cancel_current_goal()` (before the async cancel). Made `cancel_done_callback` idempotent.

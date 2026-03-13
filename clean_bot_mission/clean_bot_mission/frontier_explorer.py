@@ -520,14 +520,16 @@ class FrontierExplorer(Node):
 
     def cancel_current_goal(self):
         """Cancel the current navigation goal."""
+        # Immediately mark as not navigating to prevent repeated cancel calls (Bug 62)
+        self.is_navigating = False
+        self.navigation_start_time = None
         if self.current_goal_handle is not None:
             self.get_logger().info('   🛑 Canceling current goal...')
-            cancel_future = self.current_goal_handle.cancel_goal_async()
+            handle = self.current_goal_handle
+            self.current_goal_handle = None
+            cancel_future = handle.cancel_goal_async()
             cancel_future.add_done_callback(self.cancel_done_callback)
         else:
-            # No handle, just reset state
-            self.is_navigating = False
-            self.navigation_start_time = None
             if self.current_goal:
                 key = (round(self.current_goal['x'], 1), round(self.current_goal['y'], 1))
                 self.failed_goals.add(key)
@@ -535,9 +537,7 @@ class FrontierExplorer(Node):
     def cancel_done_callback(self, future):
         """Called when goal cancellation completes."""
         self.get_logger().info('   🛑 Goal canceled')
-        self.is_navigating = False
-        self.navigation_start_time = None
-        self.current_goal_handle = None
+        # State already cleared in cancel_current_goal; just add to failed_goals
         if self.current_goal:
             key = (round(self.current_goal['x'], 1), round(self.current_goal['y'], 1))
             self.failed_goals.add(key)
