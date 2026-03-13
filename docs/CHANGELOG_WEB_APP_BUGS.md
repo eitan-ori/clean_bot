@@ -333,3 +333,18 @@
 - **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py` (`goal_response_callback`, `get_result_callback`)
 - **Problem:** Both Nav2 callback methods called `future.result()` without try/except. If the action server crashes while in Nav2 mode, the exception would silently kill the callback, leaving the coverage planner stuck (unable to advance to next waypoint).
 - **Fix:** Wrapped `future.result()` in try/except in both callbacks; on failure, increments `failed_waypoints`, clears navigation state, and advances to next waypoint.
+
+### Bug 68: Race condition in load_and_clean_room — coverage uses stale map
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`load_and_clean_room`)
+- **Problem:** After publishing the saved room's map to `/map`, the `start_clean` command was sent immediately. Due to DDS transport differences (transient_local reliable for map vs. volatile for command), the coverage planner could receive the start command before the saved map, causing it to generate waypoints from the old SLAM map instead of the saved room.
+- **Fix:** Added 0.5s delay between publishing the map and sending start_clean, giving DDS time to deliver the larger map message.
+
+### Bug 69: Battery simulation uses unbounded time delta
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`_on_odom`)
+- **Problem:** The battery drain calculation used `dt = now - self._battery_last_update` without capping. If odometry callbacks paused (robot off, network hiccup, app restart), the next callback would have a huge `dt`, causing an unrealistic sudden battery drop (e.g., 300s gap → 6% instant drain).
+- **Fix:** Capped `dt` to 2.0 seconds maximum: `dt = min(now - self._battery_last_update, 2.0)`.
+
+### Bug 70: Distance tracking accumulates large odometry jumps
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`_on_odom`)
+- **Problem:** The distance integrator added `sqrt(dx² + dy²)` for every odom callback without filtering. If odometry had a gap (robot moved physically, SLAM correction, or odom reset), a single large jump would inflate `total_distance_traveled` unrealistically.
+- **Fix:** Added per-step cap: only accumulate distance if the step is less than 0.5m (well above the max possible movement between 10Hz callbacks at robot's max speed).

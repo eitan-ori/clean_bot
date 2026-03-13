@@ -245,12 +245,15 @@ class WebBridgeNode(Node):
         if self._last_odom_x is not None:
             dx = x - self._last_odom_x
             dy = y - self._last_odom_y
-            self.total_distance_traveled += math.sqrt(dx * dx + dy * dy)
+            step = math.sqrt(dx * dx + dy * dy)
+            # Cap per-callback distance to 0.5m to filter odom jumps/gaps (Bug 70)
+            if step < 0.5:
+                self.total_distance_traveled += step
         self._last_odom_x = x
         self._last_odom_y = y
         # Round 34: Battery simulation
         now = time.monotonic()
-        dt = now - self._battery_last_update
+        dt = min(now - self._battery_last_update, 2.0)  # Cap dt to 2s (Bug 69)
         self._battery_last_update = now
         speed = abs(self.linear_vel) + abs(self.angular_vel) * 0.3
         drain = dt * (0.02 + speed * 0.15)  # base drain + velocity drain
@@ -574,6 +577,10 @@ class WebBridgeNode(Node):
         # Our own _on_map callback will update internal state (map_msg, counter, heatmap).
         self.map_pub.publish(msg)
         self.get_logger().info(f"Published saved room map '{d.get('name', filename)}' ({w}x{h})")
+        # Brief delay to let the map propagate through DDS to the coverage planner
+        # before sending start_clean (Bug 68: avoid race where planner uses stale map)
+        import time as _time
+        _time.sleep(0.5)
         # Send start_clean command
         self.send_command("start_clean")
         return True, f"Loaded room '{d.get('name', filename)}' and started cleaning"

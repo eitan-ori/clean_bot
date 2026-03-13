@@ -1009,9 +1009,52 @@ class TestWebappStatTracking:
         assert web_node._clean_start_time == start
 
 
-# ════════════════════════════════════════════════════════════════════
-# Coverage Path Generation Edge Cases
-# ════════════════════════════════════════════════════════════════════
+class TestOdomBugFixes:
+    """Test _on_odom edge cases (Bugs 69-70)."""
+
+    @pytest.fixture
+    def web_node(self):
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        node = WebBridgeNode.__new__(WebBridgeNode)
+        node.linear_vel = 0.0
+        node.angular_vel = 0.0
+        node.total_distance_traveled = 0.0
+        node._last_odom_x = None
+        node._last_odom_y = None
+        node.battery_level = 100.0
+        node._battery_last_update = time.monotonic()
+        node.sio = MagicMock()
+        return node
+
+    def _make_odom(self, x=0.0, y=0.0, lx=0.0, az=0.0):
+        msg = MagicMock()
+        msg.pose.pose.position.x = x
+        msg.pose.pose.position.y = y
+        msg.twist.twist.linear.x = lx
+        msg.twist.twist.angular.z = az
+        return msg
+
+    def test_battery_dt_capped(self, web_node):
+        """Bug 69: Large time gap should not drain battery excessively."""
+        web_node._battery_last_update = time.monotonic() - 300  # 5 min gap
+        web_node._on_odom(self._make_odom(x=0.0))
+        # With dt capped at 2s and base drain 0.02/s: max drain = 2 * 0.02 = 0.04%
+        assert web_node.battery_level >= 99.9
+
+    def test_distance_jump_filtered(self, web_node):
+        """Bug 70: Large odom jumps should not inflate distance traveled."""
+        web_node._last_odom_x = 0.0
+        web_node._last_odom_y = 0.0
+        # Simulate a teleport/odom jump of 5 meters
+        web_node._on_odom(self._make_odom(x=5.0, y=0.0))
+        assert web_node.total_distance_traveled == 0.0  # Jump filtered out
+
+    def test_normal_movement_tracked(self, web_node):
+        """Normal movement increments should be tracked correctly."""
+        web_node._last_odom_x = 0.0
+        web_node._last_odom_y = 0.0
+        web_node._on_odom(self._make_odom(x=0.1, y=0.0))
+        assert abs(web_node.total_distance_traveled - 0.1) < 0.01
 
 class TestCoveragePathEdgeCases:
     """Test edge cases in coverage path generation."""
