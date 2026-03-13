@@ -69,6 +69,8 @@ class EmergencyStopController(Node):
         self.current_distance = 100
         self.last_range_time = None
         self.obstacle_state = False  # False = clear, True = blocked
+        self._start_time = self.get_clock().now()
+        self._sensor_grace_sec = 5.0  # Allow sensor this long to start publishing
 
         self.get_logger().info('🛑 Emergency Stop Controller started')
         self.get_logger().info(f'   Stop distance: {self.stop_dist*100:.0f}cm')
@@ -103,6 +105,16 @@ class EmergencyStopController(Node):
             if elapsed > self.timeout:
                 # Sensor timeout - be cautious, reduce forward speed
                 self.get_logger().warn_once('⚠️ Ultrasonic sensor timeout - reducing speed')
+                output.linear.x = msg.linear.x * 0.5 if msg.linear.x > 0 else msg.linear.x
+                self.cmd_vel_pub.publish(output)
+                return
+        else:
+            # No sensor data ever received — after grace period, reduce speed
+            uptime = (self.get_clock().now() - self._start_time).nanoseconds / 1e9
+            if uptime > self._sensor_grace_sec:
+                self.get_logger().warn_once(
+                    '⚠️ Ultrasonic sensor never published — reducing forward speed. '
+                    'Check sensor wiring and /ultrasonic_range topic.')
                 output.linear.x = msg.linear.x * 0.5 if msg.linear.x > 0 else msg.linear.x
                 self.cmd_vel_pub.publish(output)
                 return

@@ -216,3 +216,8 @@
 - **File:** `clean_bot_hardware/clean_bot_hardware/arduino_driver.py`
 - **Problem:** The `def _wheel_speed_to_pwm(` method definition line was completely missing. The method's parameters (`self, wheel_speed_mps: float, ...`) were orphaned inside the body of `cmd_vel_callback`, causing a **syntax error** (`unmatched ')'`). The file could not be imported at all, meaning the Arduino motor driver node could not start on the robot.
 - **Fix:** Restored the missing `def _wheel_speed_to_pwm(` line and proper blank-line separator between `cmd_vel_callback` and the new method.
+
+### Bug 44: Emergency stop provides no protection when sensor never publishes
+- **File:** `clean_bot_hardware/clean_bot_hardware/emergency_stop.py`
+- **Problem:** On startup, `current_distance` defaults to 100m and `last_range_time` is `None`. If the ultrasonic sensor is disconnected, broken, or has a wrong topic name, the timeout check is skipped entirely (it only triggers when `last_range_time is not None`). The robot operates with **zero collision protection** — driving at full speed into walls.
+- **Fix:** Added `_start_time` and `_sensor_grace_sec` (5s). After the grace period, if no sensor data has ever been received, forward speed is halved and a warning is logged. This matches the existing sensor-timeout behavior.

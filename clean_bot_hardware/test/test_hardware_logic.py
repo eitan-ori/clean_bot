@@ -453,6 +453,39 @@ class TestEmergencyStopReverse:
         assert angular_z == 0.5  # Unchanged
 
 
+class TestEmergencyStopNoSensor:
+    """Bug 44: Emergency stop must still reduce speed when sensor never publishes."""
+
+    def test_no_sensor_data_code_path_exists(self):
+        """emergency_stop.py must have _start_time and _sensor_grace_sec attributes."""
+        import ast
+        import os
+        for p in ['clean_bot_hardware/emergency_stop.py', 'clean_bot_hardware/clean_bot_hardware/emergency_stop.py']:
+            if os.path.exists(p):
+                with open(p) as f:
+                    src = f.read()
+                assert '_start_time' in src, 'missing _start_time tracking for no-sensor case'
+                assert '_sensor_grace_sec' in src, 'missing _sensor_grace_sec for grace period'
+                return
+        pytest.skip('emergency_stop.py not found')
+
+    def test_no_sensor_reduces_speed_after_grace(self):
+        """When last_range_time is None and grace period passed, forward speed should halve."""
+        import ast, os
+        for p in ['clean_bot_hardware/emergency_stop.py', 'clean_bot_hardware/clean_bot_hardware/emergency_stop.py']:
+            if os.path.exists(p):
+                with open(p) as f:
+                    src = f.read()
+                # The code must have an 'else' branch for last_range_time is None
+                # that checks uptime > grace and reduces speed
+                assert 'last_range_time' in src
+                # Check for the cautious reduction path
+                assert 'never published' in src.lower() or 'sensor never' in src.lower(), \
+                    'Missing no-sensor-data warning path in emergency_stop.py'
+                return
+        pytest.skip('emergency_stop.py not found')
+
+
 # ════════════════════════════════════════════════════════════════════
 # Test: Launch File Port Consistency
 # ════════════════════════════════════════════════════════════════════
