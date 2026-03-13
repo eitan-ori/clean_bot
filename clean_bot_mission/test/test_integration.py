@@ -935,6 +935,7 @@ class TestRemoteOperation:
             ('GET', '/api/stats'),
             ('POST', '/api/schedules', {"time": "14:00", "days": ["mon"]}),
             ('DELETE', '/api/schedules/test'),
+            ('POST', '/api/rooms/test/load_and_clean'),
         ]
         for entry in routes_needing_ros:
             method, url = entry[0], entry[1]
@@ -1009,3 +1010,111 @@ class TestRemoteOperation:
         # The old buggy pattern would crash:
         with pytest.raises(TypeError):
             io.BytesIO(img)
+
+
+# ════════════════════════════════════════════════════════════════════
+# Test Suite 14: Hebrew i18n & Clean Saved Room
+# ════════════════════════════════════════════════════════════════════
+
+class TestI18nAndCleanRoom:
+    """Tests for i18n completeness and clean-saved-room feature."""
+
+    def test_i18n_keys_match_en_he(self, client):
+        """Hebrew dict has all the same keys as English dict."""
+        resp = client.get('/')
+        html = resp.data.decode()
+        # Extract the en and he key lists from the LANG object
+        import re
+        en_match = re.search(r'en:\s*\{([^}]+)\}', html)
+        he_match = re.search(r'he:\s*\{([^}]+)\}', html)
+        assert en_match and he_match
+        en_keys = set(re.findall(r"(\w+):'", en_match.group(1)))
+        he_keys = set(re.findall(r"(\w+):'", he_match.group(1)))
+        missing_in_he = en_keys - he_keys
+        assert not missing_in_he, f"Missing Hebrew translations: {missing_in_he}"
+
+    def test_no_rtl_direction_set(self, client):
+        """Hebrew should not flip the layout to RTL."""
+        resp = client.get('/')
+        html = resp.data.decode()
+        assert "dir = 'rtl'" not in html and 'dir="rtl"' not in html
+
+    def test_all_data_i18n_have_translations(self, client):
+        """Every data-i18n key in HTML has a corresponding en translation."""
+        resp = client.get('/')
+        html = resp.data.decode()
+        import re
+        i18n_keys = set(re.findall(r'data-i18n="(\w+)"', html))
+        en_match = re.search(r'en:\s*\{([^}]+)\}', html)
+        assert en_match
+        en_keys = set(re.findall(r"(\w+):'", en_match.group(1)))
+        missing = i18n_keys - en_keys
+        assert not missing, f"data-i18n keys without en translation: {missing}"
+
+    def test_load_and_clean_room(self, client, node):
+        """Loading a saved room and starting clean."""
+        node.load_and_clean_room = MagicMock(return_value=(True, "Loaded room 'Kitchen' and started cleaning"))
+        resp = client.post('/api/rooms/Kitchen/load_and_clean')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["ok"] is True
+        assert "Kitchen" in data["message"]
+        node.load_and_clean_room.assert_called_once_with("Kitchen")
+
+    def test_load_and_clean_room_not_found(self, client, node):
+        """Loading a non-existent room returns 400."""
+        node.load_and_clean_room.return_value = (False, "Room not found")
+        resp = client.post('/api/rooms/NonExistent/load_and_clean')
+        assert resp.status_code == 400
+
+    def test_load_and_clean_room_ros_disconnected(self, client, node):
+        """Load-and-clean returns 503 when ROS is down."""
+        webapp_module.ros_node = None
+        resp = client.post('/api/rooms/Test/load_and_clean')
+        assert resp.status_code == 503
+        webapp_module.ros_node = node
+
+    def test_save_room_walls_only(self, client, node):
+        """Saved room data should contain only 0 (free) and 100 (wall)."""
+        import json
+        rooms_dir = webapp_module.SAVED_ROOMS_DIR
+        # Create a real room via the save_room static method with mock map_msg
+        mock_map = MagicMock()
+        mock_map.info.width = 4
+        mock_map.info.height = 4
+        mock_map.info.resolution = 0.05
+        mock_map.info.origin.position.x = 0.0
+        mock_map.info.origin.position.y = 0.0
+        # Mix of values: -1 (unknown), 0 (free), 30 (partial), 80 (obstacle)
+        mock_map.data = [-1, 0, 30, 80, 0, 0, 100, 50, -1, -1, 0, 0, 10, 20, 60, 99]
+        node.map_msg = mock_map
+        # Use real save_room logic
+        WBN = webapp_module.WebBridgeNode
+        ok, path = WBN.save_room(node, "WallTest")
+        assert ok
+        with open(path) as f:
+            saved = json.load(f)
+        # Verify: values < 50 → 0, values >= 50 → 100
+        for v in saved["data"]:
+            assert v in (0, 100), f"Expected 0 or 100, got {v}"
+        # Check specific values
+        assert saved["data"][3] == 100   # 80 → wall
+        assert saved["data"][6] == 100   # 100 → wall
+        assert saved["data"][7] == 100   # 50 → wall
+        assert saved["data"][0] == 0     # -1 → free
+        assert saved["data"][1] == 0     # 0 → free
+        assert saved["data"][2] == 0     # 30 → free
+
+    def test_mobile_meta_tags(self, client):
+        """Mobile PWA meta tags are present."""
+        resp = client.get('/')
+        html = resp.data.decode()
+        assert 'apple-mobile-web-app-capable' in html
+        assert 'theme-color' in html
+        assert 'user-scalable=no' in html
+
+    def test_dpad_touch_action(self, client):
+        """D-pad has touch-action:none for mobile."""
+        resp = client.get('/')
+        html = resp.data.decode()
+        assert 'touch-action:none' in html
