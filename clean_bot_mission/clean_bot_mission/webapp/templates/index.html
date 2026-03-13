@@ -15,6 +15,14 @@
   --green:#34d399;--orange:#f59e0b;--red:#ef4444;--purple:#a78bfa;
   --yellow:#fbbf24;--gray:#6b7280;--blue:#3b82f6;
   --radius:10px;--shadow:0 2px 12px rgba(0,0,0,.35);
+  --header-bg:#16172a;--header-border:#2a2b44;
+  --input-bg:#1e1f36;--input-border:#444;
+  --btn-bg:#353660;--btn-hover:#3d3f70;
+  --log-bg:#1a1b30;--log-border:rgba(34,34,136,.03);
+  --map-bg:#101020;--map-border:#333;
+  --bar-bg:#1a1b30;
+  --legend-border:#444;
+  --swatch-unknown:#282830;
 }
 html{font-size:14px}
 body{
@@ -25,7 +33,7 @@ body{
 /* ── Header ──────────────────────────────────────── */
 header{
   display:flex;align-items:center;justify-content:space-between;
-  padding:.75rem 1.5rem;background:#16172a;border-bottom:1px solid #2a2b44;
+  padding:.75rem 1.5rem;background:var(--header-bg);border-bottom:1px solid var(--header-border);
 }
 header h1{font-size:1.25rem;font-weight:700;letter-spacing:.02em}
 .conn-indicator{display:flex;align-items:center;gap:.4rem;font-size:.85rem;color:var(--text-dim)}
@@ -51,8 +59,8 @@ main{
 .map-wrap{display:flex;flex-direction:column;gap:.75rem;overflow:hidden}
 .map-container{
   position:relative;flex:1;min-height:300px;
-  border:1px solid #333;border-radius:var(--radius);overflow:hidden;
-  background:#101020;display:flex;align-items:center;justify-content:center;
+  border:1px solid var(--map-border);border-radius:var(--radius);overflow:hidden;
+  background:var(--map-bg);display:flex;align-items:center;justify-content:center;
 }
 #mapCanvas{max-width:100%;max-height:100%;display:block}
 .map-placeholder{color:var(--text-dim);font-size:.95rem}
@@ -62,7 +70,7 @@ main{
 /* ── Right Panels ────────────────────────────────── */
 .panels{display:flex;flex-direction:column;gap:.75rem;overflow-y:auto;padding-right:.25rem}
 .panels::-webkit-scrollbar{width:5px}
-.panels::-webkit-scrollbar-thumb{background:#444;border-radius:4px}
+.panels::-webkit-scrollbar-thumb{background:var(--input-border);border-radius:4px}
 
 /* ── Status Panel ────────────────────────────────── */
 .status-grid{display:grid;grid-template-columns:1fr 1fr;gap:.4rem .8rem;font-size:.85rem}
@@ -99,8 +107,8 @@ main{
 
 /* ── D-Pad ───────────────────────────────────────── */
 .dpad{display:grid;grid-template-columns:repeat(3,1fr);gap:.35rem;max-width:200px;margin:0 auto;touch-action:none}
-.dpad .btn{aspect-ratio:1;font-size:1.2rem;border-radius:10px;background:#353660}
-.dpad .btn:hover{background:#4a4b78}
+.dpad .btn{aspect-ratio:1;font-size:1.2rem;border-radius:10px;background:var(--btn-bg)}
+.dpad .btn:hover{background:var(--btn-hover)}
 .dpad .btn.stop-btn{background:var(--red);font-size:.7rem;font-weight:700}
 .dpad .empty{visibility:hidden}
 .speed-row{display:flex;align-items:center;gap:.5rem;margin-top:.5rem;font-size:.82rem}
@@ -109,14 +117,14 @@ main{
 /* ── Room Manager ────────────────────────────────── */
 .room-save-row{display:flex;gap:.4rem;margin-bottom:.6rem}
 .room-save-row input{
-  flex:1;padding:.4rem .6rem;border-radius:6px;border:1px solid #444;
-  background:#1e1f36;color:var(--text);font-size:.85rem;outline:none;
+  flex:1;padding:.4rem .6rem;border-radius:6px;border:1px solid var(--input-border);
+  background:var(--input-bg);color:var(--text);font-size:.85rem;outline:none;
 }
 .room-save-row input:focus{border-color:var(--accent)}
 .room-list{max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:.4rem}
 .room-item{
   display:flex;align-items:center;justify-content:space-between;
-  background:#1e1f36;border-radius:8px;padding:.45rem .65rem;font-size:.82rem;
+  background:var(--input-bg);border-radius:8px;padding:.45rem .65rem;font-size:.82rem;
 }
 .room-item .room-name{font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .room-item .room-date{color:var(--text-dim);font-size:.72rem;margin-left:.5rem;white-space:nowrap}
@@ -124,12 +132,12 @@ main{
 
 /* ── Mission Log ─────────────────────────────────── */
 .log-box{
-  max-height:160px;overflow-y:auto;background:#1a1b30;
+  max-height:160px;overflow-y:auto;background:var(--log-bg);
   border-radius:8px;padding:.5rem;font-size:.78rem;font-family:monospace;
 }
 .log-box::-webkit-scrollbar{width:4px}
-.log-box::-webkit-scrollbar-thumb{background:#444;border-radius:3px}
-.log-entry{padding:.15rem 0;border-bottom:1px solid #2228;display:flex;gap:.5rem}
+.log-box::-webkit-scrollbar-thumb{background:var(--input-border);border-radius:3px}
+.log-entry{padding:.15rem 0;border-bottom:1px solid var(--log-border);display:flex;gap:.5rem}
 .log-time{color:var(--accent);flex-shrink:0}
 .log-event{color:var(--text-dim)}
 
@@ -155,7 +163,7 @@ main{
 /* ── Toast ───────────────────────────────────────── */
 .toast-container{position:fixed;top:1rem;right:1rem;z-index:2000;display:flex;flex-direction:column;gap:.4rem}
 .toast{
-  background:#353660;color:var(--text);padding:.55rem 1rem;border-radius:8px;
+  background:var(--btn-bg);color:var(--text);padding:.55rem 1rem;border-radius:8px;
   font-size:.82rem;box-shadow:var(--shadow);opacity:0;transform:translateX(30px);
   transition:all .3s;pointer-events:none;
 }
@@ -178,7 +186,7 @@ main{
 /* ── Progress Bar ───────────────────────────────── */
 .progress-wrap{margin-top:.4rem}
 .progress-label{font-size:.8rem;color:var(--text-dim);margin-bottom:.2rem}
-.progress-bar{height:10px;background:#1a1b30;border-radius:5px;overflow:hidden}
+.progress-bar{height:10px;background:var(--bar-bg);border-radius:5px;overflow:hidden}
 .progress-fill{height:100%;border-radius:5px;background:var(--blue);transition:width .3s}
 @keyframes progress-animate{0%{background-position:0 0}100%{background-position:30px 0}}
 .progress-fill.animated{
@@ -189,7 +197,7 @@ main{
 /* ── Map Legend ──────────────────────────────────── */
 .map-legend{display:flex;gap:1rem;font-size:.75rem;color:var(--text-dim);flex-wrap:wrap;margin-top:.3rem}
 .map-legend-item{display:flex;align-items:center;gap:.3rem}
-.legend-swatch{width:14px;height:14px;border-radius:3px;border:1px solid #444}
+.legend-swatch{width:14px;height:14px;border-radius:3px;border:1px solid var(--legend-border)}
 
 /* ── Map Zoom ───────────────────────────────────── */
 .zoom-controls{display:flex;gap:.4rem;align-items:center;margin-top:.4rem}
@@ -205,7 +213,7 @@ main{
 /* ── Round 12: State History Timeline ──────────── */
 .timeline-wrap{margin-top:.5rem}
 .timeline-wrap h3{font-size:.8rem;color:var(--text-dim);margin-bottom:.25rem}
-#stateTimeline{width:100%;height:22px;border-radius:4px;background:#1a1b30;display:block}
+#stateTimeline{width:100%;height:22px;border-radius:4px;background:var(--bar-bg);display:block}
 
 /* ── Round 13: Disabled buttons ────────────────── */
 .btn:disabled,.btn.disabled{opacity:.35;cursor:not-allowed;pointer-events:none;filter:none;transform:none}
@@ -220,35 +228,33 @@ main{
 
 /* ── Round 15: Theme Toggle ────────────────────── */
 .theme-toggle{
-  background:none;border:1px solid #444;border-radius:6px;padding:.25rem .5rem;
+  background:none;border:1px solid var(--input-border);border-radius:6px;padding:.25rem .5rem;
   cursor:pointer;font-size:1.1rem;color:var(--text);transition:background .2s;
 }
-.theme-toggle:hover{background:#333}
+.theme-toggle:hover{background:var(--card-hover)}
 
 /* ── Light theme ── */
 html.light{
   --bg:#f0f2f5;--card:#ffffff;--card-hover:#f8f9fa;
   --accent:#2563eb;--text:#1a1b2e;--text-dim:#64748b;
   --shadow:0 2px 12px rgba(0,0,0,.1);
+  --header-bg:#fff;--header-border:#e0e0e0;
+  --input-bg:#f8f9fa;--input-border:#ccc;
+  --btn-bg:#e0e3ea;--btn-hover:#d0d3da;
+  --log-bg:#f1f3f6;--log-border:rgba(0,0,0,.06);
+  --map-bg:#e8eaed;--map-border:#ccc;
+  --bar-bg:#e5e7eb;
+  --legend-border:#ccc;
+  --swatch-unknown:#d0d0d8;
 }
-html.light header{background:#fff;border-bottom-color:#e0e0e0}
-html.light .map-container{background:#e8eaed;border-color:#ccc}
-html.light .room-item,html.light .log-box,html.light #stateTimeline{background:#f1f3f6}
-html.light .room-save-row input{background:#f8f9fa;border-color:#ccc;color:var(--text)}
-html.light .dpad .btn{background:#e0e3ea}
-html.light .dpad .btn:hover{background:#d0d3da}
 html.light .toast{background:#fff;color:var(--text)}
-html.light .theme-toggle{border-color:#ccc}
-html.light .theme-toggle:hover{background:#e8e8e8}
 
 /* ── Round 16: Fullscreen Map ──────────────────── */
 .fullscreen-btn{
-  background:none;border:1px solid #444;border-radius:6px;padding:.25rem .5rem;
+  background:none;border:1px solid var(--input-border);border-radius:6px;padding:.25rem .5rem;
   cursor:pointer;font-size:1rem;color:var(--text);transition:background .2s;
 }
-.fullscreen-btn:hover{background:#333}
-html.light .fullscreen-btn{border-color:#ccc}
-html.light .fullscreen-btn:hover{background:#e8e8e8}
+.fullscreen-btn:hover{background:var(--card-hover)}
 .map-wrap.fullscreen{
   position:fixed;inset:0;z-index:900;background:var(--bg);
   padding:1rem;display:flex;flex-direction:column;overflow:auto;
@@ -265,12 +271,10 @@ html.light .fullscreen-btn:hover{background:#e8e8e8}
 
 /* ── Round 19: Mute Toggle ─────────────────────── */
 .mute-toggle{
-  background:none;border:1px solid #444;border-radius:6px;padding:.25rem .5rem;
+  background:none;border:1px solid var(--input-border);border-radius:6px;padding:.25rem .5rem;
   cursor:pointer;font-size:1.1rem;color:var(--text);transition:background .2s;
 }
-.mute-toggle:hover{background:#333}
-html.light .mute-toggle{border-color:#ccc}
-html.light .mute-toggle:hover{background:#e8e8e8}
+.mute-toggle:hover{background:var(--card-hover)}
 
 /* ── Round 20: Mobile Responsive ───────────────── */
 @media(max-width:960px){
@@ -330,17 +334,17 @@ html.light .mute-toggle:hover{background:#e8e8e8}
 /* ── Round 33: Schedule Panel ──────────────────── */
 .sched-form{display:flex;gap:.4rem;margin-bottom:.6rem;flex-wrap:wrap;align-items:center}
 .sched-form input[type=time]{
-  padding:.35rem .5rem;border-radius:6px;border:1px solid #444;
-  background:#1e1f36;color:var(--text);font-size:.82rem;outline:none;
+  padding:.35rem .5rem;border-radius:6px;border:1px solid var(--input-border);
+  background:var(--input-bg);color:var(--text);font-size:.82rem;outline:none;
 }
 .sched-form input[type=time]:focus{border-color:var(--accent)}
 .sched-days{display:flex;gap:.25rem;flex-wrap:wrap}
 .sched-days label{font-size:.72rem;display:flex;align-items:center;gap:.15rem;cursor:pointer;
-  background:#1e1f36;padding:.2rem .35rem;border-radius:4px}
+  background:var(--input-bg);padding:.2rem .35rem;border-radius:4px}
 .sched-days input[type=checkbox]{width:14px;height:14px;accent-color:var(--accent)}
 .sched-list{max-height:140px;overflow-y:auto;display:flex;flex-direction:column;gap:.35rem}
 .sched-item{display:flex;align-items:center;justify-content:space-between;
-  background:#1e1f36;border-radius:6px;padding:.35rem .55rem;font-size:.8rem}
+  background:var(--input-bg);border-radius:6px;padding:.35rem .55rem;font-size:.8rem}
 .sched-item .sched-time{font-weight:700;color:var(--accent);margin-right:.5rem}
 .sched-item .sched-days-label{color:var(--text-dim);flex:1}
 
@@ -355,12 +359,10 @@ html.light .mute-toggle:hover{background:#e8e8e8}
 
 /* ── Round 36: Language Selector ───────────────── */
 .lang-selector{
-  background:none;border:1px solid #444;border-radius:6px;padding:.2rem .45rem;
+  background:none;border:1px solid var(--input-border);border-radius:6px;padding:.2rem .45rem;
   cursor:pointer;font-size:.8rem;color:var(--text);font-weight:600;transition:background .2s;
 }
-.lang-selector:hover{background:#333}
-html.light .lang-selector{border-color:#ccc}
-html.light .lang-selector:hover{background:#e8e8e8}
+.lang-selector:hover{background:var(--card-hover)}
 
 /* ── Round 37: Accessibility ───────────────────── */
 *:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
@@ -368,18 +370,16 @@ html.light .lang-selector:hover{background:#e8e8e8}
 
 /* ── Round 39: Settings Modal ──────────────────── */
 .settings-btn{
-  background:none;border:1px solid #444;border-radius:6px;padding:.25rem .5rem;
+  background:none;border:1px solid var(--input-border);border-radius:6px;padding:.25rem .5rem;
   cursor:pointer;font-size:1.1rem;color:var(--text);transition:background .2s;
 }
-.settings-btn:hover{background:#333}
-html.light .settings-btn{border-color:#ccc}
-html.light .settings-btn:hover{background:#e8e8e8}
+.settings-btn:hover{background:var(--card-hover)}
 .settings-group{margin-bottom:.8rem}
 .settings-group label{display:block;font-size:.85rem;color:var(--text-dim);margin-bottom:.3rem}
 .settings-group input[type=range]{width:100%;accent-color:var(--accent)}
 .settings-group select,.settings-group input[type=number]{
-  padding:.3rem .5rem;border-radius:6px;border:1px solid #444;
-  background:#1e1f36;color:var(--text);font-size:.82rem;outline:none;width:100%;
+  padding:.3rem .5rem;border-radius:6px;border:1px solid var(--input-border);
+  background:var(--input-bg);color:var(--text);font-size:.82rem;outline:none;width:100%;
 }
 .settings-group select:focus,.settings-group input[type=number]:focus{border-color:var(--accent)}
 
@@ -453,7 +453,7 @@ html.light .settings-btn:hover{background:#e8e8e8}
     <div class="map-legend">
       <span class="map-legend-item"><span class="legend-swatch" style="background:#e6ebf0"></span> <span data-i18n="free">Free</span></span>
       <span class="map-legend-item"><span class="legend-swatch" style="background:#dc3232"></span> <span data-i18n="obstacle">Obstacle</span></span>
-      <span class="map-legend-item"><span class="legend-swatch" style="background:#282830"></span> <span data-i18n="unknown">Unknown</span></span>
+      <span class="map-legend-item"><span class="legend-swatch" style="background:var(--swatch-unknown)"></span> <span data-i18n="unknown">Unknown</span></span>
       <span class="map-legend-item"><span class="legend-swatch" style="background:#4a9eff"></span> <span data-i18n="robot">Robot</span></span>
     </div>
     <div class="map-toggles">
@@ -640,7 +640,7 @@ html.light .settings-btn:hover{background:#e8e8e8}
 <div class="toast-container" id="toasts"></div>
 
 <!-- ═══ Scripts ═══ -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js"></script>
+<script src="/socket.io/socket.io.js"></script>
 <script>
 (function(){
 "use strict";

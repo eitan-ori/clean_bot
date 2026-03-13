@@ -817,3 +817,74 @@ class TestCoverageAlgorithm:
         assert abs(oriented[0][2] - 0.0) < 0.01
         # Second: pointing up (pi/2)
         assert abs(oriented[1][2] - math.pi / 2) < 0.01
+
+
+# ── Bug 47: send_command emits mission_state via SocketIO ──
+class TestSendCommandEmit:
+    """Bug 47: send_command should emit log_entry in real-time via SocketIO."""
+
+    def test_send_command_emits_log_entry(self):
+        """send_command should call sio.emit with mission_state and log_entry."""
+        bridge = MagicMock()
+        bridge.mission_state = "idle"
+        bridge.mission_log = []
+        bridge.sio = MagicMock()
+        bridge.cmd_pub = MagicMock()
+        bridge.get_logger.return_value = MagicMock()
+        # Call the real method on our mock
+        from collections import deque
+        bridge.mission_log = deque(maxlen=200)
+        webapp_module.WebBridgeNode.send_command(bridge, "start_scan")
+        bridge.sio.emit.assert_called_once()
+        call_args = bridge.sio.emit.call_args
+        assert call_args[0][0] == "mission_state"
+        payload = call_args[0][1]
+        assert "log_entry" in payload
+        assert "start_scan" in payload["log_entry"]["event"]
+
+    def test_send_command_appends_to_mission_log(self):
+        """send_command should also append to the deque for GET /api/log."""
+        from collections import deque
+        bridge = MagicMock()
+        bridge.mission_state = "idle"
+        bridge.mission_log = deque(maxlen=200)
+        bridge.sio = MagicMock()
+        bridge.cmd_pub = MagicMock()
+        bridge.get_logger.return_value = MagicMock()
+        webapp_module.WebBridgeNode.send_command(bridge, "stop_clean")
+        assert len(bridge.mission_log) == 1
+        assert "stop_clean" in bridge.mission_log[-1]["event"]
+
+
+# ── Bug 48: CSS uses variables instead of hardcoded dark colors ──
+class TestLightModeCSS:
+    """Bug 48: All CSS colors should use variables, not hardcoded hex."""
+
+    def test_no_hardcoded_dark_colors_outside_root(self, flask_client):
+        """Hardcoded dark hex colors should only appear in :root definitions."""
+        import re
+        client, _ = flask_client
+        resp = client.get("/")
+        html = resp.data.decode()
+        style_match = re.search(r"<style>(.*?)</style>", html, re.DOTALL)
+        assert style_match, "No <style> block found"
+        css = style_match.group(1)
+        # Remove :root{...} and html.light{...} blocks (variable definitions are OK)
+        css_no_root = re.sub(r":root\s*\{[^}]+\}", "", css)
+        css_no_root = re.sub(r"html\.light\s*\{[^}]+\}", "", css_no_root)
+        dark_colors = ["#1e1f36", "#353660", "#1a1b30", "#16172a", "#2a2b44", "#282830", "#101020"]
+        for color in dark_colors:
+            assert color not in css_no_root, f"Hardcoded dark color {color} found outside :root"
+
+
+# ── Bug 49: socket.io loaded locally, not from CDN ──
+class TestSocketIOLocal:
+    """Bug 49: socket.io client should be loaded from local server, not CDN."""
+
+    def test_socket_io_local_script(self, flask_client):
+        """The socket.io script tag should reference /socket.io/socket.io.js."""
+        client, _ = flask_client
+        resp = client.get("/")
+        html = resp.data.decode()
+        assert '/socket.io/socket.io.js' in html
+        assert 'cdnjs.cloudflare.com' not in html

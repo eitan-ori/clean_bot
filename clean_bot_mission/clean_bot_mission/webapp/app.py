@@ -441,6 +441,7 @@ class WebBridgeNode(Node):
         self.cmd_pub.publish(msg)
         entry = {"time": datetime.now().strftime("%H:%M:%S"), "event": f"Command sent: {cmd}"}
         self.mission_log.append(entry)
+        self.sio.emit("mission_state", {"state": self.mission_state, "log_entry": entry})
         self.get_logger().info(f"Command: {cmd}")
         # Safety: stop commands also zero velocity to halt the robot immediately
         if cmd in ("stop_clean", "stop_scan"):

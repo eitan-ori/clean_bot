@@ -231,3 +231,18 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (ws_command, ws_velocity, ws_latency_ping, ws_set_map_rate)
 - **Problem:** All WebSocket event handlers called `data.get()` without verifying that `data` is a dict. If a client sends a string, int, or None, the handlers raise `AttributeError`. While Flask-SocketIO catches the exception (server doesn't crash), it fills logs with tracebacks.
 - **Fix:** Added `if not isinstance(data, dict): return` guard to all affected handlers. Also added try/except for `float()` conversion in `ws_set_map_rate`.
+
+### Bug 47: Mission log only updates on page refresh
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`send_command`)
+- **Problem:** `send_command()` appended log entries to `self.mission_log` (deque) but never emitted them via WebSocket. The frontend only received log entries via the `mission_state` event, which fires on ROS state transitions — not on commands. Commands like "Command sent: start_scan" were invisible until page refresh triggered `GET /api/log`.
+- **Fix:** Added `self.sio.emit("mission_state", {"state": self.mission_state, "log_entry": entry})` after appending the log entry, so the frontend receives real-time updates.
+
+### Bug 48: Light mode shows dark-themed boxes
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/templates/index.html` (CSS)
+- **Problem:** Many elements used hardcoded dark hex colors (`#1e1f36`, `#353660`, `#1a1b30`, `#444`, `#333`, `#16172a`, `#2a2b44`, `#282830`) that the light theme toggle didn't override. Inputs, buttons, log boxes, map containers, progress bars, and scrollbar thumbs all stayed dark in light mode.
+- **Fix:** Introduced 12 new CSS custom properties (`--input-bg`, `--input-border`, `--btn-bg`, `--btn-hover`, `--log-bg`, `--log-border`, `--map-bg`, `--map-border`, `--bar-bg`, `--legend-border`, `--swatch-unknown`, `--header-bg`) in `:root` and `html.light`. Replaced all hardcoded colors with `var(...)` references. Removed redundant `html.light` overrides for buttons that now inherit from variables.
+
+### Bug 49: Web app unreachable from other devices on LAN
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/templates/index.html` (script tag)
+- **Problem:** The socket.io client library was loaded from `cdnjs.cloudflare.com`. On LAN-only networks without internet access, this CDN request fails and the entire app breaks — socket connections can't be established.
+- **Fix:** Changed the script `src` to `/socket.io/socket.io.js`, which Flask-SocketIO 5.x serves automatically. No external CDN dependency needed.
