@@ -279,7 +279,9 @@ class WebBridgeNode(Node):
                                  abs(self.robot_y - trail[-1][1]) > 0.01):
                     trail.append((round(self.robot_x, 3), round(self.robot_y, 3)))
                     if len(trail) > 500:
+                        removed = len(trail) - 500
                         self.path_trail = trail[-500:]
+                        self._trail_sent_index = max(0, self._trail_sent_index - removed)
         except Exception:
             self._tf_healthy = False
 
@@ -538,10 +540,8 @@ class WebBridgeNode(Node):
         msg.info.origin.position.y = float(d.get("origin_y", 0.0))
         msg.info.origin.orientation.w = 1.0
         msg.data = [int(v) for v in d["data"]]
-        # Update internal map state
-        self.map_msg = msg
-        self.map_update_counter += 1
-        # Publish to ROS so SLAM/Nav2/coverage planner pick it up
+        # Publish to ROS so SLAM/Nav2/coverage planner pick it up.
+        # Our own _on_map callback will update internal state (map_msg, counter, heatmap).
         self.map_pub.publish(msg)
         self.get_logger().info(f"Published saved room map '{d.get('name', filename)}' ({w}x{h})")
         # Send start_clean command

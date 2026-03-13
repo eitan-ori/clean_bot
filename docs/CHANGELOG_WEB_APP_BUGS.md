@@ -186,3 +186,23 @@
 - **Files:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`save_room`, `rename_room`)
 - **Problem:** If a room name consisted entirely of special characters (e.g., `@#$%`), the filename sanitization would produce an empty string, resulting in a file named `.json` — a hidden file that would be hard to manage. Same issue in `rename_room`.
 - **Fix:** Added `if not safe_name:` guard after sanitization, returning a clear error message asking for at least one alphanumeric character.
+
+### Bug 38: Path trail stops updating after list truncation
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`_update_pose`)
+- **Problem:** When `path_trail` exceeds 500 items and gets truncated to the last 500, `_trail_sent_index` was not adjusted. It stayed at ~500 while the new list also has 500 items, so `path_trail[500:]` was always empty — no new trail points were ever sent to the frontend after the first truncation.
+- **Fix:** When truncating, adjust `_trail_sent_index` by subtracting the number of removed items: `self._trail_sent_index = max(0, self._trail_sent_index - removed)`.
+
+### Bug 39: Double map_update_counter increment in load_and_clean_room
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`load_and_clean_room`)
+- **Problem:** `load_and_clean_room` manually set `self.map_msg = msg` and incremented `self.map_update_counter`, then published the message to `/map`. Since the node also subscribes to `/map`, the `_on_map` callback would fire and do the same updates again — double-incrementing the counter and double-processing the heatmap.
+- **Fix:** Removed the manual `self.map_msg` assignment and `map_update_counter` increment from `load_and_clean_room`. Let the `_on_map` callback handle internal state updates when it receives the published message.
+
+### Bug 40: Many dynamic UI strings not translated
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/templates/index.html`
+- **Problem:** Toast messages, the rename prompt, modal metadata text, emergency stop message, navigation messages, and export map messages were all hardcoded in English. Switching to Hebrew left ~16 strings untranslated.
+- **Fix:** Added 16 new i18n keys to both `en` and `he` dictionaries (`room_saved`, `room_deleted`, `room_renamed`, `rename_prompt`, `rename_failed`, `save_failed`, `preview_failed`, `enter_room_name`, `command_sent`, `confirm_action`, `emergency_activated`, `navigating_to`, `nav_failed`, `map_exported`, `no_map_export`, `failed`). Updated all dynamic strings to use `t()` function.
+
+### Bug 41: AudioContext leak in notification chime
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/templates/index.html` (`playChime`)
+- **Problem:** A new `AudioContext` was created every time `playChime()` was called. AudioContexts are limited browser resources (browsers cap at ~6-8 per page) and creating too many causes silent failure or console warnings.
+- **Fix:** Changed to singleton pattern: store `_audioCtx` in module scope, create on first use, reuse for subsequent calls.

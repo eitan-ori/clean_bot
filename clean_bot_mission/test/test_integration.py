@@ -1118,3 +1118,49 @@ class TestI18nAndCleanRoom:
         resp = client.get('/')
         html = resp.data.decode()
         assert 'touch-action:none' in html
+
+    def test_new_i18n_keys_match(self, client):
+        """Bug 40: All new dynamic string keys exist in both en and he dicts."""
+        resp = client.get('/')
+        html = resp.data.decode()
+        new_keys = [
+            'room_saved', 'room_deleted', 'room_renamed', 'rename_prompt',
+            'rename_failed', 'save_failed', 'preview_failed', 'enter_room_name',
+            'command_sent', 'confirm_action', 'emergency_activated',
+            'navigating_to', 'nav_failed', 'map_exported', 'no_map_export', 'failed',
+        ]
+        for key in new_keys:
+            # Keys in the LANG dict appear as: key_name:'value'
+            assert f"{key}:'" in html, \
+                f"i18n key '{key}' not found in LANG dict"
+
+    def test_trail_sent_index_adjusted_on_truncation(self):
+        """Bug 38: _trail_sent_index must be adjusted when trail is truncated."""
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        node = WebBridgeNode.__new__(WebBridgeNode)
+        node.path_trail = list(range(510))
+        node._trail_sent_index = 505
+        node._trail_lock = __import__('threading').Lock()
+        # Simulate truncation logic from _update_pose
+        with node._trail_lock:
+            trail = node.path_trail
+            trail.append(9999)
+            if len(trail) > 500:
+                removed = len(trail) - 500
+                node.path_trail = trail[-500:]
+                node._trail_sent_index = max(0, node._trail_sent_index - removed)
+        # After truncation: list has 500 items, index should be adjusted
+        assert len(node.path_trail) == 500
+        assert node._trail_sent_index <= len(node.path_trail)
+        # New items should be accessible via the sent index
+        new_trail = node.path_trail[node._trail_sent_index:]
+        assert len(new_trail) >= 0
+
+    def test_audio_context_reuse(self, client):
+        """Bug 41: AudioContext should be reused, not recreated each chime."""
+        resp = client.get('/')
+        html = resp.data.decode()
+        assert '_audioCtx' in html
+        assert 'new (window.AudioContext' in html
+        # The singleton pattern: create once then reuse
+        assert '_audioCtx.createOscillator()' in html

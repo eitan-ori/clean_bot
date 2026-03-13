@@ -858,9 +858,9 @@ navHereBtn.addEventListener('click', () => {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({x: navClickTarget.worldX, y: navClickTarget.worldY})
   }).then(r => r.json()).then(d => {
-    if (d.ok) toast('Navigating to (' + navClickTarget.worldX.toFixed(2) + ', ' + navClickTarget.worldY.toFixed(2) + ')');
-    else toast(d.error || 'Navigation failed');
-  }).catch(() => toast('Navigation failed'));
+    if (d.ok) toast(t('navigating_to') + ' (' + navClickTarget.worldX.toFixed(2) + ', ' + navClickTarget.worldY.toFixed(2) + ')');
+    else toast(d.error || t('nav_failed'));
+  }).catch(() => toast(t('nav_failed')));
   navPopup.style.display = 'none';
   navClickTarget = null;
 });
@@ -975,19 +975,18 @@ function setMissionBadge(state) {
 const DESTRUCTIVE_CMDS = new Set(['reset']);
 window.sendCommand = function(cmd) {
   if (DESTRUCTIVE_CMDS.has(cmd)) {
-    if (!confirm('Are you sure you want to ' + cmd.replace('_', ' ') + '?')) return;
+    if (!confirm(t('confirm_action') + ' ' + cmd.replace('_', ' ') + '?')) return;
   }
   socket.emit('command', {command: cmd});
-  toast('Command sent: ' + cmd);
+  toast(t('command_sent') + ': ' + cmd);
 };
 
 /* ── Emergency Stop (Round 2) ─────────────────── */
 window.emergencyStop = function() {
-  // Stop ALL operations - scanning, cleaning, navigation
   socket.emit('command', {command: 'stop_clean'});
   socket.emit('command', {command: 'stop_scan'});
   socket.emit('velocity', {linear: 0, angular: 0});
-  toast('⚠️ Emergency stop activated!');
+  toast('⚠️ ' + t('emergency_activated'));
 };
 
 /* ── Manual Drive ──────────────────────────────── */
@@ -1080,25 +1079,25 @@ function renderRooms(rooms) {
 
 /* ── Round 11: Room rename ─────────────────────── */
 window.renameRoom = function(filename, currentName) {
-  const newName = prompt('Enter new name for "' + currentName + '":', currentName);
+  const newName = prompt(t('rename_prompt') + ' "' + currentName + '":', currentName);
   if (!newName || newName.trim() === '' || newName.trim() === currentName) return;
   fetch('/api/rooms/' + filename + '/rename', {
     method: 'PUT', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({name: newName.trim()})
   }).then(r => r.json()).then(d => {
-    if (d.ok) { toast('Room renamed'); fetchRooms(); }
-    else toast(d.error || 'Rename failed');
-  }).catch(() => toast('Rename failed'));
+    if (d.ok) { toast(t('room_renamed')); fetchRooms(); }
+    else toast(d.error || t('rename_failed'));
+  }).catch(() => toast(t('rename_failed')));
 };
 
 window.saveRoom = function() {
   const name = document.getElementById('roomName').value.trim();
-  if (!name) { toast('Enter a room name'); return; }
+  if (!name) { toast(t('enter_room_name')); return; }
   fetch('/api/rooms/save', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})})
     .then(r => r.json()).then(d => {
-      if (d.ok) { toast('Room saved: ' + name); document.getElementById('roomName').value = ''; fetchRooms(); }
-      else toast(d.error || 'Save failed');
-    }).catch(() => toast('Save failed'));
+      if (d.ok) { toast(t('room_saved') + ': ' + name); document.getElementById('roomName').value = ''; fetchRooms(); }
+      else toast(d.error || t('save_failed'));
+    }).catch(() => toast(t('save_failed')));
 };
 
 window.previewRoom = function(filename, name) {
@@ -1107,9 +1106,9 @@ window.previewRoom = function(filename, name) {
     document.getElementById('modalTitle').textContent = d.name || name;
     document.getElementById('modalImg').src = 'data:image/png;base64,' + d.image_b64;
     document.getElementById('modalMeta').textContent =
-      'Size: ' + d.width + '×' + d.height + '  ·  Resolution: ' + d.resolution + ' m/px  ·  Saved: ' + (d.saved_at || '');
+      t('size') + ': ' + d.width + '×' + d.height + '  ·  ' + t('resolution') + ': ' + d.resolution + ' m/px  ·  ' + (d.saved_at || '');
     document.getElementById('modalOverlay').classList.add('active');
-  }).catch(() => toast('Preview failed'));
+  }).catch(() => toast(t('preview_failed')));
 };
 
 window.cleanRoom = function(filename) {
@@ -1117,16 +1116,16 @@ window.cleanRoom = function(filename) {
   fetch('/api/rooms/' + filename + '/load_and_clean', {method:'POST'})
     .then(r => r.json()).then(d => {
       if (d.ok) toast(d.message || t('clean_room'));
-      else toast(d.error || 'Failed');
-    }).catch(() => toast('Failed'));
+      else toast(d.error || t('failed'));
+    }).catch(() => toast(t('failed')));
 };
 
 window.deleteRoom = function(filename) {
   if (!confirm(t('delete_confirm'))) return;
   fetch('/api/rooms/' + filename, {method:'DELETE'}).then(r => r.json()).then(d => {
-    if (d.ok) { toast('Room deleted'); fetchRooms(); }
-    else toast(d.error || 'Delete failed');
-  }).catch(() => toast('Delete failed'));
+    if (d.ok) { toast(t('room_deleted')); fetchRooms(); }
+    else toast(d.error || t('failed'));
+  }).catch(() => toast(t('failed')));
 };
 
 window.closeModal = function(e) {
@@ -1157,7 +1156,7 @@ fullscreenBtn.addEventListener('click', () => {
 /* ── Round 17: Export map as PNG ────────────────── */
 document.getElementById('exportMapBtn').addEventListener('click', () => {
   canvas.toBlob(blob => {
-    if (!blob) { toast('No map to export'); return; }
+    if (!blob) { toast(t('no_map_export')); return; }
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -1166,7 +1165,7 @@ document.getElementById('exportMapBtn').addEventListener('click', () => {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    toast('Map exported');
+    toast(t('map_exported'));
   }, 'image/png');
 });
 
@@ -1195,22 +1194,22 @@ muteToggle.addEventListener('click', () => {
   localStorage.setItem('cb_muted', soundMuted ? '1' : '0');
 });
 
+let _audioCtx = null;
 function playChime() {
   if (soundMuted) return;
   try {
-    const actx = new (window.AudioContext || window.webkitAudioContext)();
-    // Two-note ascending chime
+    if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     [440, 554.37].forEach((freq, i) => {
-      const osc = actx.createOscillator();
-      const gain = actx.createGain();
+      const osc = _audioCtx.createOscillator();
+      const gain = _audioCtx.createGain();
       osc.type = 'sine';
       osc.frequency.value = freq;
-      gain.gain.setValueAtTime(0.3, actx.currentTime + i * 0.2);
-      gain.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + i * 0.2 + 0.4);
+      gain.gain.setValueAtTime(0.3, _audioCtx.currentTime + i * 0.2);
+      gain.gain.exponentialRampToValueAtTime(0.001, _audioCtx.currentTime + i * 0.2 + 0.4);
       osc.connect(gain);
-      gain.connect(actx.destination);
-      osc.start(actx.currentTime + i * 0.2);
-      osc.stop(actx.currentTime + i * 0.2 + 0.5);
+      gain.connect(_audioCtx.destination);
+      osc.start(_audioCtx.currentTime + i * 0.2);
+      osc.stop(_audioCtx.currentTime + i * 0.2 + 0.5);
     });
   } catch (e) { /* Audio not supported */ }
 }
@@ -1300,13 +1299,13 @@ window.addSchedule = function() {
     body: JSON.stringify({time, days})
   }).then(r => r.json()).then(d => {
     if (d.ok) { toast(t('schedule_added')); fetchSchedules(); timeEl.value = ''; document.querySelectorAll('#schedDays input[type=checkbox]').forEach(cb => cb.checked = false); }
-    else toast(d.error || 'Failed');
-  }).catch(() => toast('Failed'));
+    else toast(d.error || t('failed'));
+  }).catch(() => toast(t('failed')));
 };
 window.deleteSchedule = function(id) {
   fetch('/api/schedules/' + id, {method:'DELETE'}).then(r => r.json()).then(d => {
     if (d.ok) { toast(t('schedule_deleted')); fetchSchedules(); }
-  }).catch(() => toast('Failed'));
+  }).catch(() => toast(t('failed')));
 };
 
 /* ── Round 34: Battery indicator update ────────── */
@@ -1362,6 +1361,13 @@ const LANG = {
     preview:'Preview',clean:'Clean',delete:'Delete',connected:'Connected',disconnected:'Disconnected',
     delete_confirm:'Delete this room?',room_name_placeholder:'Room name…',
     clean_saved_room:'Loading room for cleaning…',
+    room_saved:'Room saved',room_deleted:'Room deleted',room_renamed:'Room renamed',
+    rename_prompt:'Enter new name for',rename_failed:'Rename failed',save_failed:'Save failed',
+    preview_failed:'Preview failed',enter_room_name:'Enter a room name',
+    command_sent:'Command sent',confirm_action:'Are you sure you want to',
+    emergency_activated:'Emergency stop activated!',navigating_to:'Navigating to',
+    nav_failed:'Navigation failed',map_exported:'Map exported',no_map_export:'No map to export',
+    failed:'Failed',
   },
   he: {
     emergency_stop:'עצירת חירום',status:'סטטוס',mission_control:'בקרת משימה',
@@ -1389,6 +1395,13 @@ const LANG = {
     preview:'תצוגה מקדימה',clean:'נקה',delete:'מחק',connected:'מחובר',disconnected:'מנותק',
     delete_confirm:'למחוק את החדר?',room_name_placeholder:'שם החדר…',
     clean_saved_room:'טוען חדר לניקוי…',
+    room_saved:'החדר נשמר',room_deleted:'החדר נמחק',room_renamed:'החדר שונה',
+    rename_prompt:'הזן שם חדש עבור',rename_failed:'שינוי השם נכשל',save_failed:'השמירה נכשלה',
+    preview_failed:'התצוגה המקדימה נכשלה',enter_room_name:'הזן שם חדר',
+    command_sent:'הפקודה נשלחה',confirm_action:'האם אתה בטוח שברצונך',
+    emergency_activated:'עצירת חירום הופעלה!',navigating_to:'מנווט אל',
+    nav_failed:'הניווט נכשל',map_exported:'המפה יוצאה',no_map_export:'אין מפה לייצוא',
+    failed:'נכשל',
   }
 };
 let currentLang = localStorage.getItem('cb_lang') || 'en';
