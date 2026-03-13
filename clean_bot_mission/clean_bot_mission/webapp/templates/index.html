@@ -1129,10 +1129,10 @@ function renderRooms(rooms) {
       '<span class="room-name">' + esc(r.name) + '</span>' +
       '<span class="room-date">' + date + '</span>' +
       '<div class="room-actions">' +
-        '<button class="btn btn-yellow btn-sm" onclick="renameRoom(\'' + esc(r.filename) + '\',\'' + esc(r.name) + '\')">✏️</button>' +
-        '<button class="btn btn-blue btn-sm" onclick="previewRoom(\'' + esc(r.filename) + '\',\'' + esc(r.name) + '\')">' + t('preview') + '</button>' +
-        '<button class="btn btn-green btn-sm" onclick="cleanRoom(\'' + esc(r.filename) + '\')">' + t('clean') + '</button>' +
-        '<button class="btn btn-red btn-sm" onclick="deleteRoom(\'' + esc(r.filename) + '\')">' + t('delete') + '</button>' +
+        '<button class="btn btn-yellow btn-sm" onclick="renameRoom(\'' + escAttr(r.filename) + '\',\'' + escAttr(r.name) + '\')">✏️</button>' +
+        '<button class="btn btn-blue btn-sm" onclick="previewRoom(\'' + escAttr(r.filename) + '\',\'' + escAttr(r.name) + '\')">' + t('preview') + '</button>' +
+        '<button class="btn btn-green btn-sm" onclick="cleanRoom(\'' + escAttr(r.filename) + '\')">' + t('clean') + '</button>' +
+        '<button class="btn btn-red btn-sm" onclick="deleteRoom(\'' + escAttr(r.filename) + '\')">' + t('delete') + '</button>' +
       '</div></div>';
   }).join('');
 }
@@ -1305,6 +1305,8 @@ function toast(msg) {
 
 /* ── Helpers ───────────────────────────────────── */
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML.replace(/'/g, '&#39;'); }
+// Escape for JS string inside HTML onclick attribute: JS-escape first, then HTML-escape
+function escAttr(s) { return esc(String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'")); }
 
 /* ── Init: set smart button states ─────────────── */
 updateButtonStates('UNKNOWN');
@@ -1500,7 +1502,7 @@ function renderNoGoZones() {
   nogoListEl.innerHTML = noGoZones.map((z, i) => {
     const label = z.name || (t('zone') + ' ' + (i + 1));
     return '<div class="nogo-zone-item"><span class="nogo-label">🚫 ' + esc(label) + '</span>' +
-      '<button class="nogo-del" onclick="deleteNoGoZone(\'' + esc(z.id) + '\')" title="' + t('delete') + '">✕</button></div>';
+      '<button class="nogo-del" onclick="deleteNoGoZone(\'' + escAttr(z.id) + '\')" title="' + t('delete') + '">✕</button></div>';
   }).join('');
 }
 

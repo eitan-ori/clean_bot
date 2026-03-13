@@ -493,3 +493,8 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/templates/index.html`
 - **Problem:** Line `diagToggle.querySelector('span:last-child') || null;` was a standalone expression with no side effects — its result was never assigned or used. Left over from an earlier refactor.
 - **Fix:** Removed the dead code line.
+
+### Bug 100: Room names with special characters break onclick handlers
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/templates/index.html`
+- **Problem:** Room names containing single quotes (e.g., "Bob's Room") would break the JavaScript expressions in inline `onclick` attributes. The `esc()` function converts `'` to `&#39;`, which the HTML parser decodes back to `'`, breaking the JS string literal. This could cause JS errors or XSS if a malicious room name is crafted.
+- **Fix:** Added `escAttr()` helper that first escapes for JavaScript (`'` → `\'`, `\` → `\\`) then for HTML attributes via `esc()`. Used `escAttr()` for all inline onclick string arguments in room list and no-go zone list rendering.
