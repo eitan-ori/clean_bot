@@ -242,12 +242,14 @@ class FrontierExplorer(Node):
 
     def map_callback(self, msg: OccupancyGrid):
         """Process incoming map and convert to numpy array."""
+        w, h = msg.info.width, msg.info.height
+        if w <= 0 or h <= 0 or len(msg.data) != w * h:
+            return
         self.map_info = msg.info
         self.map_data = msg.data
         
         # Convert to numpy array for easier processing
-        self.map_array = np.array(msg.data, dtype=np.int8).reshape(
-            (msg.info.height, msg.info.width))
+        self.map_array = np.array(msg.data, dtype=np.int8).reshape((h, w))
         
         if self.start_time is None and self.auto_start:
             self.start_time = self.get_clock().now()

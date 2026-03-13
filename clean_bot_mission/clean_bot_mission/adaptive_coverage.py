@@ -550,9 +550,11 @@ class AdaptiveCoveragePlanner(Node):
 
     def map_callback(self, msg: OccupancyGrid):
         """Store latest map."""
+        w, h = msg.info.width, msg.info.height
+        if w <= 0 or h <= 0 or len(msg.data) != w * h:
+            return
         self.map_info = msg.info
-        self.map_array = np.array(msg.data, dtype=np.int8).reshape(
-            (msg.info.height, msg.info.width))
+        self.map_array = np.array(msg.data, dtype=np.int8).reshape((h, w))
 
     def exploration_complete_callback(self, msg: Bool):
         """Triggered when exploration finishes."""

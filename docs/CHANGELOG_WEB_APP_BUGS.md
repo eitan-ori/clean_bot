@@ -256,3 +256,8 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`rename_room`)
 - **Problem:** When renaming a room, if another room with the target name already exists, the rename would silently overwrite that room's file — causing data loss of the original room.
 - **Fix:** Added check: `if new_path != path and new_path.exists(): return False, "A room with that name already exists"`.
+
+### Bug 52: Malformed map data crashes frontier_explorer, adaptive_coverage, and telegram_bridge
+- **Files:** `clean_bot_mission/clean_bot_mission/frontier_explorer.py` (`map_callback`), `clean_bot_mission/clean_bot_mission/adaptive_coverage.py` (`map_callback`), `clean_bot_mission/scripts/telegram_bridge.py` (`generate_map_image`)
+- **Problem:** Same as Bug 50 — `np.array(msg.data).reshape((h, w))` called without verifying `len(msg.data) == w * h`. A malformed OccupancyGrid from SLAM causes `ValueError` crash in the ROS callback, breaking the entire node.
+- **Fix:** Added dimension guard (`if w <= 0 or h <= 0 or len(msg.data) != w * h: return`) before the reshape call in all three files.

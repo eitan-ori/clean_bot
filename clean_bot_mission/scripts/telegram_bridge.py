@@ -170,6 +170,9 @@ class RobotBridgeNode(Node):
         msg = self.map_data
         width = msg.info.width
         height = msg.info.height
+        if width <= 0 or height <= 0 or len(msg.data) != width * height:
+            self.get_logger().warn('⚠️ Malformed map data, cannot generate image')
+            return None
         res = msg.info.resolution
         origin_x = msg.info.origin.position.x
         origin_y = msg.info.origin.position.y
