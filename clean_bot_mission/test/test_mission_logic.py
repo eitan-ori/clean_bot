@@ -2716,3 +2716,44 @@ class TestScorePoseOutOfBounds:
         score = WebBridgeNode._score_pose(node, pts_x, pts_y, 0.0, 0.0, 0.0,
                                            wall_mask, 0.0, 0.0, 0.05, 5, 5)
         assert score == 0  # All out of bounds → no hits
+
+
+# ── Bug 106: stop_clean/stop_scan work from PAUSED state ─────────
+class TestStopFromPausedState:
+    """Bug 106: stop_clean and stop_scan should work when paused from those states."""
+
+    def _make_controller(self):
+        from clean_bot_mission.full_mission import FullMissionController, MissionState
+        ctrl = MagicMock(spec=FullMissionController)
+        ctrl.state = MissionState.PAUSED
+        ctrl.stop_robot = MagicMock()
+        ctrl._deactivate_cleaning_hardware = MagicMock()
+        ctrl.exploration_control_pub = MagicMock()
+        ctrl.coverage_control_pub = MagicMock()
+        ctrl.get_logger = MagicMock(return_value=MagicMock())
+        return ctrl
+
+    def test_stop_clean_from_paused_coverage(self):
+        from clean_bot_mission.full_mission import FullMissionController, MissionState
+        ctrl = self._make_controller()
+        ctrl.previous_state = MissionState.COVERAGE
+        FullMissionController.handle_stop_clean(ctrl)
+        assert ctrl.state == MissionState.WAITING_FOR_CLEAN
+        ctrl._deactivate_cleaning_hardware.assert_called_once()
+        assert ctrl.previous_state is None
+
+    def test_stop_scan_from_paused_exploring(self):
+        from clean_bot_mission.full_mission import FullMissionController, MissionState
+        ctrl = self._make_controller()
+        ctrl.previous_state = MissionState.EXPLORING
+        FullMissionController.handle_stop_scan(ctrl)
+        assert ctrl.state == MissionState.WAITING_FOR_CLEAN
+        assert ctrl.previous_state is None
+
+    def test_stop_clean_rejected_from_paused_exploring(self):
+        from clean_bot_mission.full_mission import FullMissionController, MissionState
+        ctrl = self._make_controller()
+        ctrl.previous_state = MissionState.EXPLORING
+        FullMissionController.handle_stop_clean(ctrl)
+        # Should NOT change state (still paused from exploring, not coverage)
+        assert ctrl.state == MissionState.PAUSED

@@ -523,3 +523,8 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`ws_velocity`)
 - **Problem:** The velocity WebSocket handler passed raw `data.get("linear")` and `data.get("angular")` values directly to `send_velocity()`, which calls `float()`. If a malicious or buggy client sends non-numeric values (e.g., strings), `float()` raises `ValueError` — Flask-SocketIO catches it but fills logs with tracebacks.
 - **Fix:** Added `try/except (TypeError, ValueError)` around `float()` conversion with early return on failure.
+
+### Bug 106: `stop_clean` and `stop_scan` ignored when paused
+- **File:** `clean_bot_mission/clean_bot_mission/full_mission.py`
+- **Problem:** When the mission was paused from COVERAGE or EXPLORING state, sending `stop_clean` or `stop_scan` would print "Not currently cleaning/scanning" and do nothing. The user had to first `resume` and then `stop`, which is unintuitive.
+- **Fix:** Both `handle_stop_clean()` and `handle_stop_scan()` now also accept commands when `state == PAUSED` and `previous_state` matches the relevant operation. The previous_state is cleared on stop to prevent stale resume.

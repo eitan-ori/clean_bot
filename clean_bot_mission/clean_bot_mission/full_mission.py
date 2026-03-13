@@ -227,9 +227,11 @@ class FullMissionController(Node):
 
     def handle_stop_scan(self):
         """Handle stop_scan command."""
-        if self.state == MissionState.EXPLORING:
+        if self.state == MissionState.EXPLORING or \
+           (self.state == MissionState.PAUSED and self.previous_state == MissionState.EXPLORING):
             self.get_logger().info('🛑 Stopping exploration...')
             self.stop_robot()
+            self.previous_state = None
             
             # Tell explorer to stop
             ctrl_msg = String()
@@ -256,10 +258,12 @@ class FullMissionController(Node):
 
     def handle_stop_clean(self):
         """Handle stop_clean command."""
-        if self.state == MissionState.COVERAGE:
+        if self.state == MissionState.COVERAGE or \
+           (self.state == MissionState.PAUSED and self.previous_state == MissionState.COVERAGE):
             self.get_logger().info('🛑 Stopping cleaning...')
             self.stop_robot()
             self._deactivate_cleaning_hardware()
+            self.previous_state = None
 
             # Tell coverage planner to stop
             ctrl_msg = String()
