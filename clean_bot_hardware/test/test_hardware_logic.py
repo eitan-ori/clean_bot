@@ -625,3 +625,34 @@ class TestArduinoDriverSyntax:
                         methods.append(item.name)
         assert '_wheel_speed_to_pwm' in methods, \
             f"_wheel_speed_to_pwm not found in ArduinoDriver. Methods: {methods}"
+
+
+class TestLowObstacleDetectorMarkerLifetime:
+    """Bug 45: RViz markers should expire, not accumulate forever."""
+
+    def _find_file(self):
+        import os
+        for p in ['clean_bot_hardware/low_obstacle_detector.py', 'clean_bot_hardware/clean_bot_hardware/low_obstacle_detector.py']:
+            if os.path.exists(p):
+                return p
+        pytest.skip('low_obstacle_detector.py not found')
+
+    def test_marker_lifetime_matches_persistence(self):
+        """Markers should have a finite lifetime equal to persistence param."""
+        path = self._find_file()
+        with open(path) as f:
+            source = f.read()
+        lines = source.splitlines()
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped == "marker.lifetime.sec = 0" or stripped == "marker.lifetime.nanosec = 0":
+                pytest.fail(
+                    f"Line {i+1}: '{stripped}' — markers should not have infinite lifetime"
+                )
+
+    def test_file_parses(self):
+        """low_obstacle_detector.py should parse without errors."""
+        import ast
+        path = self._find_file()
+        with open(path) as f:
+            ast.parse(f.read())

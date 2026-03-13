@@ -221,3 +221,13 @@
 - **File:** `clean_bot_hardware/clean_bot_hardware/emergency_stop.py`
 - **Problem:** On startup, `current_distance` defaults to 100m and `last_range_time` is `None`. If the ultrasonic sensor is disconnected, broken, or has a wrong topic name, the timeout check is skipped entirely (it only triggers when `last_range_time is not None`). The robot operates with **zero collision protection** — driving at full speed into walls.
 - **Fix:** Added `_start_time` and `_sensor_grace_sec` (5s). After the grace period, if no sensor data has ever been received, forward speed is halved and a warning is logged. This matches the existing sensor-timeout behavior.
+
+### Bug 45: RViz marker memory leak in low_obstacle_detector
+- **File:** `clean_bot_hardware/clean_bot_hardware/low_obstacle_detector.py`
+- **Problem:** Obstacle visualization markers were published with `lifetime.sec = 0` and `lifetime.nanosec = 0`, meaning "never expire" in RViz. Combined with an ever-incrementing `marker_id_counter`, markers accumulated indefinitely in RViz, consuming increasing memory.
+- **Fix:** Changed marker lifetime to match the `obstacle_persistence` parameter (default 2.0s). Markers now automatically expire when the obstacle detection window closes.
+
+### Bug 46: WebSocket handlers crash on non-dict data
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (ws_command, ws_velocity, ws_latency_ping, ws_set_map_rate)
+- **Problem:** All WebSocket event handlers called `data.get()` without verifying that `data` is a dict. If a client sends a string, int, or None, the handlers raise `AttributeError`. While Flask-SocketIO catches the exception (server doesn't crash), it fills logs with tracebacks.
+- **Fix:** Added `if not isinstance(data, dict): return` guard to all affected handlers. Also added try/except for `float()` conversion in `ws_set_map_rate`.

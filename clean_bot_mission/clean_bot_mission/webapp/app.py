@@ -966,16 +966,18 @@ def ws_connect():
 
 @socketio.on("command")
 def ws_command(data):
-    if ros_node:
-        cmd = data.get("command", "")
-        if cmd in VALID_COMMANDS:
-            ros_node.send_command(cmd)
+    if not isinstance(data, dict) or ros_node is None:
+        return
+    cmd = data.get("command", "")
+    if cmd in VALID_COMMANDS:
+        ros_node.send_command(cmd)
 
 
 @socketio.on("velocity")
 def ws_velocity(data):
-    if ros_node:
-        ros_node.send_velocity(data.get("linear", 0), data.get("angular", 0))
+    if not isinstance(data, dict) or ros_node is None:
+        return
+    ros_node.send_velocity(data.get("linear", 0), data.get("angular", 0))
 
 
 @socketio.on("request_map")
@@ -986,14 +988,20 @@ def ws_request_map():
 
 @socketio.on("latency_ping")
 def ws_latency_ping(data):
+    if not isinstance(data, dict):
+        return
     emit("latency_pong", {"ts": data.get("ts", 0)})
 
 
 @socketio.on("set_map_rate")
 def ws_set_map_rate(data):
-    if ros_node:
+    if not isinstance(data, dict) or ros_node is None:
+        return
+    try:
         rate = max(0.5, min(5.0, float(data.get("rate", 0.5))))
-        ros_node._map_rate_interval = rate
+    except (TypeError, ValueError):
+        return
+    ros_node._map_rate_interval = rate
 
 
 # ════════════════════════════════════════════════════════════════════

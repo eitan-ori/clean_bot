@@ -610,6 +610,39 @@ class TestValidCommands:
 
 
 # ════════════════════════════════════════════════════════════════════
+# Test: WebSocket input validation (Bug 46)
+# ════════════════════════════════════════════════════════════════════
+
+class TestWebSocketInputValidation:
+    """Ensure WS handlers reject non-dict data without crashing."""
+
+    def test_ws_command_rejects_string(self):
+        fn = webapp_module.ws_command
+        # Should not raise — just return silently
+        fn("start_scan")
+
+    def test_ws_command_rejects_none(self):
+        fn = webapp_module.ws_command
+        fn(None)
+
+    def test_ws_command_rejects_int(self):
+        fn = webapp_module.ws_command
+        fn(42)
+
+    def test_ws_velocity_rejects_string(self):
+        fn = webapp_module.ws_velocity
+        fn("fast")
+
+    def test_ws_set_map_rate_rejects_string(self):
+        fn = webapp_module.ws_set_map_rate
+        fn("5")
+
+    def test_ws_set_map_rate_rejects_bad_value(self):
+        fn = webapp_module.ws_set_map_rate
+        fn({"rate": "not_a_number"})
+
+
+# ════════════════════════════════════════════════════════════════════
 # Test: Room file operations (realistic)
 # ════════════════════════════════════════════════════════════════════
 

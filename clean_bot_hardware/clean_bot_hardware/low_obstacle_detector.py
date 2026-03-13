@@ -220,9 +220,9 @@ class LowObstacleDetector(Node):
             marker.color.b = 0.0
             marker.color.a = 0.8
             
-            # Lifetime - 0 means forever
-            marker.lifetime.sec = 0
-            marker.lifetime.nanosec = 0
+            # Expire markers after the persistence window so RViz doesn't leak memory
+            marker.lifetime.sec = int(self.persistence)
+            marker.lifetime.nanosec = int((self.persistence % 1) * 1e9)
             
             self.marker_pub.publish(marker)
             
