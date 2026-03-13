@@ -328,3 +328,8 @@
 - **File:** `clean_bot_mission/clean_bot_mission/full_mission.py` (`handle_pause`, `handle_resume`)
 - **Problem:** When pausing from COVERAGE state, the cleaning hardware (relay/servo motor) remained active. The robot was stationary but the vacuum/brush motor continued running, wasting battery and creating unnecessary noise.
 - **Fix:** Added `_deactivate_cleaning_hardware()` call in `handle_pause()` when previous state is COVERAGE. Added `_activate_cleaning_hardware()` call in `handle_resume()` when restoring to COVERAGE state.
+
+### Bug 67: Unprotected future.result() in coverage planner Nav2 callbacks
+- **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py` (`goal_response_callback`, `get_result_callback`)
+- **Problem:** Both Nav2 callback methods called `future.result()` without try/except. If the action server crashes while in Nav2 mode, the exception would silently kill the callback, leaving the coverage planner stuck (unable to advance to next waypoint).
+- **Fix:** Wrapped `future.result()` in try/except in both callbacks; on failure, increments `failed_waypoints`, clears navigation state, and advances to next waypoint.

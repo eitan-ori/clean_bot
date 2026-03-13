@@ -1293,7 +1293,15 @@ class AdaptiveCoveragePlanner(Node):
 
     def goal_response_callback(self, future):
         """Handle goal acceptance/rejection."""
-        goal_handle = future.result()
+        try:
+            goal_handle = future.result()
+        except Exception as e:
+            self.get_logger().warn(f'   ⚠️ Goal send failed: {e}')
+            self.failed_waypoints += 1
+            self.is_navigating = False
+            self.current_waypoint_idx += 1
+            self.send_next_goal()
+            return
         
         if not goal_handle.accepted:
             self.get_logger().warn('   ⚠️ Goal rejected - skipping')
@@ -1314,8 +1322,18 @@ class AdaptiveCoveragePlanner(Node):
 
     def get_result_callback(self, future):
         """Handle navigation result."""
-        result = future.result()
-        status = result.status
+        try:
+            result = future.result()
+            status = result.status
+        except Exception as e:
+            self.get_logger().warn(f'   ⚠️ Navigation result error: {e}')
+            self.is_navigating = False
+            self.current_goal_handle = None
+            self.failed_waypoints += 1
+            if self.coverage_state == CoverageState.RUNNING:
+                self.current_waypoint_idx += 1
+                self.send_next_goal()
+            return
         
         self.is_navigating = False
         self.current_goal_handle = None
