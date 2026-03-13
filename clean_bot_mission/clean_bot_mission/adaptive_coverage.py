@@ -430,9 +430,12 @@ class AdaptiveCoveragePlanner(Node):
 
     def normalize_angle(self, angle):
         """Normalize angle to [-pi, pi]."""
-        while angle > math.pi:
+        if not math.isfinite(angle):
+            return 0.0
+        angle = math.fmod(angle, 2.0 * math.pi)
+        if angle > math.pi:
             angle -= 2.0 * math.pi
-        while angle < -math.pi:
+        elif angle < -math.pi:
             angle += 2.0 * math.pi
         return angle
 

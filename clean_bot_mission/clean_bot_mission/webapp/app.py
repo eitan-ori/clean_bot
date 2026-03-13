@@ -202,16 +202,19 @@ class WebBridgeNode(Node):
             # Round 31: Track scan/clean stats
             old_u = (old or '').upper()
             new_u = (msg.data or '').upper()
+            is_pause = 'PAUSE' in new_u
+            # Use COVERAGE as the definitive cleaning state (not WAITING_FOR_CLEAN)
+            def _is_cleaning(s):
+                return 'COVER' in s and 'WAITING' not in s
             if 'EXPLOR' in new_u and 'EXPLOR' not in old_u:
                 self._scan_start_time = time.monotonic()
-            elif 'EXPLOR' not in new_u and 'EXPLOR' in old_u and self._scan_start_time:
+            elif 'EXPLOR' not in new_u and 'EXPLOR' in old_u and self._scan_start_time and not is_pause:
                 self.total_scan_time += time.monotonic() - self._scan_start_time
                 self.rooms_scanned += 1
                 self._scan_start_time = None
-            if ('COVER' in new_u or 'CLEAN' in new_u) and 'COVER' not in old_u and 'CLEAN' not in old_u:
+            if _is_cleaning(new_u) and not _is_cleaning(old_u):
                 self._clean_start_time = time.monotonic()
-            elif ('COVER' not in new_u and 'CLEAN' not in new_u) and \
-                 ('COVER' in old_u or 'CLEAN' in old_u) and self._clean_start_time:
+            elif not _is_cleaning(new_u) and _is_cleaning(old_u) and self._clean_start_time and not is_pause:
                 self.total_clean_time += time.monotonic() - self._clean_start_time
                 self.rooms_cleaned += 1
                 self._clean_start_time = None

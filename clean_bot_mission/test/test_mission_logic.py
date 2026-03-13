@@ -1,0 +1,1066 @@
+#!/usr/bin/env python3
+"""
+Tests for mission logic state machines.
+
+Tests the state machines in:
+  - full_mission.py  (FullMissionController)
+  - adaptive_coverage.py  (AdaptiveCoveragePlanner)
+  - frontier_explorer.py  (FrontierExplorer)
+  - webapp/app.py  (stat tracking in _on_mission_state)
+
+These are unit tests that mock ROS 2 and focus on state transition correctness,
+edge cases, and bug regressions.
+"""
+
+import json
+import math
+import os
+import sys
+import time
+from pathlib import Path
+from unittest.mock import MagicMock, patch, PropertyMock, call
+
+import pytest
+import numpy as np
+
+# ── Mock ROS 2 before importing any mission modules ──────────────
+
+mock_rclpy = MagicMock()
+mock_rclpy.ok = MagicMock(return_value=True)
+mock_rclpy.time = MagicMock()
+mock_rclpy.time.Time = MagicMock
+
+
+class _FakeNode:
+    """Minimal Node stand-in."""
+    def __init__(self, *a, **kw):
+        pass
+    def create_publisher(self, *a, **kw):
+        return MagicMock()
+    def create_subscription(self, *a, **kw):
+        return MagicMock()
+    def create_timer(self, *a, **kw):
+        return MagicMock()
+    def get_logger(self):
+        return MagicMock()
+    def get_clock(self):
+        m = MagicMock()
+        m.now.return_value = MagicMock(to_msg=MagicMock(return_value=MagicMock()), nanoseconds=0)
+        return m
+    def declare_parameter(self, name, default):
+        self._params = getattr(self, '_params', {})
+        self._params[name] = default
+    def get_parameter(self, name):
+        self._params = getattr(self, '_params', {})
+        m = MagicMock()
+        m.value = self._params.get(name, None)
+        return m
+    def destroy_node(self):
+        pass
+
+
+_mock_node_module = MagicMock()
+_mock_node_module.Node = _FakeNode
+
+sys.modules.setdefault('rclpy', mock_rclpy)
+sys.modules['rclpy.node'] = _mock_node_module
+for mod in [
+    'rclpy.qos', 'rclpy.executors', 'rclpy.action', 'rclpy.callback_groups',
+    'rclpy.time', 'std_msgs', 'std_msgs.msg', 'geometry_msgs', 'geometry_msgs.msg',
+    'nav_msgs', 'nav_msgs.msg', 'sensor_msgs', 'sensor_msgs.msg',
+    'tf2_ros', 'nav2_msgs', 'nav2_msgs.action',
+    'visualization_msgs', 'visualization_msgs.msg',
+]:
+    sys.modules.setdefault(mod, MagicMock())
+
+
+# Now import mission modules
+from clean_bot_mission.full_mission import FullMissionController, MissionState
+from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner, CoverageState
+from clean_bot_mission.frontier_explorer import FrontierExplorer, ExplorationState
+
+
+# ════════════════════════════════════════════════════════════════════
+# Fixtures
+# ════════════════════════════════════════════════════════════════════
+
+@pytest.fixture
+def mission():
+    """Create a FullMissionController with mocked ROS."""
+    ctrl = FullMissionController()
+    # Replace publishers with spies
+    ctrl.cmd_vel_pub = MagicMock()
+    ctrl.state_pub = MagicMock()
+    ctrl.exploration_control_pub = MagicMock()
+    ctrl.coverage_control_pub = MagicMock()
+    ctrl.exploration_complete_pub = MagicMock()
+    ctrl.clean_trigger_pub = MagicMock()
+    ctrl.stop_clean_trigger_pub = MagicMock()
+    ctrl.arduino_clean_pub = MagicMock()
+    ctrl.nav_client = MagicMock()
+    ctrl.nav_client.wait_for_server = MagicMock(return_value=True)
+    return ctrl
+
+
+@pytest.fixture
+def coverage():
+    """Create an AdaptiveCoveragePlanner with mocked ROS."""
+    planner = AdaptiveCoveragePlanner()
+    planner.cmd_vel_pub = MagicMock()
+    planner.coverage_state_pub = MagicMock()
+    planner.coverage_complete_pub = MagicMock()
+    planner.coverage_path_pub = MagicMock()
+    planner.waypoint_markers_pub = MagicMock()
+    planner.nav_client = MagicMock()
+    planner.current_goal_handle = None
+    planner.is_navigating = False
+    return planner
+
+
+@pytest.fixture
+def explorer():
+    """Create a FrontierExplorer with mocked ROS."""
+    exp = FrontierExplorer()
+    exp.nav_client = MagicMock()
+    exp.frontier_markers_pub = MagicMock()
+    exp.exploration_state_pub = MagicMock()
+    exp.exploration_complete_pub = MagicMock()
+    exp.current_goal_handle = None
+    exp.is_navigating = False
+    return exp
+
+
+# ════════════════════════════════════════════════════════════════════
+# FullMissionController State Machine Tests
+# ════════════════════════════════════════════════════════════════════
+
+class TestMissionStateTransitions:
+    """Test all state transitions in the mission controller."""
+
+    def test_initial_state(self, mission):
+        assert mission.state == MissionState.WAITING_FOR_SCAN
+        assert mission.previous_state is None
+
+    def test_start_scan_from_waiting(self, mission):
+        mission.handle_start_scan()
+        assert mission.state == MissionState.EXPLORING
+
+    def test_start_scan_from_wrong_state(self, mission):
+        mission.state = MissionState.COVERAGE
+        mission.handle_start_scan()
+        assert mission.state == MissionState.COVERAGE  # unchanged
+
+    def test_start_scan_from_waiting_for_clean(self, mission):
+        mission.state = MissionState.WAITING_FOR_CLEAN
+        mission.handle_start_scan()
+        assert mission.state == MissionState.EXPLORING
+
+    def test_stop_scan_from_exploring(self, mission):
+        mission.state = MissionState.EXPLORING
+        mission.handle_stop_scan()
+        assert mission.state == MissionState.WAITING_FOR_CLEAN
+
+    def test_stop_scan_from_wrong_state(self, mission):
+        mission.state = MissionState.WAITING_FOR_SCAN
+        mission.handle_stop_scan()
+        assert mission.state == MissionState.WAITING_FOR_SCAN
+
+    def test_start_clean_from_waiting_for_clean(self, mission):
+        mission.state = MissionState.WAITING_FOR_CLEAN
+        mission.handle_start_clean()
+        assert mission.state == MissionState.COVERAGE
+
+    def test_start_clean_from_waiting_for_scan(self, mission):
+        """Allow starting clean even without scan (saved room scenario)."""
+        mission.state = MissionState.WAITING_FOR_SCAN
+        mission.handle_start_clean()
+        assert mission.state == MissionState.COVERAGE
+
+    def test_start_clean_from_wrong_state(self, mission):
+        mission.state = MissionState.EXPLORING
+        mission.handle_start_clean()
+        assert mission.state == MissionState.EXPLORING
+
+    def test_stop_clean_from_coverage(self, mission):
+        mission.state = MissionState.COVERAGE
+        mission.handle_stop_clean()
+        assert mission.state == MissionState.WAITING_FOR_CLEAN
+
+    def test_stop_clean_deactivates_hardware(self, mission):
+        mission.state = MissionState.COVERAGE
+        mission.handle_stop_clean()
+        mission.stop_clean_trigger_pub.publish.assert_called_once()
+        mission.arduino_clean_pub.publish.assert_called_once()
+
+    def test_stop_clean_from_wrong_state(self, mission):
+        mission.state = MissionState.EXPLORING
+        mission.handle_stop_clean()
+        assert mission.state == MissionState.EXPLORING
+
+    def test_pause_from_exploring(self, mission):
+        mission.state = MissionState.EXPLORING
+        mission.handle_pause()
+        assert mission.state == MissionState.PAUSED
+        assert mission.previous_state == MissionState.EXPLORING
+
+    def test_pause_from_coverage(self, mission):
+        mission.state = MissionState.COVERAGE
+        mission.handle_pause()
+        assert mission.state == MissionState.PAUSED
+        assert mission.previous_state == MissionState.COVERAGE
+
+    def test_pause_from_wrong_state(self, mission):
+        mission.state = MissionState.WAITING_FOR_SCAN
+        mission.handle_pause()
+        assert mission.state == MissionState.WAITING_FOR_SCAN
+
+    def test_resume_from_paused_exploring(self, mission):
+        mission.state = MissionState.PAUSED
+        mission.previous_state = MissionState.EXPLORING
+        mission.handle_resume()
+        assert mission.state == MissionState.EXPLORING
+        assert mission.previous_state is None
+
+    def test_resume_from_paused_coverage(self, mission):
+        mission.state = MissionState.PAUSED
+        mission.previous_state = MissionState.COVERAGE
+        mission.handle_resume()
+        assert mission.state == MissionState.COVERAGE
+        assert mission.previous_state is None
+
+    def test_resume_without_previous_state(self, mission):
+        mission.state = MissionState.PAUSED
+        mission.previous_state = None
+        mission.handle_resume()
+        assert mission.state == MissionState.PAUSED  # unchanged
+
+    def test_resume_from_wrong_state(self, mission):
+        mission.state = MissionState.EXPLORING
+        mission.handle_resume()
+        assert mission.state == MissionState.EXPLORING
+
+
+class TestMissionGoHome:
+    """Test go_home from various states."""
+
+    def test_go_home_from_exploring(self, mission):
+        mission.state = MissionState.EXPLORING
+        mission.handle_go_home()
+        assert mission.state == MissionState.RETURNING
+
+    def test_go_home_from_coverage_deactivates_hardware(self, mission):
+        mission.state = MissionState.COVERAGE
+        mission.handle_go_home()
+        assert mission.state == MissionState.RETURNING
+        mission.stop_clean_trigger_pub.publish.assert_called_once()
+        mission.arduino_clean_pub.publish.assert_called_once()
+
+    def test_go_home_from_paused_coverage_deactivates_hardware(self, mission):
+        """Bug 53 regression: go_home from PAUSED (was COVERAGE) must deactivate cleaning."""
+        mission.state = MissionState.PAUSED
+        mission.previous_state = MissionState.COVERAGE
+        mission.handle_go_home()
+        assert mission.state == MissionState.RETURNING
+        # Cleaning hardware should be deactivated
+        mission.stop_clean_trigger_pub.publish.assert_called_once()
+        mission.arduino_clean_pub.publish.assert_called_once()
+
+    def test_go_home_from_paused_exploring_no_deactivate(self, mission):
+        """go_home from PAUSED (was EXPLORING) should NOT deactivate cleaning hardware."""
+        mission.state = MissionState.PAUSED
+        mission.previous_state = MissionState.EXPLORING
+        mission.handle_go_home()
+        assert mission.state == MissionState.RETURNING
+        mission.stop_clean_trigger_pub.publish.assert_not_called()
+
+    def test_go_home_clears_previous_state(self, mission):
+        """Bug 56 regression: previous_state should be cleared on go_home."""
+        mission.state = MissionState.PAUSED
+        mission.previous_state = MissionState.COVERAGE
+        mission.handle_go_home()
+        assert mission.previous_state is None
+
+    def test_go_home_stops_both_sub_nodes(self, mission):
+        mission.state = MissionState.COVERAGE
+        mission.handle_go_home()
+        calls = [c.args[0].data for c in mission.exploration_control_pub.publish.call_args_list]
+        assert 'stop' in calls
+        calls2 = [c.args[0].data for c in mission.coverage_control_pub.publish.call_args_list]
+        assert 'stop' in calls2
+
+
+class TestMissionReset:
+    """Test reset from various states."""
+
+    def test_reset_from_exploring(self, mission):
+        mission.state = MissionState.EXPLORING
+        mission.handle_reset()
+        assert mission.state == MissionState.WAITING_FOR_SCAN
+
+    def test_reset_from_coverage_deactivates_hardware(self, mission):
+        mission.state = MissionState.COVERAGE
+        mission.handle_reset()
+        assert mission.state == MissionState.WAITING_FOR_SCAN
+        mission.stop_clean_trigger_pub.publish.assert_called_once()
+
+    def test_reset_from_paused_coverage_deactivates_hardware(self, mission):
+        """Bug 53 regression: reset from PAUSED (was COVERAGE) must deactivate cleaning."""
+        mission.state = MissionState.PAUSED
+        mission.previous_state = MissionState.COVERAGE
+        mission.handle_reset()
+        assert mission.state == MissionState.WAITING_FOR_SCAN
+        mission.stop_clean_trigger_pub.publish.assert_called_once()
+
+    def test_reset_from_paused_exploring_no_deactivate(self, mission):
+        mission.state = MissionState.PAUSED
+        mission.previous_state = MissionState.EXPLORING
+        mission.handle_reset()
+        assert mission.state == MissionState.WAITING_FOR_SCAN
+        mission.stop_clean_trigger_pub.publish.assert_not_called()
+
+    def test_reset_clears_previous_state(self, mission):
+        """Bug 56 regression: previous_state should be cleared on reset."""
+        mission.state = MissionState.PAUSED
+        mission.previous_state = MissionState.COVERAGE
+        mission.handle_reset()
+        assert mission.previous_state is None
+
+    def test_reset_clears_flags(self, mission):
+        mission.exploration_complete = True
+        mission.coverage_complete = True
+        mission.start_time = 12345
+        mission.state = MissionState.COVERAGE
+        mission.handle_reset()
+        assert mission.exploration_complete is False
+        assert mission.coverage_complete is False
+        assert mission.start_time is None
+
+    def test_reset_sends_stop_then_reset_to_sub_nodes(self, mission):
+        mission.state = MissionState.EXPLORING
+        mission.handle_reset()
+        # Should publish twice to each: stop, then reset
+        assert mission.exploration_control_pub.publish.call_count == 2
+        assert mission.coverage_control_pub.publish.call_count == 2
+
+
+class TestMissionExplorationComplete:
+    """Test exploration_complete_callback."""
+
+    def test_exploration_complete_moves_to_waiting(self, mission):
+        mission.state = MissionState.EXPLORING
+        msg = MagicMock()
+        msg.data = True
+        mission.exploration_complete_callback(msg)
+        assert mission.state == MissionState.WAITING_FOR_CLEAN
+        assert mission.exploration_complete is True
+
+    def test_exploration_complete_ignored_when_not_exploring(self, mission):
+        mission.state = MissionState.PAUSED
+        msg = MagicMock()
+        msg.data = True
+        mission.exploration_complete_callback(msg)
+        assert mission.state == MissionState.PAUSED
+
+    def test_exploration_complete_false_ignored(self, mission):
+        mission.state = MissionState.EXPLORING
+        msg = MagicMock()
+        msg.data = False
+        mission.exploration_complete_callback(msg)
+        assert mission.state == MissionState.EXPLORING
+
+
+class TestMissionCoverageComplete:
+    """Test coverage_complete_callback."""
+
+    def test_coverage_complete_deactivates_hardware(self, mission):
+        mission.state = MissionState.COVERAGE
+        mission.return_home = False
+        msg = MagicMock()
+        msg.data = True
+        mission.coverage_complete_callback(msg)
+        assert mission.state == MissionState.COMPLETE
+        mission.stop_clean_trigger_pub.publish.assert_called_once()
+
+    def test_coverage_complete_triggers_return_home(self, mission):
+        mission.state = MissionState.COVERAGE
+        mission.return_home = True
+        msg = MagicMock()
+        msg.data = True
+        mission.coverage_complete_callback(msg)
+        assert mission.state == MissionState.RETURNING
+
+    def test_coverage_complete_ignored_when_not_coverage(self, mission):
+        mission.state = MissionState.PAUSED
+        msg = MagicMock()
+        msg.data = True
+        mission.coverage_complete_callback(msg)
+        assert mission.state == MissionState.PAUSED
+
+
+class TestMissionCommandCallback:
+    """Test the command dispatcher."""
+
+    def test_valid_commands_dispatched(self, mission):
+        for cmd in ['start_scan', 'stop_scan', 'start_clean', 'stop_clean',
+                     'go_home', 'reset', 'pause', 'resume']:
+            msg = MagicMock()
+            msg.data = cmd
+            # Should not raise
+            mission.command_callback(msg)
+
+    def test_unknown_command(self, mission):
+        msg = MagicMock()
+        msg.data = 'fly_away'
+        mission.command_callback(msg)
+        assert mission.state == MissionState.WAITING_FOR_SCAN  # unchanged
+
+    def test_command_case_insensitive(self, mission):
+        msg = MagicMock()
+        msg.data = '  START_SCAN  '
+        mission.command_callback(msg)
+        assert mission.state == MissionState.EXPLORING
+
+    def test_pause_resume_roundtrip(self, mission):
+        mission.state = MissionState.EXPLORING
+        msg = MagicMock()
+        msg.data = 'pause'
+        mission.command_callback(msg)
+        assert mission.state == MissionState.PAUSED
+        msg.data = 'resume'
+        mission.command_callback(msg)
+        assert mission.state == MissionState.EXPLORING
+
+
+class TestMissionFinish:
+    """Test finish_mission."""
+
+    def test_finish_sets_complete(self, mission):
+        mission.start_time = time.time() - 60
+        mission.finish_mission()
+        assert mission.state == MissionState.COMPLETE
+
+    def test_finish_with_no_start_time(self, mission):
+        mission.start_time = None
+        mission.finish_mission()
+        assert mission.state == MissionState.COMPLETE
+
+    def test_finish_stops_robot(self, mission):
+        mission.start_time = time.time()
+        mission.finish_mission()
+        mission.cmd_vel_pub.publish.assert_called()
+
+
+# ════════════════════════════════════════════════════════════════════
+# Coverage Planner State Machine Tests
+# ════════════════════════════════════════════════════════════════════
+
+class TestCoverageStateTransitions:
+    """Test coverage planner state machine."""
+
+    def test_initial_state(self, coverage):
+        assert coverage.coverage_state == CoverageState.IDLE
+
+    def test_handle_stop_from_running(self, coverage):
+        coverage.coverage_state = CoverageState.RUNNING
+        coverage.handle_stop()
+        assert coverage.coverage_state == CoverageState.STOPPED
+
+    def test_handle_stop_from_paused(self, coverage):
+        coverage.coverage_state = CoverageState.PAUSED
+        coverage.handle_stop()
+        assert coverage.coverage_state == CoverageState.STOPPED
+
+    def test_handle_stop_from_idle(self, coverage):
+        coverage.coverage_state = CoverageState.IDLE
+        coverage.handle_stop()
+        assert coverage.coverage_state == CoverageState.IDLE
+
+    def test_handle_pause_from_running(self, coverage):
+        coverage.coverage_state = CoverageState.RUNNING
+        coverage.handle_pause()
+        assert coverage.coverage_state == CoverageState.PAUSED
+
+    def test_handle_pause_from_idle(self, coverage):
+        coverage.coverage_state = CoverageState.IDLE
+        coverage.handle_pause()
+        assert coverage.coverage_state == CoverageState.IDLE
+
+    def test_handle_resume_from_paused(self, coverage):
+        coverage.coverage_state = CoverageState.PAUSED
+        coverage.waypoints = [(0, 0, 0)]
+        coverage.current_waypoint_idx = 0
+        coverage.handle_resume()
+        assert coverage.coverage_state == CoverageState.RUNNING
+
+    def test_handle_resume_from_stopped(self, coverage):
+        coverage.coverage_state = CoverageState.STOPPED
+        coverage.handle_resume()
+        # Should call handle_start, which transitions based on waypoints
+        # After stop→resume, it should attempt to start
+        assert coverage.coverage_state in [CoverageState.RUNNING, CoverageState.IDLE, CoverageState.STOPPED]
+
+    def test_handle_reset(self, coverage):
+        coverage.coverage_state = CoverageState.RUNNING
+        coverage.waypoints = [(1, 2, 3)]
+        coverage.mission_started = True
+        coverage.handle_reset()
+        assert coverage.coverage_state == CoverageState.IDLE
+        assert coverage.waypoints == []
+        assert coverage.mission_started is False
+        assert coverage.current_waypoint_idx == 0
+
+
+class TestCoverageNormalizeAngle:
+    """Test normalize_angle edge cases including NaN/inf (Bug 55)."""
+
+    def test_normal_angle(self, coverage):
+        assert abs(coverage.normalize_angle(0.0)) < 1e-9
+        assert abs(coverage.normalize_angle(math.pi) - math.pi) < 1e-9
+
+    def test_angle_wrap_positive(self, coverage):
+        result = coverage.normalize_angle(3 * math.pi)
+        assert -math.pi <= result <= math.pi
+
+    def test_angle_wrap_negative(self, coverage):
+        result = coverage.normalize_angle(-3 * math.pi)
+        assert -math.pi <= result <= math.pi
+
+    def test_large_angle(self, coverage):
+        result = coverage.normalize_angle(100 * math.pi)
+        assert -math.pi <= result <= math.pi
+
+    def test_nan_returns_zero(self, coverage):
+        """Bug 55 regression: NaN should not cause infinite loop."""
+        result = coverage.normalize_angle(float('nan'))
+        assert result == 0.0
+
+    def test_inf_returns_zero(self, coverage):
+        """Bug 55 regression: inf should not cause infinite loop."""
+        result = coverage.normalize_angle(float('inf'))
+        assert result == 0.0
+
+    def test_neg_inf_returns_zero(self, coverage):
+        """Bug 55 regression: -inf should not cause infinite loop."""
+        result = coverage.normalize_angle(float('-inf'))
+        assert result == 0.0
+
+
+class TestCoverageFinishMission:
+    """Test coverage finish_mission including retry logic."""
+
+    def test_finish_sets_complete(self, coverage):
+        coverage.missed_waypoints = []
+        coverage.retry_count = 0
+        coverage.start_time = None
+        coverage.finish_mission()
+        assert coverage.coverage_state == CoverageState.COMPLETE
+        assert coverage.mission_complete is True
+
+    def test_finish_retries_missed_waypoints(self, coverage):
+        coverage.missed_waypoints = [(1.0, 2.0, 0.0)]
+        coverage.retry_count = 0
+        coverage.max_retries = 2
+        coverage.start_time = None
+        coverage.coverage_state = CoverageState.RUNNING
+        coverage.finish_mission()
+        # Should have set up retry, not completed
+        assert coverage.mission_complete is False
+        assert coverage.retry_count == 1
+
+    def test_finish_no_retry_after_max(self, coverage):
+        coverage.missed_waypoints = [(1.0, 2.0, 0.0)]
+        coverage.retry_count = 3
+        coverage.max_retries = 2
+        coverage.start_time = None
+        coverage.finish_mission()
+        assert coverage.mission_complete is True
+        assert coverage.coverage_state == CoverageState.COMPLETE
+
+
+class TestCoverageSendNextGoal:
+    """Test send_next_goal."""
+
+    def test_send_next_goal_finishes_when_all_done(self, coverage):
+        coverage.waypoints = [(1, 2, 3)]
+        coverage.current_waypoint_idx = 1  # past end
+        coverage.missed_waypoints = []
+        coverage.retry_count = 0
+        coverage.start_time = None
+        coverage.send_next_goal()
+        assert coverage.coverage_state == CoverageState.COMPLETE
+
+    def test_send_next_goal_noop_when_more_waypoints(self, coverage):
+        coverage.waypoints = [(1, 2, 3), (4, 5, 6)]
+        coverage.current_waypoint_idx = 0
+        coverage.send_next_goal()
+        # Should not complete
+        assert coverage.coverage_state != CoverageState.COMPLETE
+
+
+class TestCoverageGoalCallbacks:
+    """Test goal response and result callbacks."""
+
+    def test_goal_rejected(self, coverage):
+        coverage.waypoints = [(1, 2, 3)]
+        coverage.current_waypoint_idx = 0
+        coverage.is_navigating = True
+        coverage.missed_waypoints = []
+        coverage.retry_count = 0
+        coverage.max_retries = 0  # no retries
+        coverage.start_time = None
+
+        future = MagicMock()
+        goal_handle = MagicMock()
+        goal_handle.accepted = False
+        future.result.return_value = goal_handle
+
+        coverage.goal_response_callback(future)
+        assert coverage.is_navigating is False
+        assert coverage.failed_waypoints == 1
+        # After rejection of last waypoint, mission completes
+        assert coverage.coverage_state == CoverageState.COMPLETE
+
+    def test_result_succeeded(self, coverage):
+        coverage.coverage_state = CoverageState.RUNNING
+        coverage.waypoints = [(1, 2, 3), (4, 5, 6)]
+        coverage.current_waypoint_idx = 0
+        coverage.missed_waypoints = []
+        coverage.retry_count = 0
+        coverage.start_time = None
+
+        future = MagicMock()
+        result = MagicMock()
+        result.status = 4  # SUCCEEDED
+        future.result.return_value = result
+
+        coverage.get_result_callback(future)
+        assert coverage.successful_waypoints == 1
+        assert coverage.current_waypoint_idx == 1
+
+    def test_result_aborted(self, coverage):
+        coverage.coverage_state = CoverageState.RUNNING
+        coverage.waypoints = [(1, 2, 3), (4, 5, 6)]
+        coverage.current_waypoint_idx = 0
+        coverage.missed_waypoints = []
+        coverage.retry_count = 0
+        coverage.start_time = None
+
+        future = MagicMock()
+        result = MagicMock()
+        result.status = 6  # ABORTED
+        future.result.return_value = result
+
+        coverage.get_result_callback(future)
+        assert coverage.failed_waypoints == 1
+        assert len(coverage.missed_waypoints) == 1
+
+    def test_result_cancelled_doesnt_advance(self, coverage):
+        coverage.coverage_state = CoverageState.RUNNING
+        coverage.waypoints = [(1, 2, 3)]
+        coverage.current_waypoint_idx = 0
+
+        future = MagicMock()
+        result = MagicMock()
+        result.status = 5  # CANCELED
+        future.result.return_value = result
+
+        coverage.get_result_callback(future)
+        # Should not advance idx
+        assert coverage.current_waypoint_idx == 0
+
+    def test_result_ignored_when_not_running(self, coverage):
+        coverage.coverage_state = CoverageState.PAUSED
+        coverage.waypoints = [(1, 2, 3)]
+        coverage.current_waypoint_idx = 0
+
+        future = MagicMock()
+        result = MagicMock()
+        result.status = 4
+        future.result.return_value = result
+
+        coverage.get_result_callback(future)
+        assert coverage.current_waypoint_idx == 0  # not advanced
+
+
+# ════════════════════════════════════════════════════════════════════
+# Frontier Explorer State Machine Tests
+# ════════════════════════════════════════════════════════════════════
+
+class TestExplorerStateTransitions:
+    """Test frontier explorer state machine."""
+
+    def test_initial_state(self, explorer):
+        assert explorer.exploration_state == ExplorationState.IDLE
+
+    def test_start_from_idle(self, explorer):
+        explorer.handle_start()
+        assert explorer.exploration_state == ExplorationState.EXPLORING
+
+    def test_start_from_stopped(self, explorer):
+        explorer.exploration_state = ExplorationState.STOPPED
+        explorer.handle_start()
+        assert explorer.exploration_state == ExplorationState.EXPLORING
+
+    def test_start_from_paused(self, explorer):
+        explorer.exploration_state = ExplorationState.PAUSED
+        explorer.handle_start()
+        assert explorer.exploration_state == ExplorationState.EXPLORING
+
+    def test_stop_from_exploring(self, explorer):
+        explorer.exploration_state = ExplorationState.EXPLORING
+        explorer.handle_stop()
+        assert explorer.exploration_state == ExplorationState.STOPPED
+
+    def test_stop_from_paused(self, explorer):
+        explorer.exploration_state = ExplorationState.PAUSED
+        explorer.handle_stop()
+        assert explorer.exploration_state == ExplorationState.STOPPED
+
+    def test_pause_from_exploring(self, explorer):
+        explorer.exploration_state = ExplorationState.EXPLORING
+        explorer.handle_pause()
+        assert explorer.exploration_state == ExplorationState.PAUSED
+
+    def test_pause_from_idle(self, explorer):
+        explorer.exploration_state = ExplorationState.IDLE
+        explorer.handle_pause()
+        assert explorer.exploration_state == ExplorationState.IDLE
+
+    def test_resume_from_paused(self, explorer):
+        explorer.exploration_state = ExplorationState.PAUSED
+        explorer.handle_resume()
+        assert explorer.exploration_state == ExplorationState.EXPLORING
+
+    def test_resume_from_stopped(self, explorer):
+        explorer.exploration_state = ExplorationState.STOPPED
+        explorer.handle_resume()
+        assert explorer.exploration_state == ExplorationState.EXPLORING
+
+    def test_reset_clears_all(self, explorer):
+        explorer.exploration_state = ExplorationState.EXPLORING
+        explorer.is_navigating = True
+        explorer.goals_attempted = 5
+        explorer.goals_reached = 3
+        explorer.consecutive_failures = 2
+        explorer.handle_reset()
+        assert explorer.exploration_state == ExplorationState.IDLE
+        assert explorer.is_navigating is False
+        assert explorer.goals_attempted == 0
+        assert explorer.goals_reached == 0
+        assert explorer.consecutive_failures == 0
+
+
+class TestExplorerGoalCallbacks:
+    """Test explorer goal response and result callbacks."""
+
+    def test_goal_rejected(self, explorer):
+        explorer.is_navigating = True
+        explorer.current_goal = {'x': 1.0, 'y': 2.0}
+
+        future = MagicMock()
+        goal_handle = MagicMock()
+        goal_handle.accepted = False
+        future.result.return_value = goal_handle
+
+        explorer.goal_response_callback(future)
+        assert explorer.is_navigating is False
+        assert len(explorer.failed_goals) == 1
+
+    def test_result_succeeded(self, explorer):
+        explorer.current_goal = {'x': 1.0, 'y': 2.0}
+
+        future = MagicMock()
+        result = MagicMock()
+        result.status = 4  # SUCCEEDED
+        future.result.return_value = result
+
+        explorer.get_result_callback(future)
+        assert explorer.goals_reached == 1
+        assert explorer.consecutive_failures == 0
+
+    def test_result_aborted_increments_failure(self, explorer):
+        explorer.current_goal = {'x': 1.0, 'y': 2.0}
+        explorer.consecutive_failures = 0
+
+        future = MagicMock()
+        result = MagicMock()
+        result.status = 6  # ABORTED
+        future.result.return_value = result
+
+        explorer.get_result_callback(future)
+        assert explorer.consecutive_failures == 1
+        assert len(explorer.failed_goals) == 1
+
+    def test_max_consecutive_failures_finishes(self, explorer):
+        explorer.current_goal = {'x': 1.0, 'y': 2.0}
+        explorer.consecutive_failures = explorer.max_consecutive_failures - 1
+        explorer.start_time = None
+
+        future = MagicMock()
+        result = MagicMock()
+        result.status = 6
+        future.result.return_value = result
+
+        explorer.get_result_callback(future)
+        assert explorer.exploration_state == ExplorationState.COMPLETE
+
+
+class TestExplorerNoGoZones:
+    """Test no-go zone filtering in frontier selection."""
+
+    def test_point_in_no_go_zone(self, explorer):
+        explorer._no_go_zones = [{'x1': 0, 'y1': 0, 'x2': 2, 'y2': 2}]
+        assert explorer._point_in_no_go_zone(1.0, 1.0) is True
+        assert explorer._point_in_no_go_zone(3.0, 3.0) is False
+
+    def test_point_at_zone_boundary(self, explorer):
+        explorer._no_go_zones = [{'x1': 0, 'y1': 0, 'x2': 2, 'y2': 2}]
+        assert explorer._point_in_no_go_zone(0.0, 0.0) is True
+        assert explorer._point_in_no_go_zone(2.0, 2.0) is True
+
+    def test_empty_no_go_zones(self, explorer):
+        explorer._no_go_zones = []
+        assert explorer._point_in_no_go_zone(1.0, 1.0) is False
+
+
+# ════════════════════════════════════════════════════════════════════
+# Webapp Stat Tracking Tests (Bug 54)
+# ════════════════════════════════════════════════════════════════════
+
+class TestWebappStatTracking:
+    """Test _on_mission_state stat tracking in webapp."""
+
+    @pytest.fixture
+    def web_node(self, tmp_path):
+        """Create a WebBridgeNode with mocked ROS."""
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        node = WebBridgeNode.__new__(WebBridgeNode)
+        # Initialize essential attributes
+        node.mission_state = "WAITING_FOR_SCAN"
+        node.mission_log = []
+        node._scan_start_time = None
+        node._clean_start_time = None
+        node.total_scan_time = 0.0
+        node.total_clean_time = 0.0
+        node.rooms_scanned = 0
+        node.rooms_cleaned = 0
+        node.sio = MagicMock()
+        return node
+
+    def test_exploring_to_paused_no_scan_count(self, web_node):
+        """Bug 54 regression: EXPLORING→PAUSED should NOT count as scan completion."""
+        web_node.mission_state = "EXPLORING"
+        web_node._scan_start_time = time.monotonic() - 10
+
+        msg = MagicMock()
+        msg.data = "PAUSED"
+        web_node._on_mission_state(msg)
+
+        assert web_node.rooms_scanned == 0
+        # scan_start_time should be preserved (paused, not finished)
+        assert web_node._scan_start_time is not None
+
+    def test_coverage_to_paused_no_clean_count(self, web_node):
+        """Bug 54 regression: COVERAGE→PAUSED should NOT count as clean completion."""
+        web_node.mission_state = "COVERAGE"
+        web_node._clean_start_time = time.monotonic() - 10
+
+        msg = MagicMock()
+        msg.data = "PAUSED"
+        web_node._on_mission_state(msg)
+
+        assert web_node.rooms_cleaned == 0
+        assert web_node._clean_start_time is not None
+
+    def test_exploring_to_waiting_for_clean_counts_scan(self, web_node):
+        """EXPLORING→WAITING_FOR_CLEAN should count as scan completion."""
+        web_node.mission_state = "EXPLORING"
+        web_node._scan_start_time = time.monotonic() - 10
+
+        msg = MagicMock()
+        msg.data = "WAITING_FOR_CLEAN"
+        web_node._on_mission_state(msg)
+
+        assert web_node.rooms_scanned == 1
+        assert web_node._scan_start_time is None
+
+    def test_coverage_to_returning_counts_clean(self, web_node):
+        """COVERAGE→RETURNING should count as clean completion."""
+        web_node.mission_state = "COVERAGE"
+        web_node._clean_start_time = time.monotonic() - 10
+
+        msg = MagicMock()
+        msg.data = "RETURNING"
+        web_node._on_mission_state(msg)
+
+        assert web_node.rooms_cleaned == 1
+        assert web_node._clean_start_time is None
+
+    def test_exploring_start_tracks_time(self, web_node):
+        """Transition INTO EXPLORING should start scan timer."""
+        web_node.mission_state = "WAITING_FOR_SCAN"
+        web_node._scan_start_time = None
+
+        msg = MagicMock()
+        msg.data = "EXPLORING"
+        web_node._on_mission_state(msg)
+
+        assert web_node._scan_start_time is not None
+
+    def test_coverage_start_tracks_time(self, web_node):
+        """Transition INTO COVERAGE should start clean timer."""
+        web_node.mission_state = "WAITING_FOR_CLEAN"
+        web_node._clean_start_time = None
+
+        msg = MagicMock()
+        msg.data = "COVERAGE"
+        web_node._on_mission_state(msg)
+
+        assert web_node._clean_start_time is not None
+
+
+# ════════════════════════════════════════════════════════════════════
+# Coverage Path Generation Edge Cases
+# ════════════════════════════════════════════════════════════════════
+
+class TestCoveragePathEdgeCases:
+    """Test edge cases in coverage path generation."""
+
+    def test_find_free_segments_all_occupied(self, coverage):
+        coverage.inflated_map = np.full((10, 10), 100, dtype=np.int8)
+        coverage.map_info = MagicMock()
+        coverage.map_info.resolution = 0.05
+        result = coverage.find_free_segments_in_column(0)
+        assert result == []
+
+    def test_find_free_segments_all_free(self, coverage):
+        coverage.inflated_map = np.zeros((100, 10), dtype=np.int8)
+        coverage.map_info = MagicMock()
+        coverage.map_info.resolution = 0.05
+        result = coverage.find_free_segments_in_column(0)
+        assert len(result) >= 1
+        # Should cover most of the column
+        total_rows = sum(end - start for start, end in result)
+        assert total_rows > 50
+
+    def test_find_free_segments_short_segment_filtered(self, coverage):
+        """Segments shorter than 10cm should be filtered."""
+        coverage.inflated_map = np.full((10, 10), 100, dtype=np.int8)
+        coverage.map_info = MagicMock()
+        coverage.map_info.resolution = 0.05
+        # Create a 1-cell free segment (0.05m < 0.10m threshold)
+        coverage.inflated_map[5, 0] = 0
+        result = coverage.find_free_segments_in_column(0)
+        assert result == []
+
+    def test_optimize_path_order_few_waypoints(self, coverage):
+        """Path with <= 4 waypoints should be returned as-is."""
+        wps = [(0, 0, 0), (1, 0, 0)]
+        result = coverage.optimize_path_order(wps)
+        assert result == wps
+
+    def test_optimize_path_order_reversal(self, coverage):
+        """Optimizer should reverse pairs when closer to end."""
+        wps = [
+            (0, 0, 0), (0, 1, 0),
+            (0, 3, 0), (0, 2, 0),
+            (0, 5, 0), (0, 4, 0),
+        ]
+        result = coverage.optimize_path_order(wps)
+        assert len(result) == 6
+
+
+class TestCoverageGenerateCellBoundary:
+    """Test generate_cell_boundary."""
+
+    def test_empty_segments(self, coverage):
+        assert coverage.generate_cell_boundary([]) == []
+
+    def test_single_segment(self, coverage):
+        segs = [(1.0, 0.0, 2.0, 0, 0, 40)]
+        result = coverage.generate_cell_boundary(segs)
+        assert len(result) > 0
+
+    def test_multiple_segments(self, coverage):
+        segs = [
+            (1.0, 0.0, 2.0, 0, 0, 40),
+            (2.0, 0.5, 2.5, 1, 10, 50),
+        ]
+        result = coverage.generate_cell_boundary(segs)
+        assert len(result) > 0
+
+
+# ════════════════════════════════════════════════════════════════════
+# Full Mission Scenario Tests
+# ════════════════════════════════════════════════════════════════════
+
+class TestFullMissionScenarios:
+    """End-to-end scenario tests for the mission state machine."""
+
+    def test_full_scan_pause_resume_clean_home(self, mission):
+        """Test complete workflow: scan → pause → resume → clean → home → complete."""
+        # Start scan
+        mission.handle_start_scan()
+        assert mission.state == MissionState.EXPLORING
+
+        # Pause
+        mission.handle_pause()
+        assert mission.state == MissionState.PAUSED
+        assert mission.previous_state == MissionState.EXPLORING
+
+        # Resume
+        mission.handle_resume()
+        assert mission.state == MissionState.EXPLORING
+
+        # Stop scan
+        mission.handle_stop_scan()
+        assert mission.state == MissionState.WAITING_FOR_CLEAN
+
+        # Start clean
+        mission.handle_start_clean()
+        assert mission.state == MissionState.COVERAGE
+
+        # Pause during clean
+        mission.handle_pause()
+        assert mission.state == MissionState.PAUSED
+        assert mission.previous_state == MissionState.COVERAGE
+
+        # Go home from paused (Bug 53: should deactivate cleaning)
+        mission.handle_go_home()
+        assert mission.state == MissionState.RETURNING
+        assert mission.previous_state is None
+        mission.stop_clean_trigger_pub.publish.assert_called()
+
+    def test_scan_clean_reset_restart(self, mission):
+        """Test reset mid-flow and restart."""
+        mission.handle_start_scan()
+        assert mission.state == MissionState.EXPLORING
+
+        mission.handle_reset()
+        assert mission.state == MissionState.WAITING_FOR_SCAN
+        assert mission.exploration_complete is False
+
+        # Restart
+        mission.handle_start_scan()
+        assert mission.state == MissionState.EXPLORING
+
+    def test_multiple_pause_resume_cycles(self, mission):
+        """Test multiple pause/resume cycles."""
+        mission.handle_start_scan()
+        for _ in range(5):
+            mission.handle_pause()
+            assert mission.state == MissionState.PAUSED
+            mission.handle_resume()
+            assert mission.state == MissionState.EXPLORING
+
+    def test_stop_clean_restart_clean(self, mission):
+        """Test stopping and restarting clean."""
+        mission.state = MissionState.WAITING_FOR_CLEAN
+        mission.handle_start_clean()
+        assert mission.state == MissionState.COVERAGE
+
+        mission.handle_stop_clean()
+        assert mission.state == MissionState.WAITING_FOR_CLEAN
+
+        mission.handle_start_clean()
+        assert mission.state == MissionState.COVERAGE

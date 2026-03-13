@@ -280,8 +280,9 @@ class FullMissionController(Node):
         self.get_logger().info('🏠 Going home...')
         self.stop_robot()
         
-        # Deactivate cleaning if it was active
-        if self.state == MissionState.COVERAGE:
+        # Deactivate cleaning if it was active (or paused from coverage)
+        if self.state == MissionState.COVERAGE or \
+           (self.state == MissionState.PAUSED and self.previous_state == MissionState.COVERAGE):
             self._deactivate_cleaning_hardware()
         
         # Stop any running operations
@@ -290,6 +291,7 @@ class FullMissionController(Node):
         self.exploration_control_pub.publish(ctrl_msg)
         self.coverage_control_pub.publish(ctrl_msg)
         
+        self.previous_state = None
         self.state = MissionState.RETURNING
         self.return_home_sequence()
 
@@ -298,8 +300,9 @@ class FullMissionController(Node):
         self.get_logger().info('🔄 Resetting mission...')
         self.stop_robot()
         
-        # Deactivate cleaning if it was active
-        if self.state == MissionState.COVERAGE:
+        # Deactivate cleaning if it was active (or paused from coverage)
+        if self.state == MissionState.COVERAGE or \
+           (self.state == MissionState.PAUSED and self.previous_state == MissionState.COVERAGE):
             self._deactivate_cleaning_hardware()
         
         # Stop any running operations
@@ -310,6 +313,7 @@ class FullMissionController(Node):
         
         # Reset state
         self.state = MissionState.WAITING_FOR_SCAN
+        self.previous_state = None
         self.exploration_complete = False
         self.coverage_complete = False
         self.start_time = None

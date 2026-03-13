@@ -261,3 +261,28 @@
 - **Files:** `clean_bot_mission/clean_bot_mission/frontier_explorer.py` (`map_callback`), `clean_bot_mission/clean_bot_mission/adaptive_coverage.py` (`map_callback`), `clean_bot_mission/scripts/telegram_bridge.py` (`generate_map_image`)
 - **Problem:** Same as Bug 50 — `np.array(msg.data).reshape((h, w))` called without verifying `len(msg.data) == w * h`. A malformed OccupancyGrid from SLAM causes `ValueError` crash in the ROS callback, breaking the entire node.
 - **Fix:** Added dimension guard (`if w <= 0 or h <= 0 or len(msg.data) != w * h: return`) before the reshape call in all three files.
+
+### Bug 53: go_home/reset from PAUSED state doesn't deactivate cleaning hardware
+- **File:** `clean_bot_mission/clean_bot_mission/full_mission.py` (`handle_go_home`, `handle_reset`)
+- **Problem:** When the robot is cleaning (COVERAGE state), the user pauses → state becomes PAUSED. If the user then sends `go_home` or `reset`, the code only checks `if self.state == MissionState.COVERAGE` to decide whether to deactivate cleaning hardware. Since state is PAUSED (not COVERAGE), the check fails and cleaning hardware (relay + servo) stays ON indefinitely.
+- **Fix:** Extended the check to also deactivate when `self.state == MissionState.PAUSED and self.previous_state == MissionState.COVERAGE`.
+
+### Bug 54: Stat tracking counts PAUSED transitions as scan/clean completion
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`_on_mission_state`)
+- **Problem:** When mission state transitions EXPLORING → PAUSED, the stat tracker sees "no longer EXPLORING" and increments `rooms_scanned`. Similarly, COVERAGE → PAUSED increments `rooms_cleaned`. The robot is just paused, not done — stats are inflated.
+- **Fix:** Added `is_pause = 'PAUSE' in new_u` guard that skips the completion counting when the new state is a pause state.
+
+### Bug 55: normalize_angle infinite loop on NaN/inf input
+- **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py` (`normalize_angle`)
+- **Problem:** The `while angle > math.pi` / `while angle < -math.pi` loops never terminate if angle is NaN (comparisons always False, but `fmod` would handle it) or ±inf (loop runs forever subtracting/adding 2π).
+- **Fix:** Added `if not math.isfinite(angle): return 0.0` guard and replaced while-loops with `math.fmod()` for O(1) normalization.
+
+### Bug 56: previous_state not cleared on go_home/reset
+- **File:** `clean_bot_mission/clean_bot_mission/full_mission.py` (`handle_go_home`, `handle_reset`)
+- **Problem:** After calling `go_home` or `reset` from PAUSED state, `self.previous_state` retained its old value (EXPLORING or COVERAGE). If the user later pauses and resumes, the stale `previous_state` could cause incorrect state restoration.
+- **Fix:** Added `self.previous_state = None` in both `handle_go_home` and `handle_reset`.
+
+### Bug 57: Stat tracking fails for WAITING_FOR_CLEAN → COVERAGE transition
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`_on_mission_state`)
+- **Problem:** The clean-start detection used substring matching: `'CLEAN' not in old_u`. But state "WAITING_FOR_CLEAN" contains "CLEAN", making it look like the previous state was already a cleaning state. Result: `_clean_start_time` is never set when transitioning from WAITING_FOR_CLEAN to COVERAGE, and clean duration is never tracked.
+- **Fix:** Replaced substring matching with a helper `_is_cleaning(s)` that requires 'COVER' in state AND 'WAITING' not in state, correctly distinguishing COVERAGE from WAITING_FOR_CLEAN.
