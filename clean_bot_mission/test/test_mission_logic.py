@@ -2000,3 +2000,295 @@ class TestRetryDensifyOrient:
             x2, y2, _ = coverage.waypoints[i + 1]
             expected_yaw = math.atan2(y2 - y1, x2 - x1)
             assert abs(yaw1 - expected_yaw) < 0.01
+
+
+# ── Bug 91: find_safe_goal_near_frontier ──────────────────────────
+class TestFindSafeGoalNearFrontier:
+    """Tests for the optimized frontier goal finder."""
+
+    @staticmethod
+    def _make_explorer(map_array):
+        """Create a minimal explorer mock with a given map."""
+        explorer = MagicMock()
+        explorer.map_array = map_array
+        h, w = map_array.shape
+        explorer.map_info = MagicMock()
+        explorer.map_info.height = h
+        explorer.map_info.width = w
+        explorer.map_info.resolution = 0.05
+        explorer.map_info.origin.position.x = 0.0
+        explorer.map_info.origin.position.y = 0.0
+        return explorer
+
+    def test_centroid_is_free_returns_centroid(self):
+        """If the frontier centroid cell is free, return it directly."""
+        arr = np.full((20, 20), -1, dtype=np.int8)
+        arr[10, 10] = 0  # free at centroid
+        explorer = self._make_explorer(arr)
+        from clean_bot_mission.frontier_explorer import FrontierExplorer
+        frontier = {'x': 10 * 0.05, 'y': 10 * 0.05, 'size': 5}
+        result = FrontierExplorer.find_safe_goal_near_frontier(explorer, frontier)
+        expected_x = (10 + 0.5) * 0.05
+        expected_y = (10 + 0.5) * 0.05
+        assert abs(result[0] - expected_x) < 0.001
+        assert abs(result[1] - expected_y) < 0.001
+
+    def test_centroid_occupied_finds_neighbor(self):
+        """If centroid is occupied but neighbor is free, find the neighbor."""
+        arr = np.full((20, 20), 100, dtype=np.int8)
+        arr[10, 11] = 0  # free one cell to the right of centroid
+        explorer = self._make_explorer(arr)
+        from clean_bot_mission.frontier_explorer import FrontierExplorer
+        frontier = {'x': 10 * 0.05, 'y': 10 * 0.05, 'size': 5}
+        result = FrontierExplorer.find_safe_goal_near_frontier(explorer, frontier)
+        # Should find the free cell at (11, 10) in grid
+        expected_x = (11 + 0.5) * 0.05
+        expected_y = (10 + 0.5) * 0.05
+        assert abs(result[0] - expected_x) < 0.001
+        assert abs(result[1] - expected_y) < 0.001
+
+    def test_all_occupied_returns_fallback(self):
+        """If no free cell found within search radius, return original point."""
+        arr = np.full((20, 20), 100, dtype=np.int8)
+        explorer = self._make_explorer(arr)
+        from clean_bot_mission.frontier_explorer import FrontierExplorer
+        frontier = {'x': 0.5, 'y': 0.5, 'size': 5}
+        result = FrontierExplorer.find_safe_goal_near_frontier(explorer, frontier)
+        assert result == (0.5, 0.5)
+
+    def test_closest_cell_preferred_over_row_major(self):
+        """At same radius, prefer the cell closest to centroid (not first in row scan)."""
+        arr = np.full((20, 20), 100, dtype=np.int8)
+        # Place free cells at radius 2: one at corner, one on edge
+        # Corner: (8, 8) → distance² = 4+4=8
+        # Edge: (8, 10) → distance² = 4+0=4 — closer!
+        arr[8, 8] = 0   # corner (further from centroid)
+        arr[8, 10] = 0   # edge (closer to centroid)
+        explorer = self._make_explorer(arr)
+        from clean_bot_mission.frontier_explorer import FrontierExplorer
+        frontier = {'x': 10 * 0.05, 'y': 10 * 0.05, 'size': 5}
+        result = FrontierExplorer.find_safe_goal_near_frontier(explorer, frontier)
+        # Should pick (col=10, row=8) which has distance² = 4
+        expected_x = (10 + 0.5) * 0.05
+        expected_y = (8 + 0.5) * 0.05
+        assert abs(result[0] - expected_x) < 0.001
+        assert abs(result[1] - expected_y) < 0.001
+
+    def test_does_not_recheck_interior(self):
+        """Verify the perimeter-only approach: a free cell at radius 1 is found
+        at radius 1, not re-found at radius 2."""
+        arr = np.full((20, 20), 100, dtype=np.int8)
+        arr[10, 11] = 0  # free at radius 1
+        explorer = self._make_explorer(arr)
+        from clean_bot_mission.frontier_explorer import FrontierExplorer
+        frontier = {'x': 10 * 0.05, 'y': 10 * 0.05, 'size': 5}
+        result = FrontierExplorer.find_safe_goal_near_frontier(explorer, frontier)
+        expected_x = (11 + 0.5) * 0.05
+        expected_y = (10 + 0.5) * 0.05
+        assert abs(result[0] - expected_x) < 0.001
+        assert abs(result[1] - expected_y) < 0.001
+
+    def test_out_of_bounds_centroid(self):
+        """If centroid maps to out-of-bounds, expand search handles it."""
+        arr = np.full((5, 5), 100, dtype=np.int8)
+        arr[4, 4] = 0  # only free cell
+        explorer = self._make_explorer(arr)
+        from clean_bot_mission.frontier_explorer import FrontierExplorer
+        # Centroid at (0,0) maps to col=0, row=0
+        frontier = {'x': 0.0, 'y': 0.0, 'size': 5}
+        result = FrontierExplorer.find_safe_goal_near_frontier(explorer, frontier)
+        expected_x = (4 + 0.5) * 0.05
+        expected_y = (4 + 0.5) * 0.05
+        assert abs(result[0] - expected_x) < 0.001
+        assert abs(result[1] - expected_y) < 0.001
+
+
+# ── Bug 93: Schedule triggered keys isolation ─────────────────────
+class TestScheduleTriggeredKeys:
+    """Verify _last_triggered is not stored on schedule dicts."""
+
+    def test_schedule_dict_not_modified(self):
+        """Check that _check_schedules doesn't add _last_triggered to schedule dicts."""
+        from datetime import datetime
+        node = MagicMock()
+        node.mission_state = "WAITING_FOR_SCAN"
+        node._schedule_lock = __import__('threading').Lock()
+        node._schedule_triggered_keys = {}
+        now = datetime.now()
+        day_names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+        current_day = day_names[now.weekday()]
+        current_time = now.strftime("%H:%M")
+        sched = {
+            "id": "test1",
+            "time": current_time,
+            "days": [current_day],
+            "enabled": True,
+        }
+        node._schedules = [sched]
+        node.get_logger = MagicMock(return_value=MagicMock())
+        node.send_command = MagicMock()
+
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        WebBridgeNode._check_schedules(node)
+
+        # The schedule dict should NOT have _last_triggered
+        assert "_last_triggered" not in sched
+        # But the triggered key should be in the separate dict
+        assert node._schedule_triggered_keys.get("test1") == f"{current_day}_{current_time}"
+        # send_command should have been called
+        node.send_command.assert_called_once_with("start_clean")
+
+    def test_double_trigger_prevented(self):
+        """Calling _check_schedules twice in the same minute should not double-trigger."""
+        from datetime import datetime
+        node = MagicMock()
+        node.mission_state = "WAITING_FOR_SCAN"
+        node._schedule_lock = __import__('threading').Lock()
+        node._schedule_triggered_keys = {}
+        now = datetime.now()
+        day_names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+        current_day = day_names[now.weekday()]
+        current_time = now.strftime("%H:%M")
+        sched = {
+            "id": "test1",
+            "time": current_time,
+            "days": [current_day],
+            "enabled": True,
+        }
+        node._schedules = [sched]
+        node.get_logger = MagicMock(return_value=MagicMock())
+        node.send_command = MagicMock()
+
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        WebBridgeNode._check_schedules(node)
+        WebBridgeNode._check_schedules(node)
+
+        # Should only fire once
+        assert node.send_command.call_count == 1
+
+    def test_no_trigger_when_busy(self):
+        """Schedule shouldn't trigger when mission is active (e.g. EXPLORING)."""
+        from datetime import datetime
+        node = MagicMock()
+        node.mission_state = "EXPLORING"
+        node._schedule_lock = __import__('threading').Lock()
+        node._schedule_triggered_keys = {}
+        now = datetime.now()
+        day_names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+        current_day = day_names[now.weekday()]
+        current_time = now.strftime("%H:%M")
+        node._schedules = [{
+            "id": "test1",
+            "time": current_time,
+            "days": [current_day],
+            "enabled": True,
+        }]
+        node.get_logger = MagicMock(return_value=MagicMock())
+        node.send_command = MagicMock()
+
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        WebBridgeNode._check_schedules(node)
+        node.send_command.assert_not_called()
+
+    def test_disabled_schedule_not_triggered(self):
+        """Disabled schedules should not trigger."""
+        from datetime import datetime
+        node = MagicMock()
+        node.mission_state = "WAITING_FOR_SCAN"
+        node._schedule_lock = __import__('threading').Lock()
+        node._schedule_triggered_keys = {}
+        now = datetime.now()
+        day_names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+        current_day = day_names[now.weekday()]
+        current_time = now.strftime("%H:%M")
+        node._schedules = [{
+            "id": "test1",
+            "time": current_time,
+            "days": [current_day],
+            "enabled": False,
+        }]
+        node.get_logger = MagicMock(return_value=MagicMock())
+        node.send_command = MagicMock()
+
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        WebBridgeNode._check_schedules(node)
+        node.send_command.assert_not_called()
+
+    def test_wrong_day_not_triggered(self):
+        """Schedule on a different day should not trigger."""
+        from datetime import datetime
+        node = MagicMock()
+        node.mission_state = "WAITING_FOR_SCAN"
+        node._schedule_lock = __import__('threading').Lock()
+        node._schedule_triggered_keys = {}
+        now = datetime.now()
+        day_names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+        current_day = day_names[now.weekday()]
+        current_time = now.strftime("%H:%M")
+        # Use a day that's NOT today
+        other_day = day_names[(now.weekday() + 1) % 7]
+        node._schedules = [{
+            "id": "test1",
+            "time": current_time,
+            "days": [other_day],
+            "enabled": True,
+        }]
+        node.get_logger = MagicMock(return_value=MagicMock())
+        node.send_command = MagicMock()
+
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        WebBridgeNode._check_schedules(node)
+        node.send_command.assert_not_called()
+
+
+# ── Bug 91: inflate_obstacles with no-go zones ───────────────────
+class TestInflateObstaclesNoGoZones:
+    """Tests for inflate_obstacles applying no-go zones."""
+
+    @staticmethod
+    def _make_planner(map_array, no_go_zones=None):
+        planner = MagicMock()
+        planner.map_array = map_array.copy()
+        planner.inflated_map = None
+        h, w = map_array.shape
+        planner.map_info = MagicMock()
+        planner.map_info.resolution = 0.05
+        planner.map_info.origin.position.x = 0.0
+        planner.map_info.origin.position.y = 0.0
+        planner.robot_radius = 0.10  # 2 cells at 0.05 resolution
+        planner._no_go_zones = no_go_zones or []
+        planner.get_logger = MagicMock(return_value=MagicMock())
+        return planner
+
+    def test_no_go_zone_marks_cells_as_obstacle(self):
+        """No-go zone should be treated as obstacles in inflated map."""
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner
+        arr = np.zeros((20, 20), dtype=np.int8)  # all free
+        zones = [{"x1": 0.25, "y1": 0.25, "x2": 0.5, "y2": 0.5}]
+        planner = self._make_planner(arr, zones)
+        AdaptiveCoveragePlanner.inflate_obstacles(planner)
+        # The no-go zone should have inflated some cells to 100
+        assert planner.inflated_map is not None
+        # Check that some cells in the no-go region are occupied
+        assert np.any(planner.inflated_map[5:10, 5:10] == 100)
+
+    def test_empty_no_go_zones(self):
+        """With no zones, only actual obstacles are inflated."""
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner
+        arr = np.zeros((20, 20), dtype=np.int8)
+        arr[10, 10] = 100  # single obstacle
+        planner = self._make_planner(arr, [])
+        AdaptiveCoveragePlanner.inflate_obstacles(planner)
+        assert planner.inflated_map is not None
+        # The obstacle cell + inflation around it should be 100
+        assert planner.inflated_map[10, 10] == 100
+
+    def test_invalid_zone_skipped(self):
+        """Invalid zone dicts should be skipped without error."""
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner
+        arr = np.zeros((20, 20), dtype=np.int8)
+        zones = [{"bad": True}, {"x1": "notanumber", "y1": 0, "x2": 1, "y2": 1}]
+        planner = self._make_planner(arr, zones)
+        # Should not raise
+        AdaptiveCoveragePlanner.inflate_obstacles(planner)
+        assert planner.inflated_map is not None

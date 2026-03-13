@@ -332,7 +332,7 @@ class FrontierExplorer(Node):
         if best_frontier is None:
             self.get_logger().warn('⚠️ Could not find reachable frontier')
             # Check if we've tried clearing failed goals already
-            if not hasattr(self, '_retry_after_clear') or not self._retry_after_clear:
+            if not self._retry_after_clear:
                 self.get_logger().info('🔄 Clearing failed goals and retrying once...')
                 self.failed_goals.clear()
                 self._retry_after_clear = True
@@ -544,30 +544,46 @@ class FrontierExplorer(Node):
     def find_safe_goal_near_frontier(self, frontier: dict) -> tuple:
         """
         Find a safe (free) cell near the frontier centroid.
-        The goal should be in free space, not on the frontier itself.
+        Checks centroid first, then expands outward checking only the
+        perimeter of each square to avoid redundant interior re-checks.
+        Among cells at the same radius, picks the one closest to centroid.
         """
         target_x = frontier['x']
         target_y = frontier['y']
-        
-        # Convert to grid coordinates
+
         col = int((target_x - self.map_info.origin.position.x) / self.map_info.resolution)
         row = int((target_y - self.map_info.origin.position.y) / self.map_info.resolution)
-        
-        # Search in expanding circles for a free cell
-        robot_x, robot_y = self.get_robot_position()
-        
-        for radius in range(1, 20):  # Search up to 20 cells away
+
+        h, w = self.map_info.height, self.map_info.width
+
+        # Check centroid first
+        if 0 <= row < h and 0 <= col < w:
+            if 0 <= self.map_array[row, col] < FREE_THRESHOLD:
+                x = self.map_info.origin.position.x + (col + 0.5) * self.map_info.resolution
+                y = self.map_info.origin.position.y + (row + 0.5) * self.map_info.resolution
+                return (x, y)
+
+        # Expand outward, checking only the perimeter at each radius
+        for radius in range(1, 20):
+            best = None
+            best_dist_sq = float('inf')
             for dr in range(-radius, radius + 1):
                 for dc in range(-radius, radius + 1):
+                    if abs(dr) != radius and abs(dc) != radius:
+                        continue  # skip interior (already checked)
                     r, c = row + dr, col + dc
-                    
-                    if 0 <= r < self.map_info.height and 0 <= c < self.map_info.width:
+                    if 0 <= r < h and 0 <= c < w:
                         if 0 <= self.map_array[r, c] < FREE_THRESHOLD:
-                            # Found free cell - convert back to world coords
-                            x = self.map_info.origin.position.x + (c + 0.5) * self.map_info.resolution
-                            y = self.map_info.origin.position.y + (r + 0.5) * self.map_info.resolution
-                            return (x, y)
-        
+                            dist_sq = dr * dr + dc * dc
+                            if dist_sq < best_dist_sq:
+                                best_dist_sq = dist_sq
+                                best = (c, r)
+            if best is not None:
+                c, r = best
+                x = self.map_info.origin.position.x + (c + 0.5) * self.map_info.resolution
+                y = self.map_info.origin.position.y + (r + 0.5) * self.map_info.resolution
+                return (x, y)
+
         # Fallback: return original point
         return (target_x, target_y)
 

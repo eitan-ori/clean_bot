@@ -448,3 +448,18 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
 - **Problem:** Walls-only conversion used `list(m.data)` + Python list comprehension over potentially 100k+ cells.
 - **Fix:** Vectorized with `np.where(raw >= 50, 100, 0).tolist()`.
+
+### Bug 91: `find_safe_goal_near_frontier` redundant search and wrong selection
+- **File:** `clean_bot_mission/clean_bot_mission/frontier_explorer.py`
+- **Problem:** Three issues: (1) Search started at radius 1, never checking the centroid cell itself. (2) At each radius, the entire square was searched, re-checking all interior cells from previous radii (~80% redundant). (3) The first free cell in row-major order was returned, not the closest to the frontier centroid. Additionally, `robot_x, robot_y` were computed but never used (dead code).
+- **Fix:** Check centroid first (radius 0). At each expanding radius, only check perimeter cells. Among perimeter candidates, pick the one with smallest distance² to centroid. Removed dead `get_robot_position()` call.
+
+### Bug 92: Inline `import uuid` in `add_no_go_zone`
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** `uuid` was imported inline every time a no-go zone was added, instead of once at module load.
+- **Fix:** Moved `import uuid` to top-level imports.
+
+### Bug 93: Schedule `_last_triggered` leaks internal state to API
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** `_check_schedules()` stored `_last_triggered` directly on the schedule dict. This internal field was then returned by `api_get_schedules()` in the JSON response, exposing implementation details to the frontend. Also, if the schedule dicts were saved to disk, the field would persist but was never checked on load.
+- **Fix:** Introduced `_schedule_triggered_keys` dict (keyed by schedule ID) to track trigger state separately from the schedule data.

@@ -28,6 +28,7 @@ import sys
 import json
 import time
 import math
+import uuid
 import threading
 import logging
 from collections import deque
@@ -150,6 +151,7 @@ class WebBridgeNode(Node):
         # ── Round 33: Schedules ──
         self._schedules = self._load_schedules()
         self._schedule_lock = threading.Lock()
+        self._schedule_triggered_keys = {}  # {schedule_id: "day_HH:MM"} to prevent double-triggers
 
         # ── Round 34: Battery simulation ──
         self.battery_level = 100.0
@@ -667,11 +669,11 @@ class WebBridgeNode(Node):
                     continue
                 if current_day in sched.get("days", []) and sched.get("time") == current_time:
                     # Prevent double-triggering within the same minute
-                    last = sched.get("_last_triggered", "")
+                    sid = sched.get("id", "")
                     trigger_key = f"{current_day}_{current_time}"
-                    if last == trigger_key:
+                    if self._schedule_triggered_keys.get(sid) == trigger_key:
                         continue
-                    sched["_last_triggered"] = trigger_key
+                    self._schedule_triggered_keys[sid] = trigger_key
                     self.get_logger().info(f"Scheduled clean triggered: {sched}")
                     self.send_command("start_clean")
 
@@ -726,7 +728,6 @@ class WebBridgeNode(Node):
 
     def add_no_go_zone(self, zone):
         """Add a no-go zone. zone = {x1, y1, x2, y2, name?}."""
-        import uuid
         zone["id"] = str(uuid.uuid4())[:8]
         self._no_go_zones.append(zone)
         self._save_no_go_zones()
