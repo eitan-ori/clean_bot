@@ -752,16 +752,17 @@ class WebBridgeNode(Node):
 
     # ── Scan-to-Map Localization ─────────────────────────────────
     def _scan_to_points(self):
-        """Convert current LiDAR scan to 2D point list in robot frame."""
+        """Convert current LiDAR scan to 2D point list in robot frame (vectorized)."""
         if not self.scan_ranges or len(self.scan_ranges) < 10:
             return None
-        points = []
-        angle = self.scan_angle_min
-        for r in self.scan_ranges:
-            if math.isfinite(r) and 0.12 < r < 10.0:
-                points.append((r * math.cos(angle), r * math.sin(angle)))
-            angle += self.scan_angle_increment
-        return points if len(points) >= 30 else None
+        ranges = np.array(self.scan_ranges, dtype=np.float64)
+        angles = self.scan_angle_min + np.arange(len(ranges)) * self.scan_angle_increment
+        valid = np.isfinite(ranges) & (ranges > 0.12) & (ranges < 10.0)
+        r_valid = ranges[valid]
+        a_valid = angles[valid]
+        if len(r_valid) < 30:
+            return None
+        return list(zip(r_valid * np.cos(a_valid), r_valid * np.sin(a_valid)))
 
     def _score_pose(self, pts_x, pts_y, cx, cy, theta, wall_mask, ox, oy, res, w, h):
         """Score a candidate pose by counting scan points that match wall cells."""
@@ -1205,7 +1206,10 @@ def api_delete_schedule(schedule_id):
     if ros_node is None:
         return jsonify({"error": "ROS not connected"}), 503
     with ros_node._schedule_lock:
+        before = len(ros_node._schedules)
         ros_node._schedules = [s for s in ros_node._schedules if s.get("id") != schedule_id]
+        # Clean up triggered-key entry so it doesn't leak memory
+        ros_node._schedule_triggered_keys.pop(schedule_id, None)
     ros_node._save_schedules()
     return jsonify({"ok": True})
 

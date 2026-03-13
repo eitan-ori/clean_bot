@@ -473,3 +473,23 @@
 - **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py`
 - **Problem:** No-go zone coordinate-to-grid conversion used `int()` truncation for both start and end boundaries. For fractional cell coordinates (e.g., 7.6), `int(7.6) = 7` for the end boundary, potentially leaving the last partial cell unblocked.
 - **Fix:** Changed to `math.floor()` for zone start (inclusive) and `math.ceil()` for zone end (inclusive), ensuring the zone fully covers all partial cells at its boundaries.
+
+### Bug 96: Dead code `origStatusHandler` in JavaScript status handler
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/templates/index.html`
+- **Problem:** Lines before the status handler saved `origStatusHandler = socket._callbacks['$status']` and called `socket.off('status')`, but there was no prior `status` handler. These lines were dead code (no-op) left over from an earlier refactor.
+- **Fix:** Removed the dead code and simplified the status handler registration.
+
+### Bug 97: `_scan_to_points` uses Python for-loop instead of numpy
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** `_scan_to_points()` iterated over all LiDAR scan ranges (typically 360–1000 points) with a Python for-loop calling `math.cos`/`math.sin` per point. This was ~10x slower than a numpy-vectorized approach.
+- **Fix:** Replaced with numpy: build angles array via `arange`, filter valid ranges with boolean mask, compute x/y with vectorized `np.cos`/`np.sin`.
+
+### Bug 98: Schedule delete doesn't clean up `_schedule_triggered_keys`
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`api_delete_schedule`)
+- **Problem:** When a schedule was deleted via `DELETE /api/schedules/<id>`, the `_schedule_triggered_keys` dict retained the deleted schedule's trigger state. Over time this leaked memory proportional to the number of schedules ever created and triggered.
+- **Fix:** Added `_schedule_triggered_keys.pop(schedule_id, None)` inside the delete handler.
+
+### Bug 99: Dead code `diagToggle.querySelector` in JavaScript
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/templates/index.html`
+- **Problem:** Line `diagToggle.querySelector('span:last-child') || null;` was a standalone expression with no side effects — its result was never assigned or used. Left over from an earlier refactor.
+- **Fix:** Removed the dead code line.

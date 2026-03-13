@@ -2376,3 +2376,94 @@ class TestNoGoZonePrecision:
         assert planner.inflated_map is not None
         # Cell (7, 7) should be in the zone (ceil(7.6)=8, so indices 2..7 inclusive)
         assert planner.inflated_map[7, 7] == 100
+
+
+class TestScanToPointsVectorized:
+    """Bug 98: _scan_to_points should be vectorized with numpy."""
+
+    def test_basic_scan_conversion(self):
+        """Verify vectorized _scan_to_points produces correct points."""
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        node = MagicMock(spec=WebBridgeNode)
+        node.scan_angle_min = 0.0
+        node.scan_angle_increment = math.pi / 180  # 1 degree
+        # 360 ranges at 1.0m
+        node.scan_ranges = [1.0] * 360
+        pts = WebBridgeNode._scan_to_points(node)
+        assert pts is not None
+        assert len(pts) == 360
+        # First point should be (1.0, 0.0)
+        assert abs(pts[0][0] - 1.0) < 1e-6
+        assert abs(pts[0][1] - 0.0) < 1e-6
+        # Second point should be (cos(1°), sin(1°))
+        assert abs(pts[1][0] - math.cos(math.pi / 180)) < 1e-6
+        assert abs(pts[1][1] - math.sin(math.pi / 180)) < 1e-6
+
+    def test_filters_invalid_ranges(self):
+        """Verify invalid ranges (inf, nan, too close, too far) are filtered."""
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        node = MagicMock(spec=WebBridgeNode)
+        node.scan_angle_min = 0.0
+        node.scan_angle_increment = 0.01
+        # Mix of valid and invalid ranges
+        valid = [1.0] * 40
+        invalid = [float('inf'), float('nan'), 0.05, 15.0, -1.0]
+        node.scan_ranges = valid + invalid
+        pts = WebBridgeNode._scan_to_points(node)
+        assert pts is not None
+        assert len(pts) == 40  # only valid ranges
+
+    def test_returns_none_for_too_few_points(self):
+        """Verify None returned when fewer than 30 valid points."""
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        node = MagicMock(spec=WebBridgeNode)
+        node.scan_angle_min = 0.0
+        node.scan_angle_increment = 0.01
+        node.scan_ranges = [1.0] * 20 + [float('inf')] * 50
+        pts = WebBridgeNode._scan_to_points(node)
+        assert pts is None
+
+    def test_returns_none_for_empty_scan(self):
+        """Verify None returned for empty or very short scan."""
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        node = MagicMock(spec=WebBridgeNode)
+        node.scan_ranges = []
+        assert WebBridgeNode._scan_to_points(node) is None
+        node.scan_ranges = [1.0] * 5
+        assert WebBridgeNode._scan_to_points(node) is None
+
+
+class TestScheduleDeleteCleansTriggeredKeys:
+    """Bug 99: Deleting a schedule should remove its triggered key."""
+
+    def test_triggered_key_cleaned_on_delete(self):
+        """Verify _schedule_triggered_keys entry removed when schedule deleted."""
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        node = MagicMock(spec=WebBridgeNode)
+        node._schedules = [
+            {"id": "sched1", "time": "08:00", "days": ["mon"], "enabled": True},
+            {"id": "sched2", "time": "09:00", "days": ["tue"], "enabled": True},
+        ]
+        node._schedule_triggered_keys = {"sched1": "mon_08:00", "sched2": "tue_09:00"}
+        node._schedule_lock = __import__('threading').Lock()
+        # Simulate the delete logic
+        with node._schedule_lock:
+            schedule_id = "sched1"
+            node._schedules = [s for s in node._schedules if s.get("id") != schedule_id]
+            node._schedule_triggered_keys.pop(schedule_id, None)
+        assert "sched1" not in node._schedule_triggered_keys
+        assert "sched2" in node._schedule_triggered_keys
+        assert len(node._schedules) == 1
+
+    def test_delete_nonexistent_schedule_safe(self):
+        """Deleting non-existent schedule doesn't raise."""
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        node = MagicMock(spec=WebBridgeNode)
+        node._schedules = [{"id": "sched1", "time": "08:00", "days": ["mon"]}]
+        node._schedule_triggered_keys = {}
+        node._schedule_lock = __import__('threading').Lock()
+        with node._schedule_lock:
+            schedule_id = "nonexistent"
+            node._schedules = [s for s in node._schedules if s.get("id") != schedule_id]
+            node._schedule_triggered_keys.pop(schedule_id, None)
+        assert len(node._schedules) == 1

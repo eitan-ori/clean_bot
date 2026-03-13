@@ -1699,14 +1699,11 @@ const diagContent = document.getElementById('diagContent');
 diagToggle.addEventListener('click', () => {
   const open = diagContent.classList.toggle('open');
   diagToggle.setAttribute('aria-expanded', open);
-  diagToggle.querySelector('span:last-child') || null;
   diagToggle.innerHTML = '🔧 <span data-i18n="diagnostics">' + t('diagnostics') + '</span> ' + (open ? '▾' : '▸');
 });
 diagToggle.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); diagToggle.click(); } });
 
-/* ── Update status handler with all round 31-40 features ── */
-const origStatusHandler = socket._callbacks['$status'];
-socket.off('status');
+/* ── Status handler ── */
 socket.on('status', d => {
   setMissionBadge(d.mission_state);
   document.getElementById('sExplore').textContent = d.exploration_state;
