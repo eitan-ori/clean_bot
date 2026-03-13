@@ -463,3 +463,13 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
 - **Problem:** `_check_schedules()` stored `_last_triggered` directly on the schedule dict. This internal field was then returned by `api_get_schedules()` in the JSON response, exposing implementation details to the frontend. Also, if the schedule dicts were saved to disk, the field would persist but was never checked on load.
 - **Fix:** Introduced `_schedule_triggered_keys` dict (keyed by schedule ID) to track trigger state separately from the schedule data.
+
+### Bug 94: `select_best_frontier` log omits no-go zone skip count
+- **File:** `clean_bot_mission/clean_bot_mission/frontier_explorer.py`
+- **Problem:** When no suitable frontier was found, the warning message included `skipped_failed` and `skipped_too_close` counts but not `skipped_nogo`. Users had no diagnostic visibility into how many frontiers were filtered by no-go zones.
+- **Fix:** Added `skipped_nogo={skipped_nogo}` to the warning log message.
+
+### Bug 95: No-go zone boundaries use `int()` truncation instead of `floor`/`ceil`
+- **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py`
+- **Problem:** No-go zone coordinate-to-grid conversion used `int()` truncation for both start and end boundaries. For fractional cell coordinates (e.g., 7.6), `int(7.6) = 7` for the end boundary, potentially leaving the last partial cell unblocked.
+- **Fix:** Changed to `math.floor()` for zone start (inclusive) and `math.ceil()` for zone end (inclusive), ensuring the zone fully covers all partial cells at its boundaries.

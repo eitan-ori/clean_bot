@@ -801,10 +801,10 @@ class AdaptiveCoveragePlanner(Node):
                     zx2, zy2 = float(zone["x2"]), float(zone["y2"])
                 except (KeyError, TypeError, ValueError):
                     continue
-                c1 = int((min(zx1, zx2) - ox) / res)
-                c2 = int((max(zx1, zx2) - ox) / res)
-                r1 = int((min(zy1, zy2) - oy) / res)
-                r2 = int((max(zy1, zy2) - oy) / res)
+                c1 = math.floor((min(zx1, zx2) - ox) / res)
+                c2 = math.ceil((max(zx1, zx2) - ox) / res)
+                r1 = math.floor((min(zy1, zy2) - oy) / res)
+                r2 = math.ceil((max(zy1, zy2) - oy) / res)
                 r1, r2 = max(0, r1), min(h, r2 + 1)
                 c1, c2 = max(0, c1), min(w, c2 + 1)
                 obstacle_mask[r1:r2, c1:c2] = True

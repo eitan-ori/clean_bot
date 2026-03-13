@@ -2292,3 +2292,87 @@ class TestInflateObstaclesNoGoZones:
         # Should not raise
         AdaptiveCoveragePlanner.inflate_obstacles(planner)
         assert planner.inflated_map is not None
+
+
+# ── Bug 94-95: Explorer select_best_frontier + nogo zone precision ─
+class TestSelectBestFrontierNogo:
+    """Tests for frontier selection with no-go zones and log message."""
+
+    @staticmethod
+    def _make_explorer_with_frontiers(frontiers, no_go_zones=None, robot_pos=(0, 0)):
+        explorer = MagicMock()
+        explorer.frontiers = frontiers
+        explorer._no_go_zones = no_go_zones or []
+        explorer.failed_goals = set()
+        explorer.min_goal_distance = 0.5
+        explorer.get_robot_position = MagicMock(return_value=robot_pos)
+        explorer.get_logger = MagicMock(return_value=MagicMock())
+        from clean_bot_mission.frontier_explorer import FrontierExplorer
+        explorer._point_in_no_go_zone = lambda x, y: FrontierExplorer._point_in_no_go_zone(explorer, x, y)
+        return explorer
+
+    def test_nogo_frontier_skipped(self):
+        """Frontier inside no-go zone should be skipped."""
+        from clean_bot_mission.frontier_explorer import FrontierExplorer
+        frontiers = [
+            {'x': 1.0, 'y': 1.0, 'size': 50},
+            {'x': 5.0, 'y': 5.0, 'size': 50},
+        ]
+        zones = [{"x1": 0.5, "y1": 0.5, "x2": 1.5, "y2": 1.5}]
+        explorer = self._make_explorer_with_frontiers(frontiers, zones, (0, 0))
+        result = FrontierExplorer.select_best_frontier(explorer)
+        # First frontier is in no-go zone, so second should be selected
+        assert result is not None
+        assert result['x'] == 5.0
+
+    def test_all_nogo_returns_none(self):
+        """If all frontiers are in no-go zones, returns None."""
+        from clean_bot_mission.frontier_explorer import FrontierExplorer
+        frontiers = [{'x': 1.0, 'y': 1.0, 'size': 50}]
+        zones = [{"x1": 0.0, "y1": 0.0, "x2": 2.0, "y2": 2.0}]
+        explorer = self._make_explorer_with_frontiers(frontiers, zones, (0, 0))
+        result = FrontierExplorer.select_best_frontier(explorer)
+        assert result is None
+        # Check that nogo count is logged
+        warn_call = explorer.get_logger.return_value.warn
+        assert warn_call.called
+        args = warn_call.call_args[0][0]
+        assert "skipped_nogo=1" in args
+
+    def test_nogo_boundary_check(self):
+        """Verify _point_in_no_go_zone returns True for point inside zone."""
+        from clean_bot_mission.frontier_explorer import FrontierExplorer
+        explorer = MagicMock()
+        explorer._no_go_zones = [{"x1": 1.0, "y1": 2.0, "x2": 3.0, "y2": 4.0}]
+        # Inside
+        assert FrontierExplorer._point_in_no_go_zone(explorer, 2.0, 3.0) is True
+        # Outside
+        assert FrontierExplorer._point_in_no_go_zone(explorer, 0.5, 3.0) is False
+        # On boundary
+        assert FrontierExplorer._point_in_no_go_zone(explorer, 1.0, 2.0) is True
+
+
+class TestNoGoZonePrecision:
+    """Test that no-go zone boundaries use floor/ceil for proper coverage."""
+
+    def test_floor_ceil_boundaries(self):
+        """Verify floor/ceil produces correct zone bounds."""
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner
+        arr = np.zeros((40, 40), dtype=np.int8)
+        # Zone from (0.12, 0.12) to (0.38, 0.38) at resolution 0.05
+        # floor(0.12/0.05)=2, ceil(0.38/0.05)=8
+        zones = [{"x1": 0.12, "y1": 0.12, "x2": 0.38, "y2": 0.38}]
+        planner = MagicMock()
+        planner.map_array = arr.copy()
+        planner.inflated_map = None
+        planner.map_info = MagicMock()
+        planner.map_info.resolution = 0.05
+        planner.map_info.origin.position.x = 0.0
+        planner.map_info.origin.position.y = 0.0
+        planner.robot_radius = 0.01  # minimal inflation
+        planner._no_go_zones = zones
+        planner.get_logger = MagicMock(return_value=MagicMock())
+        AdaptiveCoveragePlanner.inflate_obstacles(planner)
+        assert planner.inflated_map is not None
+        # Cell (7, 7) should be in the zone (ceil(7.6)=8, so indices 2..7 inclusive)
+        assert planner.inflated_map[7, 7] == 100

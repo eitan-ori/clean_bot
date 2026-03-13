@@ -454,7 +454,8 @@ class FrontierExplorer(Node):
         if best_frontier is None:
             self.get_logger().warn(
                 f'⚠️ No suitable frontier selected (frontiers={len(self.frontiers)}, '
-                f'skipped_failed={skipped_failed}, skipped_too_close={skipped_too_close}). '
+                f'skipped_failed={skipped_failed}, skipped_too_close={skipped_too_close}, '
+                f'skipped_nogo={skipped_nogo}). '
                 'This can happen if TF map->base_link is missing/wrong or Nav2 keeps failing goals.'
             )
 
