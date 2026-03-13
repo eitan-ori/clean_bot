@@ -2583,3 +2583,136 @@ class TestWsVelocityValidation:
             assert False, "Should have raised"
         except (TypeError, ValueError):
             pass  # This is what the new guard catches
+
+
+# ── Edge case tests: normalize_angle ──────────────────────────────
+class TestNormalizeAngleEdgeCases:
+    """Test normalize_angle with boundary and special values."""
+
+    def test_normalize_nan(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner
+        p = MagicMock(spec=AdaptiveCoveragePlanner)
+        result = AdaptiveCoveragePlanner.normalize_angle(p, float('nan'))
+        assert result == 0.0
+
+    def test_normalize_inf(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner
+        p = MagicMock(spec=AdaptiveCoveragePlanner)
+        result = AdaptiveCoveragePlanner.normalize_angle(p, float('inf'))
+        assert result == 0.0
+
+    def test_normalize_negative_inf(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner
+        p = MagicMock(spec=AdaptiveCoveragePlanner)
+        result = AdaptiveCoveragePlanner.normalize_angle(p, float('-inf'))
+        assert result == 0.0
+
+    def test_normalize_exact_pi(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner
+        p = MagicMock(spec=AdaptiveCoveragePlanner)
+        result = AdaptiveCoveragePlanner.normalize_angle(p, math.pi)
+        assert abs(result - math.pi) < 1e-10
+
+    def test_normalize_exact_negative_pi(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner
+        p = MagicMock(spec=AdaptiveCoveragePlanner)
+        result = AdaptiveCoveragePlanner.normalize_angle(p, -math.pi)
+        assert abs(result - (-math.pi)) < 1e-10
+
+    def test_normalize_large_positive(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner
+        p = MagicMock(spec=AdaptiveCoveragePlanner)
+        result = AdaptiveCoveragePlanner.normalize_angle(p, 7 * math.pi)
+        assert -math.pi <= result <= math.pi
+
+    def test_normalize_zero(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner
+        p = MagicMock(spec=AdaptiveCoveragePlanner)
+        result = AdaptiveCoveragePlanner.normalize_angle(p, 0.0)
+        assert result == 0.0
+
+
+# ── Edge case tests: densify_waypoints ────────────────────────────
+class TestDensifyEdgeCases:
+    """Test densify_waypoints with boundary conditions."""
+
+    def test_densify_empty(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner
+        p = MagicMock(spec=AdaptiveCoveragePlanner)
+        p.get_logger = MagicMock(return_value=MagicMock())
+        result = AdaptiveCoveragePlanner.densify_waypoints(p, [], 0.15)
+        assert result == []
+
+    def test_densify_single_point(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner
+        p = MagicMock(spec=AdaptiveCoveragePlanner)
+        wps = [(1.0, 2.0, 0.0)]
+        result = AdaptiveCoveragePlanner.densify_waypoints(p, wps, 0.15)
+        assert result == wps
+
+    def test_densify_exactly_at_threshold(self):
+        """Segment exactly at max_segment_length should NOT be subdivided."""
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner
+        p = MagicMock(spec=AdaptiveCoveragePlanner)
+        p.get_logger = MagicMock(return_value=MagicMock())
+        # Segment of exactly 0.15m
+        wps = [(0.0, 0.0, 0.0), (0.15, 0.0, 0.0)]
+        result = AdaptiveCoveragePlanner.densify_waypoints(p, wps, 0.15)
+        assert len(result) == 2  # No subdivision needed
+
+    def test_densify_preserves_endpoints(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner
+        p = MagicMock(spec=AdaptiveCoveragePlanner)
+        p.get_logger = MagicMock(return_value=MagicMock())
+        wps = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.5)]
+        result = AdaptiveCoveragePlanner.densify_waypoints(p, wps, 0.15)
+        assert result[0] == wps[0]
+        assert result[-1] == wps[-1]
+        assert len(result) > 2
+
+
+# ── Edge case tests: orient_waypoints with coincident points ──────
+class TestOrientCoincidentPoints:
+    """Test orient_waypoints when consecutive points are at same location."""
+
+    def test_orient_coincident_points(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner
+        p = MagicMock(spec=AdaptiveCoveragePlanner)
+        p.get_logger = MagicMock(return_value=MagicMock())
+        # Two points at the same location
+        wps = [(1.0, 1.0, 0.0), (1.0, 1.0, 0.0), (2.0, 2.0, 0.0)]
+        result = AdaptiveCoveragePlanner.orient_waypoints(p, wps)
+        assert len(result) == 3
+        # First point yaw = atan2(0, 0) = 0
+        assert result[0][2] == 0.0
+
+    def test_orient_two_points(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner
+        p = MagicMock(spec=AdaptiveCoveragePlanner)
+        p.get_logger = MagicMock(return_value=MagicMock())
+        wps = [(0.0, 0.0, 999.0), (1.0, 0.0, 999.0)]
+        result = AdaptiveCoveragePlanner.orient_waypoints(p, wps)
+        assert len(result) == 2
+        # First should face east (yaw=0)
+        assert abs(result[0][2]) < 1e-10
+        # Last inherits first's yaw
+        assert abs(result[1][2]) < 1e-10
+
+
+# ── Edge case tests: score_pose with out-of-bounds points ─────────
+class TestScorePoseOutOfBounds:
+    """Test _score_pose when scan points fall outside map boundaries."""
+
+    def test_score_with_all_out_of_bounds(self):
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        node = MagicMock(spec=WebBridgeNode)
+        # 5x5 map grid, walls at edges
+        wall_mask = np.zeros((5, 5), dtype=bool)
+        wall_mask[0, :] = True
+        wall_mask[4, :] = True
+        # Scan points way outside map
+        pts_x = np.array([100.0, 200.0, 300.0])
+        pts_y = np.array([100.0, 200.0, 300.0])
+        score = WebBridgeNode._score_pose(node, pts_x, pts_y, 0.0, 0.0, 0.0,
+                                           wall_mask, 0.0, 0.0, 0.05, 5, 5)
+        assert score == 0  # All out of bounds → no hits
