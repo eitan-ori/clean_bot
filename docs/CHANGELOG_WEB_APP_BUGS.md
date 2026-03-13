@@ -246,3 +246,13 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/templates/index.html` (script tag)
 - **Problem:** The socket.io client library was loaded from `cdnjs.cloudflare.com`. On LAN-only networks without internet access, this CDN request fails and the entire app breaks — socket connections can't be established.
 - **Fix:** Changed the script `src` to `/socket.io/socket.io.js`, which Flask-SocketIO 5.x serves automatically. No external CDN dependency needed.
+
+### Bug 50: Malformed map data crashes _on_map and get_map_data
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`_on_map`, `get_map_data`)
+- **Problem:** Both methods call `np.array(msg.data).reshape((h, w))` without verifying that `len(data) == w * h`. If SLAM or an external node publishes a malformed OccupancyGrid (e.g., partial data, wrong dimensions), numpy raises `ValueError` and the ROS callback crashes. `_on_map` also sets `self.map_msg` before validation, so subsequent `get_map_data()` calls would fail too.
+- **Fix:** Added guard: `if w <= 0 or h <= 0 or len(msg.data) != w * h: return` at the start of `_on_map`. Moved `self.map_msg = msg` after validation. Added same dimension check in `get_map_data()` returning `None` for invalid data.
+
+### Bug 51: rename_room silently overwrites existing rooms
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`rename_room`)
+- **Problem:** When renaming a room, if another room with the target name already exists, the rename would silently overwrite that room's file — causing data loss of the original room.
+- **Fix:** Added check: `if new_path != path and new_path.exists(): return False, "A room with that name already exists"`.

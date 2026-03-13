@@ -245,6 +245,9 @@ class WebBridgeNode(Node):
         self._scan_valid_count = sum(1 for r in msg.ranges if math.isfinite(r) and r > 0)
 
     def _on_map(self, msg):
+        w, h = msg.info.width, msg.info.height
+        if w <= 0 or h <= 0 or len(msg.data) != w * h:
+            return
         self.map_msg = msg
         self.map_update_counter += 1
         # Round 32: Update obstacle heatmap
@@ -319,6 +322,8 @@ class WebBridgeNode(Node):
             return None
         m = self.map_msg
         w, h = m.info.width, m.info.height
+        if w <= 0 or h <= 0 or len(m.data) != w * h:
+            return None
         res = m.info.resolution
         ox = m.info.origin.position.x
         oy = m.info.origin.position.y
@@ -498,6 +503,8 @@ class WebBridgeNode(Node):
             if not safe_new:
                 return False, "New name must contain at least one alphanumeric character"
             new_path = SAVED_ROOMS_DIR / f"{safe_new}.json"
+            if new_path != path and new_path.exists():
+                return False, "A room with that name already exists"
             if new_path != path:
                 with open(new_path, "w") as f:
                     json.dump(d, f)

@@ -888,3 +888,81 @@ class TestSocketIOLocal:
         html = resp.data.decode()
         assert '/socket.io/socket.io.js' in html
         assert 'cdnjs.cloudflare.com' not in html
+
+
+# ── Bug 50: Malformed map data should not crash ──
+class TestMapDataGuard:
+    """Bug 50: _on_map and get_map_data should guard against malformed data."""
+
+    def test_on_map_rejects_empty_dimensions(self):
+        """_on_map should skip maps with zero width or height."""
+        bridge = MagicMock()
+        bridge.map_msg = None
+        bridge.map_update_counter = 0
+        bridge.obstacle_heatmap = None
+        bridge._heatmap_width = 0
+        bridge._heatmap_height = 0
+        bridge._last_map_emit = 0.0
+        bridge._map_rate_interval = 0.5
+        bridge.sio = MagicMock()
+        # Create a fake map msg with 0 width
+        msg = MagicMock()
+        msg.info.width = 0
+        msg.info.height = 10
+        msg.data = []
+        webapp_module.WebBridgeNode._on_map(bridge, msg)
+        # map_msg should NOT be updated
+        assert bridge.map_msg is None
+        assert bridge.map_update_counter == 0
+
+    def test_on_map_rejects_mismatched_data(self):
+        """_on_map should skip maps where len(data) != w*h."""
+        bridge = MagicMock()
+        bridge.map_msg = None
+        bridge.map_update_counter = 0
+        bridge.obstacle_heatmap = None
+        bridge._heatmap_width = 0
+        bridge._heatmap_height = 0
+        bridge._last_map_emit = 0.0
+        bridge._map_rate_interval = 0.5
+        bridge.sio = MagicMock()
+        msg = MagicMock()
+        msg.info.width = 10
+        msg.info.height = 10
+        msg.data = [0] * 50  # should be 100
+        webapp_module.WebBridgeNode._on_map(bridge, msg)
+        assert bridge.map_msg is None
+
+    def test_get_map_data_returns_none_for_bad_dims(self):
+        """get_map_data should return None for malformed map."""
+        bridge = MagicMock()
+        mock_map = MagicMock()
+        mock_map.info.width = 10
+        mock_map.info.height = 10
+        mock_map.data = [0] * 50  # mismatched
+        bridge.map_msg = mock_map
+        result = webapp_module.WebBridgeNode.get_map_data(bridge)
+        assert result is None
+
+
+# ── Bug 51: Rename room should not overwrite existing ──
+class TestRenameRoomOverwrite:
+    """Bug 51: rename_room should refuse to overwrite existing rooms."""
+
+    def test_rename_to_existing_room_fails(self, flask_client, temp_rooms_dir):
+        """Renaming to an already-existing room name should return error."""
+        # Create two room files
+        for name in ("room_a", "room_b"):
+            path = temp_rooms_dir / f"{name}.json"
+            path.write_text(json.dumps({"name": name, "width": 10, "height": 10,
+                                         "resolution": 0.05, "data": [0]*100}))
+        # Try to rename room_a to room_b
+        ok, info = webapp_module.WebBridgeNode.rename_room("room_a", "room_b")
+        assert not ok
+        assert "already exists" in info.lower()
+        # Verify room_a still exists
+        assert (temp_rooms_dir / "room_a.json").exists()
+        # Verify room_b is unchanged
+        with open(temp_rooms_dir / "room_b.json") as f:
+            d = json.load(f)
+        assert d["name"] == "room_b"
