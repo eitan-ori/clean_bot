@@ -528,3 +528,23 @@
 - **File:** `clean_bot_mission/clean_bot_mission/full_mission.py`
 - **Problem:** When the mission was paused from COVERAGE or EXPLORING state, sending `stop_clean` or `stop_scan` would print "Not currently cleaning/scanning" and do nothing. The user had to first `resume` and then `stop`, which is unintuitive.
 - **Fix:** Both `handle_stop_clean()` and `handle_stop_scan()` now also accept commands when `state == PAUSED` and `previous_state` matches the relevant operation. The previous_state is cleared on stop to prevent stale resume.
+
+### Bug 107: Stop buttons disabled when mission is PAUSED
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/templates/index.html`
+- **Problem:** `updateButtonStates()` disabled `btnStopScan` when state didn't contain 'EXPLOR', and `btnStopClean` when state didn't contain 'COVERAGE' or 'CLEAN'. After Bug 106 fix (backend accepts stop from PAUSED state), the buttons were still grayed out in PAUSED state.
+- **Fix:** Added `s.indexOf('PAUSE') === -1` to the disable conditions for both stop buttons, so they're enabled when paused.
+
+### Bug 108: Log DOM entries accumulate without cap
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/templates/index.html`
+- **Problem:** `addLogEntry()` appended DOM elements without any limit. During long sessions, hundreds of DOM nodes accumulated in the log box, degrading performance.
+- **Fix:** Added `while (logBox.children.length > 200) logBox.removeChild(logBox.firstChild)` to cap at 200 entries (matching server-side deque maxlen).
+
+### Bug 109: `/api/navigate` missing coordinate validation
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** The navigate API passed raw `body.get("x")` and `body.get("y")` to `navigate_to_pose()` without validating they are numbers. Non-numeric values would trigger a generic 500 error instead of a helpful 400 response.
+- **Fix:** Added explicit `float()` conversion with `try/except` returning 400 with "x and y must be numbers" message.
+
+### Bug 110: `/api/velocity` missing value validation
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** The HTTP velocity route (`/api/velocity`) didn't validate `linear` and `angular` as numbers (unlike the WebSocket handler fixed in Bug 105). Non-numeric values caused a 500 error.
+- **Fix:** Added explicit `float()` conversion with `try/except` returning 400 with "linear and angular must be numbers" message.

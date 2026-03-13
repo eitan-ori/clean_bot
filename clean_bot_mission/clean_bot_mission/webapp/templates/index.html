@@ -977,9 +977,9 @@ function updateButtonStates(missionState) {
   const btn = id => document.getElementById(id);
   const setD = (id, disabled) => { const b = btn(id); if (b) b.disabled = disabled; };
   setD('btnScan', !(s.indexOf('WAIT') !== -1));
-  setD('btnStopScan', s.indexOf('EXPLOR') === -1);
+  setD('btnStopScan', s.indexOf('EXPLOR') === -1 && s.indexOf('PAUSE') === -1);
   setD('btnClean', !(s.indexOf('WAIT') !== -1));
-  setD('btnStopClean', s.indexOf('COVERAGE') === -1 && s.indexOf('CLEAN') === -1);
+  setD('btnStopClean', s.indexOf('COVERAGE') === -1 && s.indexOf('CLEAN') === -1 && s.indexOf('PAUSE') === -1);
   setD('btnPause', s.indexOf('EXPLOR') === -1 && s.indexOf('COVERAGE') === -1 && s.indexOf('CLEAN') === -1);
   setD('btnResume', s.indexOf('PAUSE') === -1);
   setD('btnHome', s.indexOf('RETURNING') !== -1 || s.indexOf('COMPLETE') !== -1);
@@ -1282,6 +1282,7 @@ function addLogEntry(entry) {
   div.className = 'log-entry';
   div.innerHTML = '<span class="log-time">' + esc(entry.time) + '</span><span class="log-event">' + esc(entry.event) + '</span>';
   logBox.appendChild(div);
+  while (logBox.children.length > 200) logBox.removeChild(logBox.firstChild);
   logBox.scrollTop = logBox.scrollHeight;
 }
 

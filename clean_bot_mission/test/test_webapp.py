@@ -1096,3 +1096,76 @@ class TestNoGoZonesHTML:
         resp = client.get('/')
         assert b'nogo-active' in resp.data
         assert b'nogo-toolbar' in resp.data
+
+
+class TestBug107ButtonStatesForPaused:
+    """Bug 107: Stop buttons should be enabled when state is PAUSED."""
+
+    def test_stop_scan_enabled_in_paused_state(self, flask_client):
+        """Stop Scan button should be enabled when paused (not just EXPLORING)."""
+        client, _ = flask_client
+        resp = client.get('/')
+        html = resp.data.decode()
+        # JS enables btnStopScan when state contains 'EXPLOR' OR 'PAUSE'
+        assert "s.indexOf('PAUSE') === -1" in html
+
+    def test_stop_clean_enabled_in_paused_state(self, flask_client):
+        """Stop Clean button should be enabled when paused (not just COVERAGE/CLEAN)."""
+        client, _ = flask_client
+        resp = client.get('/')
+        html = resp.data.decode()
+        # The stop clean line should include PAUSE check
+        assert "s.indexOf('PAUSE') === -1)" in html
+
+
+class TestBug108LogDomCap:
+    """Bug 108: Log entries should be capped at 200 DOM elements."""
+
+    def test_log_entries_cap_in_js(self, flask_client):
+        client, _ = flask_client
+        resp = client.get('/')
+        html = resp.data.decode()
+        assert 'logBox.children.length > 200' in html
+
+
+class TestBug109NavigateValidation:
+    """Bug 109: /api/navigate should validate x and y as numbers."""
+
+    def test_navigate_with_invalid_coords(self, flask_client):
+        client, mock_node = flask_client
+        resp = client.post('/api/navigate',
+                           json={"x": "abc", "y": "def"},
+                           content_type='application/json')
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert 'numbers' in data.get('error', '').lower()
+
+    def test_navigate_with_valid_coords(self, flask_client):
+        client, mock_node = flask_client
+        mock_node.navigate_to_pose.return_value = (True, "Goal sent")
+        resp = client.post('/api/navigate',
+                           json={"x": 1.5, "y": 2.3},
+                           content_type='application/json')
+        assert resp.status_code == 200
+        mock_node.navigate_to_pose.assert_called_once_with(1.5, 2.3)
+
+
+class TestBug110VelocityHTTPValidation:
+    """Bug 110: /api/velocity should validate linear and angular as numbers."""
+
+    def test_velocity_with_invalid_values(self, flask_client):
+        client, mock_node = flask_client
+        resp = client.post('/api/velocity',
+                           json={"linear": "fast", "angular": "left"},
+                           content_type='application/json')
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert 'numbers' in data.get('error', '').lower()
+
+    def test_velocity_with_valid_values(self, flask_client):
+        client, mock_node = flask_client
+        resp = client.post('/api/velocity',
+                           json={"linear": 0.5, "angular": 0.1},
+                           content_type='application/json')
+        assert resp.status_code == 200
+        mock_node.send_velocity.assert_called_once_with(0.5, 0.1)

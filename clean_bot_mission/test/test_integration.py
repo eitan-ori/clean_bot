@@ -820,7 +820,7 @@ class TestEdgeCases:
     def test_velocity_with_string_values(self, client, node):
         """Non-numeric velocity values handled gracefully."""
         resp = client.post('/api/velocity', json={"linear": "fast", "angular": "left"})
-        assert resp.status_code == 500  # TypeError is caught
+        assert resp.status_code == 400  # validated before sending
 
     def test_navigate_with_missing_coords(self, client, node):
         """Navigate defaults to (0,0) if coords missing."""

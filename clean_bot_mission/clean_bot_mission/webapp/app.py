@@ -1046,8 +1046,11 @@ def api_velocity():
     if ros_node is None:
         return jsonify({"error": "ROS not connected"}), 503
     body = request.json or {}
-    lin = body.get("linear", 0.0)
-    ang = body.get("angular", 0.0)
+    try:
+        lin = float(body.get("linear", 0.0))
+        ang = float(body.get("angular", 0.0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "linear and angular must be numbers"}), 400
     try:
         ros_node.send_velocity(lin, ang)
     except Exception as e:
@@ -1138,8 +1141,11 @@ def api_navigate():
     if ros_node is None:
         return jsonify({"error": "ROS not connected"}), 503
     body = request.json or {}
-    x = body.get("x", 0.0)
-    y = body.get("y", 0.0)
+    try:
+        x = float(body.get("x", 0.0))
+        y = float(body.get("y", 0.0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "x and y must be numbers"}), 400
     try:
         ok, info = ros_node.navigate_to_pose(x, y)
     except Exception as e:
