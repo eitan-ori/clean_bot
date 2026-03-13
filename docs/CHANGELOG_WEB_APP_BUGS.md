@@ -308,3 +308,23 @@
 - **File:** `clean_bot_mission/clean_bot_mission/frontier_explorer.py` (`cancel_current_goal`)
 - **Problem:** When navigation timed out, `cancel_current_goal()` sent an async cancel but didn't immediately clear `is_navigating` or `current_goal_handle`. Since the exploration_loop fires every 2 seconds, it would detect the timeout again and send another cancel request, causing repeated cancel messages and potential race conditions.
 - **Fix:** Clear `is_navigating`, `navigation_start_time`, and `current_goal_handle` immediately in `cancel_current_goal()` (before the async cancel). Made `cancel_done_callback` idempotent.
+
+### Bug 63: Unprotected future.result() in go-home callback — robot stuck in RETURNING
+- **File:** `clean_bot_mission/clean_bot_mission/full_mission.py` (`_nav_goal_response_callback`)
+- **Problem:** `future.result()` was called without try/except. If the Nav2 action server crashes or the communication fails, the exception would propagate silently (ROS 2 swallows callback exceptions), and `finish_mission()` would never be called, leaving the robot permanently stuck in RETURNING state with no recovery.
+- **Fix:** Wrapped `future.result()` in try/except; on failure, calls `finish_mission()` to gracefully complete.
+
+### Bug 64: Unprotected future.result() in explorer goal response — 30s stall
+- **File:** `clean_bot_mission/clean_bot_mission/frontier_explorer.py` (`goal_response_callback`)
+- **Problem:** `future.result()` was called without try/except. If the action client fails, `is_navigating` stays True and the exploration loop is blocked until navigation timeout (30s) triggers recovery.
+- **Fix:** Wrapped in try/except; on failure, clears `is_navigating` and `navigation_start_time`, increments `consecutive_failures`.
+
+### Bug 65: Unprotected future.result() in explorer result callback — 30s stall
+- **File:** `clean_bot_mission/clean_bot_mission/frontier_explorer.py` (`get_result_callback`)
+- **Problem:** Same as Bug 64 but for the navigation result future. If `get_result_async()` fails, `is_navigating` stays True blocking the exploration loop.
+- **Fix:** Wrapped in try/except; on failure, clears all navigation state and increments `consecutive_failures`.
+
+### Bug 66: Cleaning hardware stays active during PAUSED state
+- **File:** `clean_bot_mission/clean_bot_mission/full_mission.py` (`handle_pause`, `handle_resume`)
+- **Problem:** When pausing from COVERAGE state, the cleaning hardware (relay/servo motor) remained active. The robot was stationary but the vacuum/brush motor continued running, wasting battery and creating unnecessary noise.
+- **Fix:** Added `_deactivate_cleaning_hardware()` call in `handle_pause()` when previous state is COVERAGE. Added `_activate_cleaning_hardware()` call in `handle_resume()` when restoring to COVERAGE state.

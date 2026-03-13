@@ -1155,12 +1155,139 @@ class TestFullMissionScenarios:
         mission.handle_start_clean()
         assert mission.state == MissionState.COVERAGE
 
+    def test_invalid_commands_in_all_states(self, mission):
+        """Test that invalid state transitions are rejected correctly."""
+        # start_clean from EXPLORING
+        mission.state = MissionState.EXPLORING
+        mission.handle_start_clean()
+        assert mission.state == MissionState.EXPLORING  # unchanged
 
-# ════════════════════════════════════════════════════════════════════
-# Drive Control Tests (Bug 59)
-# ════════════════════════════════════════════════════════════════════
+        # stop_scan from COVERAGE
+        mission.state = MissionState.COVERAGE
+        mission.handle_stop_scan()
+        assert mission.state == MissionState.COVERAGE  # unchanged
 
-class TestDriveToWaypoint:
+        # pause from COMPLETE
+        mission.state = MissionState.COMPLETE
+        mission.handle_pause()
+        assert mission.state == MissionState.COMPLETE  # unchanged
+
+        # resume from EXPLORING
+        mission.state = MissionState.EXPLORING
+        mission.previous_state = None
+        mission.handle_resume()
+        assert mission.state == MissionState.EXPLORING  # unchanged
+
+    def test_go_home_from_exploring_no_clean_deactivation(self, mission):
+        """go_home from EXPLORING should NOT deactivate cleaning hardware."""
+        mission.state = MissionState.EXPLORING
+        mission.previous_state = None
+        mission.handle_go_home()
+        assert mission.state == MissionState.RETURNING
+        # Cleaning hardware should NOT be deactivated (not cleaning)
+        mission.stop_clean_trigger_pub.publish.assert_not_called()
+
+    def test_coverage_planner_full_lifecycle(self, coverage):
+        """Coverage planner: IDLE → start → RUNNING → pause → resume → stop."""
+        assert coverage.coverage_state == CoverageState.IDLE
+
+        # Can't test start_coverage_mission without a map, so test state management
+        coverage.coverage_state = CoverageState.RUNNING
+        coverage.waypoints = [(0, 0, 0), (1, 0, 0)]
+        coverage.current_waypoint_idx = 0
+        coverage.mission_started = True
+
+        coverage.handle_pause()
+        assert coverage.coverage_state == CoverageState.PAUSED
+
+        coverage.handle_resume()
+        assert coverage.coverage_state == CoverageState.RUNNING
+
+        coverage.handle_stop()
+        assert coverage.coverage_state == CoverageState.STOPPED
+
+    def test_explorer_exploration_complete_flow(self, explorer):
+        """Explorer completes exploration and publishes completion."""
+        explorer.exploration_state = ExplorationState.EXPLORING
+        explorer.start_time = None
+        explorer.finish_exploration()
+        assert explorer.exploration_state == ExplorationState.COMPLETE
+        assert explorer.exploration_complete is True
+
+    def test_pause_from_coverage_deactivates_hardware(self, mission):
+        """Bug 66: Pausing from COVERAGE should deactivate cleaning hardware."""
+        mission.state = MissionState.COVERAGE
+        mission.handle_pause()
+        assert mission.state == MissionState.PAUSED
+        assert mission.previous_state == MissionState.COVERAGE
+        # Cleaning hardware should be deactivated
+        mission.stop_clean_trigger_pub.publish.assert_called()
+
+    def test_pause_from_exploring_no_hardware_deactivation(self, mission):
+        """Pausing from EXPLORING should NOT deactivate cleaning hardware."""
+        mission.state = MissionState.EXPLORING
+        mission.handle_pause()
+        assert mission.state == MissionState.PAUSED
+        mission.stop_clean_trigger_pub.publish.assert_not_called()
+
+    def test_resume_to_coverage_reactivates_hardware(self, mission):
+        """Bug 66: Resuming to COVERAGE should reactivate cleaning hardware."""
+        mission.state = MissionState.PAUSED
+        mission.previous_state = MissionState.COVERAGE
+        mission.handle_resume()
+        assert mission.state == MissionState.COVERAGE
+        # Cleaning hardware should be reactivated
+        mission.clean_trigger_pub.publish.assert_called()
+
+    def test_resume_to_exploring_no_hardware_activation(self, mission):
+        """Resuming to EXPLORING should NOT activate cleaning hardware."""
+        mission.state = MissionState.PAUSED
+        mission.previous_state = MissionState.EXPLORING
+        mission.handle_resume()
+        assert mission.state == MissionState.EXPLORING
+        mission.clean_trigger_pub.publish.assert_not_called()
+
+
+class TestNavCallbackErrorHandling:
+    """Test error handling in Nav2 callback methods (Bugs 63-65)."""
+
+    def test_nav_goal_response_exception_finishes_mission(self, mission):
+        """Bug 63: If future.result() throws, finish_mission should be called."""
+        from unittest.mock import MagicMock
+        future = MagicMock()
+        future.result.side_effect = RuntimeError("action server crashed")
+        mission.state = MissionState.RETURNING
+        mission._nav_goal_response_callback(future)
+        # Should fall back to finish_mission, setting state to COMPLETE
+        assert mission.state == MissionState.COMPLETE
+
+    def test_explorer_goal_response_exception_clears_navigating(self, explorer):
+        """Bug 64: If future.result() throws in explorer, is_navigating cleared."""
+        from unittest.mock import MagicMock
+        future = MagicMock()
+        future.result.side_effect = RuntimeError("action server crashed")
+        explorer.is_navigating = True
+        explorer.navigation_start_time = object()  # non-None
+        explorer.consecutive_failures = 0
+        explorer.goal_response_callback(future)
+        assert explorer.is_navigating is False
+        assert explorer.navigation_start_time is None
+        assert explorer.consecutive_failures == 1
+
+    def test_explorer_get_result_exception_clears_navigating(self, explorer):
+        """Bug 65: If future.result() throws in get_result, is_navigating cleared."""
+        from unittest.mock import MagicMock
+        future = MagicMock()
+        future.result.side_effect = RuntimeError("result fetch failed")
+        explorer.is_navigating = True
+        explorer.navigation_start_time = object()
+        explorer.current_goal_handle = object()
+        explorer.consecutive_failures = 0
+        explorer.get_result_callback(future)
+        assert explorer.is_navigating is False
+        assert explorer.navigation_start_time is None
+        assert explorer.current_goal_handle is None
+        assert explorer.consecutive_failures == 1
     """Test drive_to_waypoint steering logic."""
 
     @pytest.fixture

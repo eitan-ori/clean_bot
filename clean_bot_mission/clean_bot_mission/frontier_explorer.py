@@ -574,7 +574,14 @@ class FrontierExplorer(Node):
 
     def goal_response_callback(self, future):
         """Handle goal acceptance/rejection."""
-        goal_handle = future.result()
+        try:
+            goal_handle = future.result()
+        except Exception as e:
+            self.get_logger().warn(f'   ⚠️ Goal send failed: {e}')
+            self.is_navigating = False
+            self.navigation_start_time = None
+            self.consecutive_failures += 1
+            return
         
         if not goal_handle.accepted:
             self.get_logger().warn('   ⚠️ Goal rejected by Nav2')
@@ -592,8 +599,16 @@ class FrontierExplorer(Node):
 
     def get_result_callback(self, future):
         """Handle navigation result."""
-        result = future.result()
-        status = result.status
+        try:
+            result = future.result()
+            status = result.status
+        except Exception as e:
+            self.get_logger().warn(f'   ⚠️ Navigation result error: {e}')
+            self.is_navigating = False
+            self.navigation_start_time = None
+            self.current_goal_handle = None
+            self.consecutive_failures += 1
+            return
         
         self.is_navigating = False
         self.navigation_start_time = None

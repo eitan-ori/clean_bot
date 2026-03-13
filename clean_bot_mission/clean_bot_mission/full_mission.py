@@ -334,6 +334,10 @@ class FullMissionController(Node):
             self.previous_state = self.state
             self.stop_robot()
             
+            # Deactivate cleaning hardware while paused to save battery and reduce noise
+            if self.state == MissionState.COVERAGE:
+                self._deactivate_cleaning_hardware()
+            
             # Tell sub-nodes to pause
             ctrl_msg = String()
             ctrl_msg.data = 'pause'
@@ -348,6 +352,10 @@ class FullMissionController(Node):
         """Handle resume command."""
         if self.state == MissionState.PAUSED and self.previous_state:
             self.get_logger().info('▶️ Resuming mission...')
+            
+            # Reactivate cleaning hardware if resuming coverage
+            if self.previous_state == MissionState.COVERAGE:
+                self._activate_cleaning_hardware()
             
             # Tell sub-nodes to resume
             ctrl_msg = String()
@@ -470,7 +478,12 @@ class FullMissionController(Node):
 
     def _nav_goal_response_callback(self, future):
         """Handle Nav2 goal acceptance/rejection."""
-        goal_handle = future.result()
+        try:
+            goal_handle = future.result()
+        except Exception as e:
+            self.get_logger().warn(f'⚠️ Nav2 goal send failed: {e}')
+            self.finish_mission()
+            return
         if not goal_handle.accepted:
             self.get_logger().warn('⚠️ Nav2 rejected go-home goal, finishing mission anyway')
             self.finish_mission()
