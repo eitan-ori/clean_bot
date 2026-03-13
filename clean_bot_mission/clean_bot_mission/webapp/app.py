@@ -503,8 +503,8 @@ class WebBridgeNode(Node):
         m = self.map_msg
         # Save only structural walls: occupancy >= 50 → 100 (wall), else → 0 (free)
         # This lets movable obstacles be re-detected on next clean
-        raw = list(m.data)
-        walls_only = [100 if v >= 50 else 0 for v in raw]
+        raw = np.array(m.data, dtype=np.int8)
+        walls_only = np.where(raw >= 50, 100, 0).tolist()
         room = {
             "name": name,
             "saved_at": datetime.now().isoformat(),
@@ -606,8 +606,7 @@ class WebBridgeNode(Node):
 
         # Brief delay to let the map propagate through DDS to the coverage planner
         # before sending start_clean (Bug 68: avoid race where planner uses stale map)
-        import time as _time
-        _time.sleep(0.5)
+        time.sleep(0.5)
         # Send start_clean command
         self.send_command("start_clean")
         return True, f"Loaded room '{room_name}' and started cleaning.{loc_msg}"

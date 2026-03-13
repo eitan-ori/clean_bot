@@ -1857,3 +1857,146 @@ class TestHeatmapDecay:
         node._on_map(msg)
         # After adding 1.0 to all cells (999→1000), should trigger decay (* 0.5)
         assert node.obstacle_heatmap.max() <= 501.0
+
+
+class TestFindFreeSegmentsVectorized:
+    """Test vectorized find_free_segments_in_column (Bug 87)."""
+
+    @pytest.fixture
+    def coverage(self):
+        planner = AdaptiveCoveragePlanner()
+        planner.map_info = MagicMock()
+        planner.map_info.resolution = 0.05
+        return planner
+
+    def test_simple_free_column(self, coverage):
+        """Column with a single free segment."""
+        coverage.inflated_map = np.zeros((20, 1), dtype=np.int8)
+        coverage.inflated_map[0:3, 0] = 100   # occupied top
+        coverage.inflated_map[17:, 0] = 100    # occupied bottom
+        segs = coverage.find_free_segments_in_column(0)
+        assert len(segs) >= 1
+        # Segment should start at row 3 and end at row 16
+        assert segs[0][0] == 3
+        assert segs[0][1] == 16
+
+    def test_no_free_space(self, coverage):
+        coverage.inflated_map = np.full((10, 1), 100, dtype=np.int8)
+        segs = coverage.find_free_segments_in_column(0)
+        assert segs == []
+
+    def test_all_free(self, coverage):
+        coverage.inflated_map = np.zeros((20, 1), dtype=np.int8)
+        segs = coverage.find_free_segments_in_column(0)
+        assert len(segs) == 1
+        assert segs[0] == (0, 19)
+
+    def test_multiple_segments(self, coverage):
+        coverage.inflated_map = np.zeros((30, 1), dtype=np.int8)
+        coverage.inflated_map[5:8, 0] = 100  # wall in the middle
+        segs = coverage.find_free_segments_in_column(0)
+        # Should have two segments: 0-4 and 8-29
+        # But 0-4 is only 5 cells × 0.05 = 0.25m (>= 0.10m), so included
+        assert len(segs) == 2
+        assert segs[0][1] == 4
+        assert segs[1][0] == 8
+
+    def test_short_segment_filtered(self, coverage):
+        """Segments shorter than 10cm should be filtered out."""
+        coverage.inflated_map = np.full((10, 1), 100, dtype=np.int8)
+        coverage.inflated_map[5, 0] = 0  # Single free cell = 0.05m < 0.10m
+        segs = coverage.find_free_segments_in_column(0)
+        assert segs == []
+
+
+class TestDriveToWaypointSpeeds:
+    """Test that drive_to_waypoint uses parameter-based speed limits (Bug 86)."""
+
+    @pytest.fixture
+    def coverage(self):
+        planner = AdaptiveCoveragePlanner()
+        planner.robot_x = 0.0
+        planner.robot_y = 0.0
+        planner.robot_yaw = 0.0
+        planner.odom_received = True
+        planner._map_odom_offset = None
+        planner._tf_pose_warned = False
+        planner.tf_buffer = MagicMock()
+        planner.tf_buffer.lookup_transform.side_effect = Exception("no TF")
+        planner._last_debug_time = 0.0
+        planner.waypoints = [(1.0, 0.0, 0.0)]
+        planner.current_waypoint_idx = 0
+        planner.successful_waypoints = 0
+        # Capture published commands
+        planner.cmd_vel_pub = MagicMock()
+        planner.get_logger = MagicMock(return_value=MagicMock())
+        return planner
+
+    def test_turn_speed_respects_angular_speed_param(self, coverage):
+        """When robot needs a big turn, speed should not exceed angular_speed param."""
+        coverage.angular_speed = 0.25
+        # Robot at (0,0) facing right (yaw=0), target behind at (-1, 0)
+        # angle_error ≈ ±π, which is > turn_threshold
+        coverage.robot_yaw = 0.0
+        coverage.drive_to_waypoint(-1.0, 0.0, 100.0)
+        cmd = coverage.cmd_vel_pub.publish.call_args[0][0]
+        assert abs(cmd.angular.z) <= coverage.angular_speed + 0.001
+
+    def test_steering_respects_angular_speed_param(self, coverage):
+        """Steering correction should not exceed angular_speed param."""
+        coverage.angular_speed = 0.25
+        coverage.linear_speed = 0.18
+        # Robot at (0,0) facing right (yaw=0), target slightly left
+        # angle_error small enough to be in drive-with-steer mode
+        coverage.robot_yaw = 0.0
+        coverage.drive_to_waypoint(1.0, 0.2, 100.0)
+        cmd = coverage.cmd_vel_pub.publish.call_args[0][0]
+        assert abs(cmd.angular.z) <= coverage.angular_speed + 0.001
+
+
+class TestRetryDensifyOrient:
+    """Test that retry mission applies densify and orient (Bug 88)."""
+
+    @pytest.fixture
+    def coverage(self):
+        planner = AdaptiveCoveragePlanner()
+        planner.robot_x = 0.0
+        planner.robot_y = 0.0
+        planner.robot_yaw = 0.0
+        planner.odom_received = True
+        planner._map_odom_offset = None
+        planner._tf_pose_warned = False
+        planner.tf_buffer = MagicMock()
+        planner.tf_buffer.lookup_transform.side_effect = Exception("no TF")
+        planner.coverage_state = CoverageState.RUNNING
+        planner.coverage_complete_pub = MagicMock()
+        planner.coverage_path_pub = MagicMock()
+        planner.waypoint_markers_pub = MagicMock()
+        planner.cmd_vel_pub = MagicMock()
+        planner.max_retries = 1
+        planner.retry_count = 0
+        planner.max_segment_length = 0.08
+        planner.successful_waypoints = 5
+        planner.failed_waypoints = 0
+        planner.start_time = MagicMock()
+        planner.get_logger = MagicMock(return_value=MagicMock())
+        planner.get_clock = MagicMock()
+        planner.get_clock.return_value.now.return_value = MagicMock()
+        planner.get_clock.return_value.now.return_value.to_msg.return_value = MagicMock()
+        # Simulate a retry with missed waypoints far apart
+        planner.missed_waypoints = [
+            (0.0, 0.0, 0.0),
+            (1.0, 0.0, 0.0),  # 1m apart — should be densified
+        ]
+        return planner
+
+    def test_retry_densifies_waypoints(self, coverage):
+        coverage.finish_mission()
+        # After retry, waypoints should have been densified (more than original 2)
+        assert len(coverage.waypoints) > 2
+        # All waypoints should be oriented (yaw pointing toward next)
+        for i in range(len(coverage.waypoints) - 1):
+            x1, y1, yaw1 = coverage.waypoints[i]
+            x2, y2, _ = coverage.waypoints[i + 1]
+            expected_yaw = math.atan2(y2 - y1, x2 - x1)
+            assert abs(yaw1 - expected_yaw) < 0.01

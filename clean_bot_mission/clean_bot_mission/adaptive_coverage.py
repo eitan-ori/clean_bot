@@ -238,6 +238,7 @@ class AdaptiveCoveragePlanner(Node):
         self.last_cmd_time = 0.0
         self.drive_start_time = 0.0
         self.min_drive_time = 0.8  # seconds (drive straight a bit before re-aligning)
+        self._last_debug_time = 0.0
         
         # Statistics
         self.successful_waypoints = 0
@@ -503,8 +504,6 @@ class AdaptiveCoveragePlanner(Node):
         angle_error = self.normalize_angle(target_angle - ryaw)
         
         # Debug log every 2 seconds
-        if not hasattr(self, '_last_debug_time'):
-            self._last_debug_time = 0.0
         if now - self._last_debug_time > 2.0:
             self._last_debug_time = now
             self.get_logger().info(
@@ -532,7 +531,7 @@ class AdaptiveCoveragePlanner(Node):
         turn_threshold = self.angle_tolerance * 2.5  # ~45 degrees
         if abs(angle_error) > turn_threshold:
             cmd.linear.x = 0.0
-            turn_speed = min(0.8, max(0.3, abs(angle_error) * 0.8))
+            turn_speed = min(self.angular_speed, max(self.angular_speed * 0.4, abs(angle_error) * 0.8))
             cmd.angular.z = turn_speed if angle_error > 0 else -turn_speed
         else:
             # Drive forward with steering correction
@@ -542,7 +541,7 @@ class AdaptiveCoveragePlanner(Node):
             if abs(angle_error) < self.angle_tolerance:
                 cmd.angular.z = 0.0
             else:
-                ang = min(0.8, abs(angle_error) * 1.5)
+                ang = min(self.angular_speed, abs(angle_error) * 1.5)
                 cmd.angular.z = ang if angle_error > 0 else -ang
 
         self.cmd_vel_pub.publish(cmd)
@@ -1120,37 +1119,28 @@ class AdaptiveCoveragePlanner(Node):
         Find continuous free segments in a column.
         Returns list of (start_row, end_row) tuples.
         """
-        segments = []
         height = self.inflated_map.shape[0]
-        
-        in_segment = False
-        seg_start = 0
-        
-        for row in range(height):
-            cell_value = self.inflated_map[row, col]
-            is_free = 0 <= cell_value < FREE_THRESHOLD
-            
-            if is_free and not in_segment:
-                # Start new segment
-                in_segment = True
-                seg_start = row
-            elif not is_free and in_segment:
-                # End segment
-                in_segment = False
-                seg_end = row - 1
-                
-                # Only add if segment is long enough (at least 10cm)
-                segment_length = (seg_end - seg_start) * self.map_info.resolution
-                if segment_length >= 0.10:  # At least 10cm
-                    segments.append((seg_start, seg_end))
-        
-        # Handle segment that goes to end of column
-        if in_segment:
-            seg_end = height - 1
-            segment_length = (seg_end - seg_start) * self.map_info.resolution
-            if segment_length >= 0.10:  # At least 10cm
-                segments.append((seg_start, seg_end))
-        
+        column = self.inflated_map[:, col]
+        is_free = (column >= 0) & (column < FREE_THRESHOLD)
+
+        if not np.any(is_free):
+            return []
+
+        # Pad with False to detect transitions at boundaries
+        padded = np.empty(height + 2, dtype=bool)
+        padded[0] = False
+        padded[1:-1] = is_free
+        padded[-1] = False
+
+        diff = np.diff(padded.astype(np.int8))
+        starts = np.where(diff == 1)[0]   # transition from not-free to free
+        ends = np.where(diff == -1)[0] - 1  # transition from free to not-free
+
+        min_cells = max(1, int(0.10 / self.map_info.resolution))
+        segments = []
+        for s, e in zip(starts, ends):
+            if e - s >= min_cells:
+                segments.append((int(s), int(e)))
         return segments
 
     def generate_simple_zigzag_path(self) -> list:
@@ -1457,6 +1447,10 @@ class AdaptiveCoveragePlanner(Node):
             # Optimize the visit order to minimize travel
             if len(self.waypoints) > 2:
                 self.waypoints = self.optimize_path_order(self.waypoints)
+            
+            # Densify and orient (same as initial path generation)
+            self.waypoints = self.densify_waypoints(self.waypoints, max_segment_length=self.max_segment_length)
+            self.waypoints = self.orient_waypoints(self.waypoints)
             
             # Reset state for retry
             self.current_waypoint_idx = 0

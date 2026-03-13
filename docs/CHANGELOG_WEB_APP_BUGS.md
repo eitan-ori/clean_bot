@@ -418,3 +418,33 @@
 - **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py`
 - **Problem:** `handle_reset()` didn't clear `_map_odom_offset`, so a stale localization offset could persist after a mission reset.
 - **Fix:** Added `self._map_odom_offset = None` to `handle_reset()`.
+
+### Bug 85: `_last_debug_time` uses `hasattr` on every odom callback
+- **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py`
+- **Problem:** `drive_to_waypoint()` checked `if not hasattr(self, '_last_debug_time')` on every call (20Hz). `hasattr` involves exception handling internally and is slower than attribute access.
+- **Fix:** Initialized `_last_debug_time = 0.0` in `__init__()` and removed the `hasattr` check.
+
+### Bug 86: `drive_to_waypoint` uses hardcoded speed limits
+- **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py`
+- **Problem:** Turn speed capped at hardcoded `0.8 rad/s` and steering correction at `0.8 rad/s`, ignoring the `angular_speed` parameter (0.25 rad/s). This meant the robot could command speeds 3× higher than intended.
+- **Fix:** Replaced hardcoded `min(0.8, ...)` with `min(self.angular_speed, ...)` in both turn-in-place and drive-with-steer modes.
+
+### Bug 87: `find_free_segments_in_column` pure Python row-loop
+- **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py`
+- **Problem:** Finding free segments in a column iterated every row in pure Python. For a 1000-row map, that's 1000 iterations per column.
+- **Fix:** Vectorized with numpy: pad the boolean array, use `np.diff` to find transitions, then extract start/end pairs.
+
+### Bug 88: Coverage retry mission skips densify and orient
+- **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py`
+- **Problem:** When retrying missed waypoints in `finish_mission()`, `optimize_path_order()` was called but `densify_waypoints()` and `orient_waypoints()` were not. This could leave gaps >0.08m between waypoints, causing the robot to lose track.
+- **Fix:** Added `densify_waypoints()` and `orient_waypoints()` calls after `optimize_path_order()` in the retry path.
+
+### Bug 89: Redundant inline `import time as _time`
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** `load_and_clean_room()` had `import time as _time` inline, but `time` was already imported at module level.
+- **Fix:** Removed inline import; use top-level `time.sleep()`.
+
+### Bug 90: `save_room` uses slow Python list comprehension
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** Walls-only conversion used `list(m.data)` + Python list comprehension over potentially 100k+ cells.
+- **Fix:** Vectorized with `np.where(raw >= 50, 100, 0).tolist()`.
