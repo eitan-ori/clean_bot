@@ -525,8 +525,12 @@ class AdaptiveCoveragePlanner(Node):
             # Drive forward with steering correction
             alignment_scale = max(0.25, 1.0 - abs(angle_error) / turn_threshold)
             cmd.linear.x = self.linear_speed * alignment_scale
-            ang = min(0.8, max(0.15, abs(angle_error) * 1.5))
-            cmd.angular.z = ang if angle_error > 0 else -ang
+            # Dead zone: no correction when well-aligned
+            if abs(angle_error) < self.angle_tolerance:
+                cmd.angular.z = 0.0
+            else:
+                ang = min(0.8, abs(angle_error) * 1.5)
+                cmd.angular.z = ang if angle_error > 0 else -ang
 
         self.cmd_vel_pub.publish(cmd)
 

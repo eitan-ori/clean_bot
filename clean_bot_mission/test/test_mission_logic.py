@@ -918,6 +918,56 @@ class TestWebappStatTracking:
 
         assert web_node._clean_start_time is not None
 
+    def test_paused_to_returning_clears_clean_timer(self, web_node):
+        """Bug 60 regression: PAUSED→RETURNING should finalize clean time, not leak timer."""
+        web_node.mission_state = "PAUSED"
+        web_node._clean_start_time = time.monotonic() - 30
+
+        msg = MagicMock()
+        msg.data = "RETURNING"
+        web_node._on_mission_state(msg)
+
+        assert web_node._clean_start_time is None
+        assert web_node.total_clean_time >= 29  # approximately 30 seconds
+
+    def test_paused_to_waiting_clears_scan_timer(self, web_node):
+        """Bug 60 regression: PAUSED→WAITING_FOR_SCAN (reset) should finalize scan time."""
+        web_node.mission_state = "PAUSED"
+        web_node._scan_start_time = time.monotonic() - 20
+
+        msg = MagicMock()
+        msg.data = "WAITING_FOR_SCAN"
+        web_node._on_mission_state(msg)
+
+        assert web_node._scan_start_time is None
+        assert web_node.total_scan_time >= 19  # approximately 20 seconds
+
+    def test_resume_preserves_scan_timer(self, web_node):
+        """Bug 61 regression: PAUSED→EXPLORING should NOT reset scan timer."""
+        start = time.monotonic() - 60
+        web_node.mission_state = "PAUSED"
+        web_node._scan_start_time = start
+
+        msg = MagicMock()
+        msg.data = "EXPLORING"
+        web_node._on_mission_state(msg)
+
+        # Timer should continue from original start, not be reset
+        assert web_node._scan_start_time == start
+
+    def test_resume_preserves_clean_timer(self, web_node):
+        """Bug 61 regression: PAUSED→COVERAGE should NOT reset clean timer."""
+        start = time.monotonic() - 45
+        web_node.mission_state = "PAUSED"
+        web_node._clean_start_time = start
+
+        msg = MagicMock()
+        msg.data = "COVERAGE"
+        web_node._on_mission_state(msg)
+
+        # Timer should continue from original start, not be reset
+        assert web_node._clean_start_time == start
+
 
 # ════════════════════════════════════════════════════════════════════
 # Coverage Path Generation Edge Cases
@@ -1064,3 +1114,127 @@ class TestFullMissionScenarios:
 
         mission.handle_start_clean()
         assert mission.state == MissionState.COVERAGE
+
+
+# ════════════════════════════════════════════════════════════════════
+# Drive Control Tests (Bug 59)
+# ════════════════════════════════════════════════════════════════════
+
+class TestDriveToWaypoint:
+    """Test drive_to_waypoint steering logic."""
+
+    @pytest.fixture
+    def drive_coverage(self):
+        """Coverage planner set up for drive tests."""
+        planner = AdaptiveCoveragePlanner()
+        planner.cmd_vel_pub = MagicMock()
+        planner.coverage_state = CoverageState.RUNNING
+        planner.waypoints = [(1.0, 0.0, 0.0)]
+        planner.current_waypoint_idx = 0
+        planner.robot_x = 0.0
+        planner.robot_y = 0.0
+        planner.robot_yaw = 0.0
+        planner.odom_received = True
+        # Mock TF to fail so it falls back to odom pose
+        planner.tf_buffer = MagicMock()
+        planner.tf_buffer.lookup_transform.side_effect = Exception("no TF")
+        planner._tf_pose_warned = True
+        return planner
+
+    def test_well_aligned_no_angular_correction(self, drive_coverage):
+        """Bug 59 regression: when well-aligned, angular velocity should be zero."""
+        # Robot at origin facing right (yaw=0), target at (1,0) → perfect alignment
+        drive_coverage.robot_yaw = 0.0
+        drive_coverage.drive_to_waypoint(1.0, 0.0, 100.0)
+        cmd = drive_coverage.cmd_vel_pub.publish.call_args[0][0]
+        # Should drive forward with near-zero angular correction
+        assert cmd.linear.x > 0
+        assert cmd.angular.z == 0.0
+
+    def test_misaligned_gets_correction(self, drive_coverage):
+        """When significantly misaligned, angular correction should be applied."""
+        drive_coverage.robot_yaw = 0.5  # ~29 degrees off
+        drive_coverage.drive_to_waypoint(1.0, 0.0, 100.0)
+        cmd = drive_coverage.cmd_vel_pub.publish.call_args[0][0]
+        assert cmd.angular.z != 0.0
+
+    def test_large_misalignment_rotates_in_place(self, drive_coverage):
+        """When very misaligned, robot should rotate in place (no forward)."""
+        drive_coverage.robot_yaw = math.pi  # facing backwards
+        drive_coverage.drive_to_waypoint(1.0, 0.0, 100.0)
+        cmd = drive_coverage.cmd_vel_pub.publish.call_args[0][0]
+        assert cmd.linear.x == 0.0
+        assert abs(cmd.angular.z) > 0
+
+    def test_waypoint_reached_advances(self, drive_coverage):
+        """When within position_tolerance, waypoint should advance."""
+        drive_coverage.robot_x = 0.99
+        drive_coverage.robot_y = 0.0
+        drive_coverage.position_tolerance = 0.1
+        drive_coverage.missed_waypoints = []
+        drive_coverage.retry_count = 0
+        drive_coverage.max_retries = 0
+        drive_coverage.start_time = None
+        drive_coverage.coverage_complete_pub = MagicMock()
+        drive_coverage.drive_to_waypoint(1.0, 0.0, 100.0)
+        assert drive_coverage.current_waypoint_idx == 1
+        assert drive_coverage.successful_waypoints == 1
+
+    def test_normalize_angle_edge_cases(self, drive_coverage):
+        """Test normalize_angle with boundary values."""
+        assert abs(drive_coverage.normalize_angle(math.pi)) - math.pi < 1e-9
+        assert abs(drive_coverage.normalize_angle(-math.pi)) - math.pi < 1e-9
+        assert abs(drive_coverage.normalize_angle(2 * math.pi)) < 1e-9
+
+
+class TestDensifyWaypoints:
+    """Test waypoint densification."""
+
+    def test_single_waypoint(self, coverage):
+        result = coverage.densify_waypoints([(0, 0, 0)])
+        assert len(result) == 1
+
+    def test_close_waypoints_not_densified(self, coverage):
+        wps = [(0, 0, 0), (0.1, 0, 0)]
+        result = coverage.densify_waypoints(wps, max_segment_length=0.15)
+        assert len(result) == 2
+
+    def test_far_waypoints_densified(self, coverage):
+        wps = [(0, 0, 0), (1.0, 0, 0)]
+        result = coverage.densify_waypoints(wps, max_segment_length=0.15)
+        assert len(result) > 2
+        # All points should be between start and end
+        for x, y, _ in result:
+            assert 0 <= x <= 1.0
+
+    def test_preserves_endpoints(self, coverage):
+        wps = [(0, 0, 0), (1.0, 0, 0)]
+        result = coverage.densify_waypoints(wps, max_segment_length=0.5)
+        assert result[0] == wps[0]
+        assert result[-1] == wps[-1]
+
+
+class TestOrientWaypoints:
+    """Test waypoint orientation."""
+
+    def test_single_waypoint(self, coverage):
+        result = coverage.orient_waypoints([(0, 0, 0)])
+        assert len(result) == 1
+
+    def test_two_waypoints_rightward(self, coverage):
+        wps = [(0, 0, 0), (1, 0, 0)]
+        result = coverage.orient_waypoints(wps)
+        # First waypoint should face right (yaw ≈ 0)
+        assert abs(result[0][2]) < 0.01
+
+    def test_two_waypoints_upward(self, coverage):
+        wps = [(0, 0, 0), (0, 1, 0)]
+        result = coverage.orient_waypoints(wps)
+        # First waypoint should face up (yaw ≈ pi/2)
+        assert abs(result[0][2] - math.pi / 2) < 0.01
+
+    def test_last_waypoint_inherits_direction(self, coverage):
+        wps = [(0, 0, 0), (1, 0, 0), (2, 0, 0)]
+        result = coverage.orient_waypoints(wps)
+        # Last waypoint should have same yaw as second-to-last
+        assert abs(result[-1][2] - result[-2][2]) < 0.01

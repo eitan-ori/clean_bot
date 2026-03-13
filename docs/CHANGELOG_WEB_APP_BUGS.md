@@ -286,3 +286,20 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`_on_mission_state`)
 - **Problem:** The clean-start detection used substring matching: `'CLEAN' not in old_u`. But state "WAITING_FOR_CLEAN" contains "CLEAN", making it look like the previous state was already a cleaning state. Result: `_clean_start_time` is never set when transitioning from WAITING_FOR_CLEAN to COVERAGE, and clean duration is never tracked.
 - **Fix:** Replaced substring matching with a helper `_is_cleaning(s)` that requires 'COVER' in state AND 'WAITING' not in state, correctly distinguishing COVERAGE from WAITING_FOR_CLEAN.
+
+### Bug 58: (reserved – no code change)
+
+### Bug 59: drive_to_waypoint oscillation when well-aligned
+- **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py` (`drive_to_waypoint`)
+- **Problem:** The steering correction had a minimum angular velocity of 0.15 rad/s applied even when the robot was nearly perfectly aligned (angle_error ≈ 0). This caused constant zig-zag oscillation during straight-line driving.
+- **Fix:** Added dead zone: when `abs(angle_error) < angle_tolerance`, angular correction is set to 0.0.
+
+### Bug 60: Stat tracking timers leak on PAUSED → RETURNING/RESET
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`_on_mission_state`)
+- **Problem:** When transitioning from PAUSED to RETURNING (go_home) or WAITING_FOR_SCAN (reset), the scan/clean timers were never stopped. The elif conditions check for `'EXPLOR' in old_u` but old state is "PAUSED" which doesn't match. The timer leaked indefinitely, and accumulated time was lost.
+- **Fix:** Added catch-all: when leaving PAUSED for a non-operation state, finalize and clear any active timers.
+
+### Bug 61: Scan/clean timer reset on resume (losing pre-pause time)
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`_on_mission_state`)
+- **Problem:** When resuming from PAUSED → EXPLORING, the scan timer was reset to current time because the start-tracking condition (`'EXPLOR' in new_u and 'EXPLOR' not in old_u`) matched. This discarded all time accumulated before the pause.
+- **Fix:** Added guard: only set timer if not already tracking (`if not self._scan_start_time`). Same fix applied to clean timer.

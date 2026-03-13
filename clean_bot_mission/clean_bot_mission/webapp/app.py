@@ -206,18 +206,29 @@ class WebBridgeNode(Node):
             # Use COVERAGE as the definitive cleaning state (not WAITING_FOR_CLEAN)
             def _is_cleaning(s):
                 return 'COVER' in s and 'WAITING' not in s
+            # Bug 61 fix: only start timer if not already tracking (preserves pre-pause time on resume)
             if 'EXPLOR' in new_u and 'EXPLOR' not in old_u:
-                self._scan_start_time = time.monotonic()
+                if not self._scan_start_time:
+                    self._scan_start_time = time.monotonic()
             elif 'EXPLOR' not in new_u and 'EXPLOR' in old_u and self._scan_start_time and not is_pause:
                 self.total_scan_time += time.monotonic() - self._scan_start_time
                 self.rooms_scanned += 1
                 self._scan_start_time = None
             if _is_cleaning(new_u) and not _is_cleaning(old_u):
-                self._clean_start_time = time.monotonic()
+                if not self._clean_start_time:
+                    self._clean_start_time = time.monotonic()
             elif not _is_cleaning(new_u) and _is_cleaning(old_u) and self._clean_start_time and not is_pause:
                 self.total_clean_time += time.monotonic() - self._clean_start_time
                 self.rooms_cleaned += 1
                 self._clean_start_time = None
+            # Bug 60 fix: clean up leaked timers when leaving PAUSED for non-operation state
+            if 'PAUSE' in old_u and not is_pause:
+                if 'EXPLOR' not in new_u and self._scan_start_time:
+                    self.total_scan_time += time.monotonic() - self._scan_start_time
+                    self._scan_start_time = None
+                if not _is_cleaning(new_u) and self._clean_start_time:
+                    self.total_clean_time += time.monotonic() - self._clean_start_time
+                    self._clean_start_time = None
 
     def _on_exploration_state(self, msg):
         self.exploration_state = msg.data
