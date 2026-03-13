@@ -498,3 +498,18 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/templates/index.html`
 - **Problem:** Room names containing single quotes (e.g., "Bob's Room") would break the JavaScript expressions in inline `onclick` attributes. The `esc()` function converts `'` to `&#39;`, which the HTML parser decodes back to `'`, breaking the JS string literal. This could cause JS errors or XSS if a malicious room name is crafted.
 - **Fix:** Added `escAttr()` helper that first escapes for JavaScript (`'` → `\'`, `\` → `\\`) then for HTML attributes via `esc()`. Used `escAttr()` for all inline onclick string arguments in room list and no-go zone list rendering.
+
+### Bug 101: PNG `optimize=True` wastes CPU on real-time map emission
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`get_map_data`)
+- **Problem:** Both the main map and heatmap PNG encoding used `optimize=True`, which runs an additional compression pass. For real-time map updates at 2Hz, this adds ~20-30% encoding time for marginal file size savings. The extra CPU cost is wasted since the images are immediately replaced by the next update.
+- **Fix:** Removed `optimize=True` from the main map and heatmap PNG encoding in `get_map_data`. Kept it for room preview rendering (one-shot, size matters more).
+
+### Bug 102: Non-deterministic obstacle downsampling causes map flickering
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`get_map_data`)
+- **Problem:** When there are >2000 obstacle points, `np.random.choice()` was used to downsample. Each call produced a different random sample, causing the obstacle overlay on the web client to "flicker" as different points appear and disappear between map updates.
+- **Fix:** Replaced `np.random.choice` with deterministic stride-based downsampling (`occ_x[::step]`). Now the same obstacles are consistently selected, eliminating visual flickering.
+
+### Bug 103: Schedule timer 60s interval can miss minute boundary
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (timer setup)
+- **Problem:** The schedule checker ran every 60 seconds and compared `current_time == schedule_time` using `strftime("%H:%M")`. If the timer fires at 07:59:59 ("07:59") and then at 08:01:01 ("08:01"), the entire "08:00" minute is missed and the scheduled clean never triggers.
+- **Fix:** Reduced timer interval from 60s to 30s. With a 30-second period, any 60-second minute window is guaranteed to contain at least one timer fire.

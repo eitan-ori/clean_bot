@@ -194,7 +194,7 @@ class WebBridgeNode(Node):
         # ── Periodic status push (2 Hz) ──
         self.create_timer(0.5, self._push_status)
         # ── Round 33: Schedule checker (every 60s) ──
-        self.create_timer(60.0, self._check_schedules)
+        self.create_timer(30.0, self._check_schedules)
         # ── Round 40: Scan Hz calculator (every 1s) ──
         self.create_timer(1.0, self._calc_scan_hz)
         # ── No-go zones: re-publish periodically (10s) ──
@@ -397,8 +397,8 @@ class WebBridgeNode(Node):
         occ_y, occ_x = np.where(data >= 50)
         # Downsample obstacles for perf (send max ~2000 points)
         if len(occ_x) > 2000:
-            idx = np.random.choice(len(occ_x), 2000, replace=False)
-            occ_x, occ_y = occ_x[idx], occ_y[idx]
+            step = max(1, len(occ_x) // 2000)
+            occ_x, occ_y = occ_x[::step], occ_y[::step]
 
         # Convert to world coords (vectorized)
         obs_world_x = (ox + occ_x * res).round(3)
@@ -416,7 +416,7 @@ class WebBridgeNode(Node):
             scale = max(min_dim / w, min_dim / h, 1.0)
             img = img.resize((int(w * scale), int(h * scale)), Image.NEAREST)
         buf = io.BytesIO()
-        img.save(buf, format="PNG", optimize=True)
+        img.save(buf, format="PNG")
         b64 = base64.b64encode(buf.getvalue()).decode("ascii")
 
         # Round 32: Heatmap data (vectorized with numpy)
@@ -454,7 +454,7 @@ class WebBridgeNode(Node):
                 if w < min_dim or h < min_dim:
                     hm_img = hm_img.resize((int(w * scale), int(h * scale)), Image.NEAREST)
                 hm_buf = io.BytesIO()
-                hm_img.save(hm_buf, format="PNG", optimize=True)
+                hm_img.save(hm_buf, format="PNG")
                 heatmap_b64 = base64.b64encode(hm_buf.getvalue()).decode("ascii")
 
         return {

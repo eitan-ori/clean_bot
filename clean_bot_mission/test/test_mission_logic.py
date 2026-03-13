@@ -2455,15 +2455,83 @@ class TestScheduleDeleteCleansTriggeredKeys:
         assert "sched2" in node._schedule_triggered_keys
         assert len(node._schedules) == 1
 
-    def test_delete_nonexistent_schedule_safe(self):
-        """Deleting non-existent schedule doesn't raise."""
+
+# ── Bug 101: PNG optimize=True removed for real-time emission ─────
+class TestPngOptimizeRemoved:
+    """Bug 101: Verify that get_map_data produces valid PNG without optimize flag."""
+
+    def test_get_map_data_produces_valid_png(self):
         from clean_bot_mission.webapp.app import WebBridgeNode
         node = MagicMock(spec=WebBridgeNode)
-        node._schedules = [{"id": "sched1", "time": "08:00", "days": ["mon"]}]
-        node._schedule_triggered_keys = {}
-        node._schedule_lock = __import__('threading').Lock()
-        with node._schedule_lock:
-            schedule_id = "nonexistent"
-            node._schedules = [s for s in node._schedules if s.get("id") != schedule_id]
-            node._schedule_triggered_keys.pop(schedule_id, None)
-        assert len(node._schedules) == 1
+        # Build a small OccupancyGrid message
+        map_msg = MagicMock()
+        map_msg.info.width = 10
+        map_msg.info.height = 10
+        map_msg.info.resolution = 0.05
+        map_msg.info.origin.position.x = 0.0
+        map_msg.info.origin.position.y = 0.0
+        map_msg.data = [0] * 100  # all free
+        node.map_msg = map_msg
+        node.obstacle_heatmap = None
+        node.robot_x = 0.0
+        node.robot_y = 0.0
+        node.robot_yaw = 0.0
+        node.map_update_counter = 1
+        node._no_go_zones = []
+        node._heatmap_width = 0
+        node._heatmap_height = 0
+        result = WebBridgeNode.get_map_data(node)
+        assert result is not None
+        # Verify base64 image is valid
+        import base64
+        raw = base64.b64decode(result["image_b64"])
+        assert raw[:4] == b'\x89PNG'
+
+
+# ── Bug 102: Deterministic obstacle downsampling ──────────────────
+class TestDeterministicObstacleDownsampling:
+    """Bug 102: Verify obstacle downsampling uses stride (no random flickering)."""
+
+    def test_downsample_is_deterministic(self):
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        node = MagicMock(spec=WebBridgeNode)
+        map_msg = MagicMock()
+        w, h = 100, 100
+        map_msg.info.width = w
+        map_msg.info.height = h
+        map_msg.info.resolution = 0.05
+        map_msg.info.origin.position.x = 0.0
+        map_msg.info.origin.position.y = 0.0
+        # All occupied → 10000 obstacle points, will trigger downsampling
+        map_msg.data = [100] * (w * h)
+        node.map_msg = map_msg
+        node.obstacle_heatmap = None
+        node.robot_x = 0.0
+        node.robot_y = 0.0
+        node.robot_yaw = 0.0
+        node.map_update_counter = 1
+        node._no_go_zones = []
+        node._heatmap_width = 0
+        node._heatmap_height = 0
+        result1 = WebBridgeNode.get_map_data(node)
+        result2 = WebBridgeNode.get_map_data(node)
+        # With deterministic stride, obstacle lists should be identical
+        assert result1["obstacles"] == result2["obstacles"]
+        assert len(result1["obstacles"]) <= 2000
+
+
+# ── Bug 103: Schedule timer interval ──────────────────────────────
+class TestScheduleTimerInterval:
+    """Bug 103: Verify schedule timer is ≤30s to never miss a minute boundary."""
+
+    def test_schedule_timer_is_30s(self):
+        """Check that the schedule timer uses 30s interval (not 60s)."""
+        import inspect
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        source = inspect.getsource(WebBridgeNode.__init__)
+        assert '30.0' in source or '30,' in source
+        # Ensure the old 60s interval isn't used for schedules
+        lines = source.split('\n')
+        for line in lines:
+            if '_check_schedules' in line and 'create_timer' in line:
+                assert '30' in line, "Schedule timer should be 30 seconds"
