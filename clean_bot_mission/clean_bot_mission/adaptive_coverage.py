@@ -1194,6 +1194,29 @@ class AdaptiveCoveragePlanner(Node):
         self.get_logger().info(f'Simple zigzag generated {len(waypoints)} waypoints')
         return waypoints
 
+    def _nearest_neighbor_order(self, waypoints: list) -> list:
+        """Reorder individual waypoints using nearest-neighbor heuristic."""
+        if len(waypoints) <= 2:
+            return waypoints
+        rx, ry, _ = self._get_robot_pose_map()
+        ordered = []
+        remaining = list(range(len(waypoints)))
+        curr = (rx, ry)
+        while remaining:
+            best_i = 0
+            best_d = float('inf')
+            for idx, ri in enumerate(remaining):
+                dx = waypoints[ri][0] - curr[0]
+                dy = waypoints[ri][1] - curr[1]
+                d = dx * dx + dy * dy
+                if d < best_d:
+                    best_d = d
+                    best_i = idx
+            chosen = remaining.pop(best_i)
+            ordered.append(waypoints[chosen])
+            curr = (waypoints[chosen][0], waypoints[chosen][1])
+        return ordered
+
     def optimize_path_order(self, waypoints: list) -> list:
         """
         Reorder waypoint pairs to minimize travel distance.
@@ -1444,9 +1467,9 @@ class AdaptiveCoveragePlanner(Node):
             self.waypoints = self.missed_waypoints
             self.missed_waypoints = []
             
-            # Optimize the visit order to minimize travel
+            # Optimize the visit order (nearest-neighbor on individual waypoints)
             if len(self.waypoints) > 2:
-                self.waypoints = self.optimize_path_order(self.waypoints)
+                self.waypoints = self._nearest_neighbor_order(self.waypoints)
             
             # Densify and orient (same as initial path generation)
             self.waypoints = self.densify_waypoints(self.waypoints, max_segment_length=self.max_segment_length)

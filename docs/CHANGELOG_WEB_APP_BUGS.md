@@ -513,3 +513,13 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (timer setup)
 - **Problem:** The schedule checker ran every 60 seconds and compared `current_time == schedule_time` using `strftime("%H:%M")`. If the timer fires at 07:59:59 ("07:59") and then at 08:01:01 ("08:01"), the entire "08:00" minute is missed and the scheduled clean never triggers.
 - **Fix:** Reduced timer interval from 60s to 30s. With a 30-second period, any 60-second minute window is guaranteed to contain at least one timer fire.
+
+### Bug 104: Retry mission drops last waypoint when odd count
+- **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py` (`finish_mission`)
+- **Problem:** When retrying missed waypoints, `optimize_path_order()` was used — but it groups waypoints into pairs (`for i in range(0, len, 2)`). Missed waypoints are individual points, not segment pairs. With an odd number of missed waypoints, the last one was silently dropped (never cleaned).
+- **Fix:** Added `_nearest_neighbor_order()` method that reorders individual waypoints using nearest-neighbor heuristic from robot position. Retry now uses this instead of the pair-based `optimize_path_order`.
+
+### Bug 105: `ws_velocity` crashes on non-numeric WebSocket values
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py` (`ws_velocity`)
+- **Problem:** The velocity WebSocket handler passed raw `data.get("linear")` and `data.get("angular")` values directly to `send_velocity()`, which calls `float()`. If a malicious or buggy client sends non-numeric values (e.g., strings), `float()` raises `ValueError` — Flask-SocketIO catches it but fills logs with tracebacks.
+- **Fix:** Added `try/except (TypeError, ValueError)` around `float()` conversion with early return on failure.

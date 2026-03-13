@@ -193,7 +193,7 @@ class WebBridgeNode(Node):
         self.create_timer(0.1, self._update_pose)
         # ── Periodic status push (2 Hz) ──
         self.create_timer(0.5, self._push_status)
-        # ── Round 33: Schedule checker (every 60s) ──
+        # ── Round 33: Schedule checker (every 30s — must be ≤30s to hit every minute) ──
         self.create_timer(30.0, self._check_schedules)
         # ── Round 40: Scan Hz calculator (every 1s) ──
         self.create_timer(1.0, self._calc_scan_hz)
@@ -1282,7 +1282,12 @@ def ws_command(data):
 def ws_velocity(data):
     if not isinstance(data, dict) or ros_node is None:
         return
-    ros_node.send_velocity(data.get("linear", 0), data.get("angular", 0))
+    try:
+        lin = float(data.get("linear", 0))
+        ang = float(data.get("angular", 0))
+    except (TypeError, ValueError):
+        return
+    ros_node.send_velocity(lin, ang)
 
 
 @socketio.on("request_map")

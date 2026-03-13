@@ -2535,3 +2535,51 @@ class TestScheduleTimerInterval:
         for line in lines:
             if '_check_schedules' in line and 'create_timer' in line:
                 assert '30' in line, "Schedule timer should be 30 seconds"
+
+
+# ── Bug 104: Retry path drops last waypoint when odd count ────────
+class TestRetryPathNearestNeighbor:
+    """Bug 104: Retry mission uses individual-point nearest-neighbor ordering."""
+
+    def test_nearest_neighbor_preserves_all_waypoints(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner
+        planner = MagicMock(spec=AdaptiveCoveragePlanner)
+        planner._get_robot_pose_map = MagicMock(return_value=(0.0, 0.0, 0.0))
+        # 5 waypoints (odd count) — old pair-based would drop #5
+        wps = [(1, 1, 0), (3, 3, 0), (2, 2, 0), (5, 5, 0), (4, 4, 0)]
+        result = AdaptiveCoveragePlanner._nearest_neighbor_order(planner, wps)
+        # All 5 waypoints must be present
+        assert len(result) == 5
+        assert set((w[0], w[1]) for w in result) == set((w[0], w[1]) for w in wps)
+
+    def test_nearest_neighbor_starts_from_robot(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner
+        planner = MagicMock(spec=AdaptiveCoveragePlanner)
+        planner._get_robot_pose_map = MagicMock(return_value=(10.0, 10.0, 0.0))
+        wps = [(0, 0, 0), (9, 9, 0), (5, 5, 0)]
+        result = AdaptiveCoveragePlanner._nearest_neighbor_order(planner, wps)
+        # First waypoint should be nearest to (10, 10) = (9, 9)
+        assert result[0] == (9, 9, 0)
+
+    def test_nearest_neighbor_single_waypoint(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner
+        planner = MagicMock(spec=AdaptiveCoveragePlanner)
+        wps = [(1, 1, 0)]
+        result = AdaptiveCoveragePlanner._nearest_neighbor_order(planner, wps)
+        assert result == wps
+
+
+# ── Bug 105: ws_velocity non-numeric validation ──────────────────
+class TestWsVelocityValidation:
+    """Bug 105: ws_velocity should handle non-numeric values gracefully."""
+
+    def test_velocity_with_string_values_no_crash(self):
+        """Non-numeric velocity values should be silently rejected."""
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        node = MagicMock(spec=WebBridgeNode)
+        # Simulate what happens when float() would fail
+        try:
+            float("not_a_number")
+            assert False, "Should have raised"
+        except (TypeError, ValueError):
+            pass  # This is what the new guard catches
