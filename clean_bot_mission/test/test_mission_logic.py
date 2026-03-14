@@ -3199,3 +3199,98 @@ class TestDriveToWaypointEdgeCases:
         twist = call_args[0][0]
         assert twist.linear.x == 0.0
         assert twist.angular.z != 0.0
+
+
+# ════════════════════════════════════════════════════════════════════
+# Test: Localization edge cases
+# ════════════════════════════════════════════════════════════════════
+
+class TestLocalizationEdgeCases:
+    """Edge cases in scan-to-map localization."""
+
+    def test_scan_to_points_empty_ranges(self):
+        """_scan_to_points with empty ranges should return None."""
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        node = MagicMock()
+        node.scan_ranges = []
+        node.scan_angle_min = 0.0
+        node.scan_angle_inc = 0.01
+        node._scan_to_points = WebBridgeNode._scan_to_points.__get__(node)
+        assert node._scan_to_points() is None
+
+    def test_scan_to_points_too_few_valid(self):
+        """_scan_to_points with <30 valid points should return None."""
+        import numpy as np
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        node = MagicMock()
+        node.scan_ranges = [0.5] * 20 + [0.0] * 100  # only 20 valid
+        node.scan_angle_min = -1.57
+        node.scan_angle_increment = 0.01
+        node._scan_to_points = WebBridgeNode._scan_to_points.__get__(node)
+        assert node._scan_to_points() is None
+
+    def test_scan_to_points_valid(self):
+        """_scan_to_points with sufficient valid points should return array."""
+        import numpy as np
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        node = MagicMock()
+        node.scan_ranges = [1.0] * 100
+        node.scan_angle_min = -1.57
+        node.scan_angle_increment = 0.03
+        node._scan_to_points = WebBridgeNode._scan_to_points.__get__(node)
+        result = node._scan_to_points()
+        assert result is not None
+        assert len(result) >= 30  # at least 30 valid points
+        assert len(result[0]) == 2  # each point is (x, y)
+
+
+# ════════════════════════════════════════════════════════════════════
+# Test: Coverage state transitions
+# ════════════════════════════════════════════════════════════════════
+
+class TestCoverageStateTransitions:
+    """Test coverage planner state machine transitions."""
+
+    def test_handle_start_changes_state(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as ACP, CoverageState
+        planner = MagicMock()
+        planner.coverage_state = CoverageState.STOPPED
+        planner.waypoints = [(1.0, 0.0, 0.0)]
+        planner.current_waypoint_idx = 0
+        planner.handle_start = ACP.handle_start.__get__(planner)
+        planner.handle_start()
+        assert planner.coverage_state == CoverageState.RUNNING
+
+    def test_handle_pause_from_running(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as ACP, CoverageState
+        planner = MagicMock()
+        planner.coverage_state = CoverageState.RUNNING
+        planner.handle_pause = ACP.handle_pause.__get__(planner)
+        planner.handle_pause()
+        assert planner.coverage_state == CoverageState.PAUSED
+
+    def test_handle_resume_from_paused(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as ACP, CoverageState
+        planner = MagicMock()
+        planner.coverage_state = CoverageState.PAUSED
+        planner.handle_resume = ACP.handle_resume.__get__(planner)
+        planner.handle_resume()
+        assert planner.coverage_state == CoverageState.RUNNING
+
+    def test_handle_stop_from_running(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as ACP, CoverageState
+        planner = MagicMock()
+        planner.coverage_state = CoverageState.RUNNING
+        planner.cmd_vel_pub = MagicMock()
+        planner.handle_stop = ACP.handle_stop.__get__(planner)
+        planner.handle_stop()
+        assert planner.coverage_state == CoverageState.STOPPED
+
+    def test_handle_stop_cancels_goal(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as ACP, CoverageState
+        planner = MagicMock()
+        planner.coverage_state = CoverageState.RUNNING
+        planner.cmd_vel_pub = MagicMock()
+        planner.handle_stop = ACP.handle_stop.__get__(planner)
+        planner.handle_stop()
+        planner.cancel_current_goal.assert_called_once()
