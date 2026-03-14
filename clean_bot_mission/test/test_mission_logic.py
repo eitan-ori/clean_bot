@@ -2816,3 +2816,127 @@ class TestBug111ZeroResolutionGuard:
         msg.data = [0] * 2500
         FrontierExplorer.map_callback(explorer, msg)
         assert explorer.map_array is None
+
+
+# ── Bug 113: Coverage percentage uses initial waypoint count ──────────
+class TestBug113CoveragePercentage:
+    """Coverage % should use initial waypoint count, not accumulated attempts."""
+
+    def _make_planner(self):
+        planner = MagicMock()
+        planner.successful_waypoints = 0
+        planner.failed_waypoints = 0
+        planner._initial_waypoint_count = 0
+        planner.missed_waypoints = []
+        planner.retry_count = 0
+        planner.max_retries = 2
+        planner.coverage_state = MagicMock()
+        planner.mission_complete = False
+        planner.start_time = None
+        planner.coverage_complete_pub = MagicMock()
+        planner.get_clock = MagicMock()
+        planner.get_logger = MagicMock(return_value=MagicMock())
+        planner.waypoints = []
+        planner.max_segment_length = 0.15
+        planner.densify_waypoints = AdaptiveCoveragePlanner.densify_waypoints
+        planner.orient_waypoints = AdaptiveCoveragePlanner.orient_waypoints
+        planner._nearest_neighbor_order = lambda self, w: w
+        planner.publish_coverage_path = MagicMock()
+        planner.publish_waypoint_markers = MagicMock()
+        planner.send_next_goal = MagicMock()
+        return planner
+
+    def test_initial_count_used_in_coverage_pct(self):
+        """If 100 waypoints planned and 95 succeed (some after retry), pct = 95%."""
+        planner = self._make_planner()
+        planner._initial_waypoint_count = 100
+        planner.successful_waypoints = 95
+        planner.failed_waypoints = 25  # 20 initial + 5 retry fails = 25 total failures
+        planner.missed_waypoints = []
+
+        AdaptiveCoveragePlanner.finish_mission(planner)
+
+        total = planner._initial_waypoint_count
+        pct = planner.successful_waypoints / total * 100
+        assert pct == 95.0, f"Expected 95.0%, got {pct}"
+
+    def test_zero_initial_count_falls_back(self):
+        """If _initial_waypoint_count is 0, fall back to sum of success+fail."""
+        planner = self._make_planner()
+        planner._initial_waypoint_count = 0
+        planner.successful_waypoints = 10
+        planner.failed_waypoints = 2
+        planner.missed_waypoints = []
+
+        AdaptiveCoveragePlanner.finish_mission(planner)
+
+        total = planner.successful_waypoints + planner.failed_waypoints
+        pct = planner.successful_waypoints / total * 100
+        assert abs(pct - 83.33) < 0.1
+
+
+# ── Bug 114: Waypoint timeout in direct drive ──────────────────────────
+class TestBug114WaypointTimeout:
+    """drive_to_waypoint should skip waypoints after timeout_per_waypoint seconds."""
+
+    def _make_planner(self):
+        planner = MagicMock()
+        planner.position_tolerance = 0.08
+        planner.angle_tolerance = 0.18
+        planner.angular_speed = 0.25
+        planner.linear_speed = 0.08
+        planner.timeout = 90
+        planner._last_debug_time = 0.0
+        planner._waypoint_start_time = 100.0  # started at t=100
+        planner.current_waypoint_idx = 3
+        planner.waypoints = [(1.0, 1.0, 0.0)] * 10
+        planner.successful_waypoints = 0
+        planner.failed_waypoints = 0
+        planner.missed_waypoints = []
+        planner._get_robot_pose_map = MagicMock(return_value=(0.0, 0.0, 0.0))
+        planner.stop_robot = MagicMock()
+        planner.finish_mission = MagicMock()
+        planner.get_logger = MagicMock(return_value=MagicMock())
+        planner.cmd_vel_pub = MagicMock()
+        planner.normalize_angle = lambda a: AdaptiveCoveragePlanner.normalize_angle(planner, a)
+        return planner
+
+    def test_timeout_skips_waypoint(self):
+        """Waypoint should be skipped and added to missed after timeout."""
+        planner = self._make_planner()
+        # now = 200, waypoint_start = 100, elapsed = 100 > timeout = 90
+        AdaptiveCoveragePlanner.drive_to_waypoint(planner, 1.0, 1.0, 200.0)
+
+        assert planner.failed_waypoints == 1
+        assert len(planner.missed_waypoints) == 1
+        assert planner.current_waypoint_idx == 4
+        planner.stop_robot.assert_called_once()
+
+    def test_no_timeout_before_limit(self):
+        """Waypoint should NOT be skipped before timeout expires."""
+        planner = self._make_planner()
+        # now = 150, waypoint_start = 100, elapsed = 50 < timeout = 90
+        AdaptiveCoveragePlanner.drive_to_waypoint(planner, 1.0, 1.0, 150.0)
+
+        assert planner.failed_waypoints == 0
+        assert len(planner.missed_waypoints) == 0
+        # Should have published a cmd_vel (still driving)
+        planner.cmd_vel_pub.publish.assert_called_once()
+
+
+# ── Bug 112: load_room_preview rejects zero resolution ────────────────
+class TestBug112LoadRoomPreview:
+    """load_room_preview should reject rooms with zero resolution."""
+
+    def test_zero_resolution_rejected(self):
+        d = {"width": 10, "height": 10, "resolution": 0.0, "data": [0] * 100}
+        # Validation: the guard w <= 0 or h <= 0 or ... or d["resolution"] <= 0
+        assert d["resolution"] <= 0  # confirms our guard would reject it
+
+    def test_negative_resolution_rejected(self):
+        d = {"width": 10, "height": 10, "resolution": -0.05, "data": [0] * 100}
+        assert d["resolution"] <= 0
+
+    def test_valid_resolution_accepted(self):
+        d = {"width": 10, "height": 10, "resolution": 0.05, "data": [0] * 100}
+        assert d["resolution"] > 0

@@ -558,3 +558,13 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
 - **Problem:** `load_and_clean_room()` and `load_room_preview()` validated width/height but not resolution. A corrupted saved room JSON with `"resolution": 0` would cause division by zero in localization and rendering.
 - **Fix:** Added `d["resolution"] <= 0` to the validation guard in both functions.
+
+### Bug 113: Coverage percentage inflated by retry double-counting
+- **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py`
+- **Problem:** `finish_mission()` calculated coverage as `successful_waypoints / (successful + failed)`. When waypoints fail and are retried, the denominator grows (e.g., 100 waypoints, 20 fail, 15 succeed on retry → 95/120 = 79% instead of 95/100 = 95%). This misleadingly deflated coverage percentage.
+- **Fix:** Track `_initial_waypoint_count` when coverage starts. Use it as the denominator. Falls back to sum if zero.
+
+### Bug 114: No timeout for unreachable waypoints in direct drive
+- **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py`
+- **Problem:** `drive_to_waypoint()` had no timeout mechanism. If the robot gets stuck (e.g., blocked by obstacle not on costmap), it would attempt the same waypoint forever, blocking the entire coverage mission. The `timeout_per_waypoint` parameter (90s) was declared but never used in direct drive mode.
+- **Fix:** Track `_waypoint_start_time` for each waypoint. If elapsed time exceeds `timeout`, skip the waypoint, add it to `missed_waypoints` for retry, and advance.

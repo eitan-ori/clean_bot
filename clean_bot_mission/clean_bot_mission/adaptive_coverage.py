@@ -239,10 +239,12 @@ class AdaptiveCoveragePlanner(Node):
         self.drive_start_time = 0.0
         self.min_drive_time = 0.8  # seconds (drive straight a bit before re-aligning)
         self._last_debug_time = 0.0
+        self._waypoint_start_time = 0.0  # For timeout detection
         
         # Statistics
         self.successful_waypoints = 0
         self.failed_waypoints = 0
+        self._initial_waypoint_count = 0
         self.start_time = None
         self.total_distance = 0.0
 
@@ -350,6 +352,7 @@ class AdaptiveCoveragePlanner(Node):
         self.missed_waypoints = []
         self.successful_waypoints = 0
         self.failed_waypoints = 0
+        self._initial_waypoint_count = 0
         self.start_time = None
         self.movement_phase = 'idle'
         self.last_turn_direction = 1  # Reset to default (counter-clockwise)
@@ -518,8 +521,24 @@ class AdaptiveCoveragePlanner(Node):
             
             # ADVANCE TO NEXT WAYPOINT
             self.current_waypoint_idx += 1
+            self._waypoint_start_time = now
             
             # Check if we finished all waypoints
+            if self.current_waypoint_idx >= len(self.waypoints):
+                self.finish_mission()
+            return
+
+        # Timeout: skip waypoint if stuck too long
+        if self._waypoint_start_time > 0 and (now - self._waypoint_start_time) > self.timeout:
+            self.stop_robot()
+            self.get_logger().warn(
+                f'⏰ Timeout on waypoint {self.current_waypoint_idx + 1}/{len(self.waypoints)} '
+                f'(>{self.timeout}s) — skipping')
+            self.failed_waypoints += 1
+            if self.current_waypoint_idx < len(self.waypoints):
+                self.missed_waypoints.append(self.waypoints[self.current_waypoint_idx])
+            self.current_waypoint_idx += 1
+            self._waypoint_start_time = now
             if self.current_waypoint_idx >= len(self.waypoints):
                 self.finish_mission()
             return
@@ -675,6 +694,8 @@ class AdaptiveCoveragePlanner(Node):
         if nearest > 0:
             self.waypoints = self.waypoints[nearest:] + self.waypoints[:nearest]
         self.current_waypoint_idx = 0
+        self._initial_waypoint_count = len(self.waypoints)
+        self._waypoint_start_time = self.get_clock().now().nanoseconds / 1e9
         
         self.get_logger().info('')
         self.get_logger().info('=' * 50)
@@ -1477,6 +1498,7 @@ class AdaptiveCoveragePlanner(Node):
             
             # Reset state for retry
             self.current_waypoint_idx = 0
+            self._waypoint_start_time = self.get_clock().now().nanoseconds / 1e9
             
             # Update visualization
             self.publish_coverage_path()
@@ -1493,7 +1515,7 @@ class AdaptiveCoveragePlanner(Node):
         if self.start_time:
             elapsed = (self.get_clock().now() - self.start_time).nanoseconds / 1e9
         
-        total = self.successful_waypoints + self.failed_waypoints
+        total = self._initial_waypoint_count if self._initial_waypoint_count > 0 else (self.successful_waypoints + self.failed_waypoints)
         coverage_pct = (self.successful_waypoints / total * 100) if total > 0 else 0
         
         self.get_logger().info('')
