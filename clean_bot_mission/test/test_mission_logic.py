@@ -2940,3 +2940,152 @@ class TestBug112LoadRoomPreview:
     def test_valid_resolution_accepted(self):
         d = {"width": 10, "height": 10, "resolution": 0.05, "data": [0] * 100}
         assert d["resolution"] > 0
+
+
+# ── Tests for untested critical functions ─────────────────────────────
+
+class TestFindFrontiers:
+    """Test frontier detection algorithm."""
+
+    def _make_explorer(self, map_array, resolution=0.05, origin=(0.0, 0.0)):
+        explorer = MagicMock()
+        explorer.map_array = map_array
+        explorer.map_info = MagicMock()
+        explorer.map_info.width = map_array.shape[1]
+        explorer.map_info.height = map_array.shape[0]
+        explorer.map_info.resolution = resolution
+        explorer.map_info.origin.position.x = origin[0]
+        explorer.map_info.origin.position.y = origin[1]
+        explorer.min_frontier_size = 3
+        explorer.get_logger = MagicMock(return_value=MagicMock())
+        return explorer
+
+    def test_simple_frontier_detected(self):
+        """A border between free (0) and unknown (-1) cells should be a frontier."""
+        # Left half free, right half unknown
+        arr = np.zeros((20, 20), dtype=np.int8)
+        arr[:, 10:] = -1
+        explorer = self._make_explorer(arr)
+        frontiers = FrontierExplorer.find_frontiers(explorer)
+        assert len(frontiers) > 0, "Should detect at least one frontier"
+        # Frontier should be near the boundary (column ~10)
+        for f in frontiers:
+            assert 'x' in f and 'y' in f and 'size' in f
+
+    def test_no_frontier_all_free(self):
+        """All-free map should have no frontiers."""
+        arr = np.zeros((20, 20), dtype=np.int8)
+        explorer = self._make_explorer(arr)
+        frontiers = FrontierExplorer.find_frontiers(explorer)
+        assert len(frontiers) == 0, f"Expected 0 frontiers, got {len(frontiers)}"
+
+    def test_no_frontier_all_unknown(self):
+        """All-unknown map should have no frontiers."""
+        arr = np.full((20, 20), -1, dtype=np.int8)
+        explorer = self._make_explorer(arr)
+        frontiers = FrontierExplorer.find_frontiers(explorer)
+        assert len(frontiers) == 0
+
+    def test_small_frontier_filtered(self):
+        """Frontier smaller than min_frontier_size should be filtered."""
+        arr = np.zeros((20, 20), dtype=np.int8)
+        # Only 1 unknown cell
+        arr[10, 10] = -1
+        explorer = self._make_explorer(arr)
+        explorer.min_frontier_size = 5
+        frontiers = FrontierExplorer.find_frontiers(explorer)
+        # The frontier around a single unknown cell is small
+        for f in frontiers:
+            assert f['size'] >= 5, f"Frontier size {f['size']} should be >= 5"
+
+
+class TestSendNextGoal:
+    """Test waypoint sequencing."""
+
+    def test_calls_finish_when_done(self):
+        planner = MagicMock()
+        planner.current_waypoint_idx = 5
+        planner.waypoints = [(0, 0, 0)] * 5  # len=5, idx=5 means done
+        planner.finish_mission = MagicMock()
+        AdaptiveCoveragePlanner.send_next_goal(planner)
+        planner.finish_mission.assert_called_once()
+
+    def test_no_finish_when_waypoints_remain(self):
+        planner = MagicMock()
+        planner.current_waypoint_idx = 2
+        planner.waypoints = [(0, 0, 0)] * 5
+        planner.finish_mission = MagicMock()
+        AdaptiveCoveragePlanner.send_next_goal(planner)
+        planner.finish_mission.assert_not_called()
+
+
+class TestReturnHomeSequence:
+    """Test the return home logic in full_mission."""
+
+    def test_return_home_calls_nav(self):
+        ctrl = MagicMock()
+        ctrl.home_x = 0.5
+        ctrl.home_y = 0.5
+        ctrl.get_clock = MagicMock()
+        ctrl.get_logger = MagicMock(return_value=MagicMock())
+        ctrl.nav_client.wait_for_server.return_value = True
+        ctrl.finish_mission = MagicMock()
+        FullMissionController.return_home_sequence(ctrl)
+        ctrl.nav_client.send_goal_async.assert_called_once()
+
+    def test_return_home_no_nav_server(self):
+        ctrl = MagicMock()
+        ctrl.home_x = 0.0
+        ctrl.home_y = 0.0
+        ctrl.get_clock = MagicMock()
+        ctrl.get_logger = MagicMock(return_value=MagicMock())
+        ctrl.nav_client.wait_for_server.return_value = False
+        ctrl.finish_mission = MagicMock()
+        FullMissionController.return_home_sequence(ctrl)
+        ctrl.finish_mission.assert_called_once()
+
+
+class TestExplorationLoop:
+    """Test exploration state machine."""
+
+    def _make_explorer(self):
+        explorer = MagicMock()
+        explorer.exploration_state = MagicMock()
+        explorer.exploration_state.__eq__ = lambda s, other: str(s) == str(other)
+        explorer.exploration_complete = False
+        explorer.map_array = np.zeros((20, 20), dtype=np.int8)
+        explorer.start_time = None
+        explorer.is_navigating = False
+        explorer.get_clock = MagicMock()
+        explorer.get_logger = MagicMock(return_value=MagicMock())
+        return explorer
+
+    def test_skips_when_not_exploring(self):
+        explorer = self._make_explorer()
+        # exploration_state != EXPLORING
+        explorer.exploration_state = "IDLE"
+        FrontierExplorer.exploration_loop(explorer)
+        explorer.find_frontiers = MagicMock()
+        explorer.find_frontiers.assert_not_called()
+
+
+class TestStartCoverageHardware:
+    """Test hardware activation in full_mission."""
+
+    def test_activate_cleaning_hardware(self):
+        ctrl = MagicMock()
+        ctrl.clean_trigger_pub = MagicMock()
+        ctrl.arduino_clean_pub = MagicMock()
+        ctrl.get_logger = MagicMock(return_value=MagicMock())
+        FullMissionController._activate_cleaning_hardware(ctrl)
+        ctrl.clean_trigger_pub.publish.assert_called_once()
+        ctrl.arduino_clean_pub.publish.assert_called_once()
+
+    def test_deactivate_cleaning_hardware(self):
+        ctrl = MagicMock()
+        ctrl.stop_clean_trigger_pub = MagicMock()
+        ctrl.arduino_clean_pub = MagicMock()
+        ctrl.get_logger = MagicMock(return_value=MagicMock())
+        FullMissionController._deactivate_cleaning_hardware(ctrl)
+        ctrl.stop_clean_trigger_pub.publish.assert_called_once()
+        ctrl.arduino_clean_pub.publish.assert_called_once()

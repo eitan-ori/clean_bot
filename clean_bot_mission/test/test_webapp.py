@@ -1169,3 +1169,52 @@ class TestBug110VelocityHTTPValidation:
                            content_type='application/json')
         assert resp.status_code == 200
         mock_node.send_velocity.assert_called_once_with(0.5, 0.1)
+
+
+# ── Tests for previously untested routes ──────────────────────────────
+
+class TestClearNoGoZones:
+    """Test POST /api/no_go_zones/clear."""
+
+    def test_clear_no_go_zones(self, flask_client):
+        client, mock_node = flask_client
+        resp = client.post('/api/no_go_zones/clear')
+        assert resp.status_code == 200
+        mock_node.clear_no_go_zones.assert_called_once()
+
+    def test_clear_no_go_zones_no_ros(self, flask_client):
+        client, mock_node = flask_client
+        import clean_bot_mission.webapp.app as app_mod
+        app_mod.ros_node = None
+        resp = client.post('/api/no_go_zones/clear')
+        assert resp.status_code == 503
+        app_mod.ros_node = mock_node
+
+
+class TestLoadAndCleanRoom:
+    """Test POST /api/rooms/<filename>/load_and_clean."""
+
+    def test_load_and_clean_success(self, flask_client):
+        client, mock_node = flask_client
+        mock_node.load_and_clean_room.return_value = (True, "Loaded room 'test' and started cleaning.")
+        resp = client.post('/api/rooms/test_room/load_and_clean')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['ok'] is True
+        mock_node.load_and_clean_room.assert_called_once_with('test_room')
+
+    def test_load_and_clean_failure(self, flask_client):
+        client, mock_node = flask_client
+        mock_node.load_and_clean_room.return_value = (False, "Room not found")
+        resp = client.post('/api/rooms/test_room/load_and_clean')
+        assert resp.status_code == 400
+        data = resp.get_json()
+        assert 'error' in data
+
+    def test_load_and_clean_no_ros(self, flask_client):
+        client, mock_node = flask_client
+        import clean_bot_mission.webapp.app as app_mod
+        app_mod.ros_node = None
+        resp = client.post('/api/rooms/test_room/load_and_clean')
+        assert resp.status_code == 503
+        app_mod.ros_node = mock_node
