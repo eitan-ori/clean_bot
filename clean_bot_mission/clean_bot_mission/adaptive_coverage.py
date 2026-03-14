@@ -1544,6 +1544,7 @@ def main(args=None):
         rclpy.spin(node)
     except KeyboardInterrupt:
         node.get_logger().info('Coverage interrupted by user')
+        node.stop_robot()
     finally:
         node.destroy_node()
         if rclpy.ok():

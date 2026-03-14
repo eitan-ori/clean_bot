@@ -688,3 +688,13 @@
 - **File:** `clean_bot_mission/clean_bot_mission/full_mission.py`
 - **Problem:** The `main()` function's `except KeyboardInterrupt` block only logged the interruption but did not stop the robot or deactivate the cleaning hardware. If Ctrl+C was pressed during active cleaning, the relay powering the cleaning mechanism would stay energized.
 - **Fix:** Added `stop_robot()` and `_deactivate_cleaning_hardware()` calls in the KeyboardInterrupt handler before cleanup.
+
+### Bug 139: Coverage planner doesn't stop robot on Ctrl+C
+- **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py`
+- **Problem:** The `main()` function's `except KeyboardInterrupt` block only logged the interruption but did not call `stop_robot()`. If Ctrl+C was pressed during active coverage, the last cmd_vel (possibly a forward drive command) would persist, leaving the robot moving.
+- **Fix:** Added `stop_robot()` call in the KeyboardInterrupt handler.
+
+### Bug 140: Frontier explorer doesn't cancel navigation on Ctrl+C
+- **File:** `clean_bot_mission/clean_bot_mission/frontier_explorer.py`
+- **Problem:** The `main()` function's `except KeyboardInterrupt` block only logged the interruption but did not cancel the current Nav2 goal. If interrupted during navigation, the Nav2 action server would continue executing the goal autonomously.
+- **Fix:** Added `cancel_current_goal()` call in the KeyboardInterrupt handler.

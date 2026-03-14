@@ -731,6 +731,7 @@ def main(args=None):
         rclpy.spin(node)
     except KeyboardInterrupt:
         node.get_logger().info('Exploration interrupted by user')
+        node.cancel_current_goal()
     finally:
         node.destroy_node()
         if rclpy.ok():
