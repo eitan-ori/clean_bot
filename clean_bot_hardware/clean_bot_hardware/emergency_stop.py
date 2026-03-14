@@ -29,6 +29,7 @@
 ###############################################################################
 """
 
+import math
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
@@ -80,8 +81,8 @@ class EmergencyStopController(Node):
         """Update current obstacle distance."""
         # Ignore 0 readings - HC-SR04 returns 0 when no echo received
         # Also ignore readings below min_range (typically 2cm for HC-SR04)
-        if msg.range <= 0.02:  # 2cm minimum valid reading
-            # Invalid reading - don't update distance (keep previous valid value)
+        # Reject NaN/Infinity from sensor noise
+        if not math.isfinite(msg.range) or msg.range <= 0.02:
             return
         
         self.current_distance = msg.range

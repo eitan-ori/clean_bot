@@ -633,3 +633,8 @@
 - **File:** `clean_bot_hardware/clean_bot_hardware/arduino_driver.py`
 - **Problem:** `cmd_vel_callback()` (from `/cmd_vel` subscription), `send_command()` (from mission commands), and `update_loop()` (timer-based watchdog) all wrote to the serial port without synchronization. Concurrent writes from different ROS callback threads could interleave bytes, sending corrupted commands to the Arduino.
 - **Fix:** Added `threading.Lock` (`_serial_lock`) and wrapped all `self.serial.write()` calls with `with self._serial_lock:`.
+
+### Bug 128: Emergency stop accepts NaN/Infinity range readings
+- **File:** `clean_bot_hardware/clean_bot_hardware/emergency_stop.py`
+- **Problem:** The `range_callback()` only checked `msg.range <= 0.02` to filter invalid readings. NaN and Infinity values from sensor noise passed this check (NaN comparisons return False), corrupting `self.current_distance` and causing undefined behavior in the velocity scaling math.
+- **Fix:** Added `math.isfinite(msg.range)` check before the minimum range threshold.

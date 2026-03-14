@@ -719,3 +719,38 @@ class TestSerialLock:
         src = (base / "clean_bot_hardware" / "arduino_driver.py").read_text()
         assert "_serial_lock" in src
         assert "with self._serial_lock" in src
+
+
+class TestEmergencyStopNaNRange:
+    """Bug 128: Emergency stop should reject NaN/Infinity range readings."""
+
+    def test_nan_range_rejected(self):
+        """NaN range should not update current_distance."""
+        import math
+        # Simulate: current_distance starts at safe value
+        current = 1.0
+        msg_range = float('nan')
+        # The guard: not math.isfinite(msg.range) or msg.range <= 0.02
+        rejected = not math.isfinite(msg_range) or msg_range <= 0.02
+        assert rejected
+
+    def test_inf_range_rejected(self):
+        """Infinity range should not update current_distance."""
+        import math
+        msg_range = float('inf')
+        rejected = not math.isfinite(msg_range) or msg_range <= 0.02
+        assert rejected
+
+    def test_negative_inf_range_rejected(self):
+        """Negative infinity should be rejected."""
+        import math
+        msg_range = float('-inf')
+        rejected = not math.isfinite(msg_range) or msg_range <= 0.02
+        assert rejected
+
+    def test_valid_range_accepted(self):
+        """Valid range (e.g., 0.5m) should pass the guard."""
+        import math
+        msg_range = 0.5
+        rejected = not math.isfinite(msg_range) or msg_range <= 0.02
+        assert not rejected

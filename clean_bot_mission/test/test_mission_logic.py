@@ -3089,3 +3089,113 @@ class TestStartCoverageHardware:
         FullMissionController._deactivate_cleaning_hardware(ctrl)
         ctrl.stop_clean_trigger_pub.publish.assert_called_once()
         ctrl.arduino_clean_pub.publish.assert_called_once()
+
+
+# ════════════════════════════════════════════════════════════════════
+# Test: Nearest Neighbor Ordering
+# ════════════════════════════════════════════════════════════════════
+
+class TestNearestNeighborOrder:
+    """Test _nearest_neighbor_order waypoint reordering."""
+
+    def _make_planner(self, robot_x=0.0, robot_y=0.0):
+        planner = MagicMock()
+        planner._get_robot_pose_map = MagicMock(return_value=(robot_x, robot_y, 0.0))
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as CoveragePlanner
+        planner._nearest_neighbor_order = CoveragePlanner._nearest_neighbor_order.__get__(planner)
+        return planner
+
+    def test_empty_list(self):
+        p = self._make_planner()
+        assert p._nearest_neighbor_order([]) == []
+
+    def test_single_waypoint(self):
+        p = self._make_planner()
+        wp = [(1.0, 2.0, 0.0)]
+        assert p._nearest_neighbor_order(wp) == wp
+
+    def test_two_waypoints(self):
+        p = self._make_planner()
+        wp = [(1.0, 0.0, 0.0), (0.5, 0.0, 0.0)]
+        result = p._nearest_neighbor_order(wp)
+        assert len(result) == 2
+
+    def test_nearest_first(self):
+        """Robot at (0,0) should pick closest waypoint first."""
+        p = self._make_planner(0.0, 0.0)
+        wp = [(10.0, 10.0, 0.0), (1.0, 1.0, 0.0), (5.0, 5.0, 0.0)]
+        result = p._nearest_neighbor_order(wp)
+        assert result[0] == (1.0, 1.0, 0.0)  # closest
+        assert result[1] == (5.0, 5.0, 0.0)  # next closest from (1,1)
+        assert result[2] == (10.0, 10.0, 0.0)
+
+    def test_preserves_all_waypoints(self):
+        p = self._make_planner()
+        wp = [(i, i, 0.0) for i in range(10)]
+        result = p._nearest_neighbor_order(wp)
+        assert len(result) == 10
+        assert set((w[0], w[1]) for w in result) == set((w[0], w[1]) for w in wp)
+
+
+# ════════════════════════════════════════════════════════════════════
+# Test: Edge cases in drive_to_waypoint
+# ════════════════════════════════════════════════════════════════════
+
+class TestDriveToWaypointEdgeCases:
+    """Edge cases in direct drive waypoint following."""
+
+    def _make_planner(self):
+        planner = MagicMock()
+        planner.robot_x = 0.0
+        planner.robot_y = 0.0
+        planner.robot_yaw = 0.0
+        planner._map_odom_offset = None
+        planner.waypoints = [(1.0, 0.0, 0.0)]
+        planner.current_waypoint_idx = 0
+        planner.missed_waypoints = []
+        planner._waypoint_start_time = 0.0
+        planner.timeout = 90.0
+        planner.angular_speed = 0.25
+        planner.linear_speed = 0.15
+        planner.cmd_pub = MagicMock()
+        planner.cmd_vel_pub = MagicMock()
+        planner.successful_waypoints = 0
+        planner._initial_waypoint_count = 1
+        planner.coverage_state = MagicMock()
+        planner.get_logger = MagicMock(return_value=MagicMock())
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as CoveragePlanner
+        planner.normalize_angle = CoveragePlanner.normalize_angle.__get__(planner)
+        planner.drive_to_waypoint = CoveragePlanner.drive_to_waypoint.__get__(planner)
+        planner._get_robot_pose_map = MagicMock(return_value=(planner.robot_x, planner.robot_y, planner.robot_yaw))
+        planner.goal_tolerance = 0.10
+        planner.position_tolerance = 0.08
+        planner.ANGLE_THRESHOLD = 0.785
+        planner._last_debug_time = 0.0
+        planner.dead_zone = 0.02
+        planner.angle_tolerance = 0.1
+        planner.send_next_goal = MagicMock()
+        return planner
+
+    def test_already_at_waypoint(self):
+        """Robot already at target should advance to next."""
+        p = self._make_planner()
+        p.robot_x = 1.0
+        p.robot_y = 0.0
+        p._get_robot_pose_map.return_value = (1.0, 0.0, 0.0)
+        p.drive_to_waypoint(1.0, 0.0, 100.0)
+        assert p.current_waypoint_idx == 1
+
+    def test_large_angle_error_turns_in_place(self):
+        """Robot facing opposite direction should turn in place (angular only)."""
+        import math
+        p = self._make_planner()
+        p.robot_x = 0.0
+        p.robot_y = 0.0
+        p.robot_yaw = math.pi  # facing away
+        p._get_robot_pose_map.return_value = (0.0, 0.0, math.pi)
+        p.drive_to_waypoint(1.0, 0.0, 100.0)
+        # Should publish a Twist with angular.z != 0 and linear.x == 0
+        call_args = p.cmd_vel_pub.publish.call_args
+        twist = call_args[0][0]
+        assert twist.linear.x == 0.0
+        assert twist.angular.z != 0.0
