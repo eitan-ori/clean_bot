@@ -648,3 +648,18 @@
 - **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py`
 - **Problem:** `optimize_path_order()` called `math.sqrt()` for every distance comparison (2× per pair per iteration), then recalculated the same distances for the nearest pair after selection. Since only ordering matters, squared distances suffice for comparisons.
 - **Fix:** Replaced `math.sqrt()` with squared distance comparisons, eliminated duplicate distance calculation by tracking the reverse flag during search, and combined the search and reversal logic into a single pass.
+
+### Bug 131: send_velocity accepts NaN/Infinity values
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** `send_velocity()` converted input directly to float and published as a Twist message without checking for NaN or Infinity. Manual drive commands from the web UI could send garbage values to the robot if the joystick input was corrupted.
+- **Fix:** Added `math.isfinite()` check and `try/except (TypeError, ValueError)` guard.
+
+### Bug 132: Low obstacle detector accepts NaN ultrasonic readings
+- **File:** `clean_bot_hardware/clean_bot_hardware/low_obstacle_detector.py`
+- **Problem:** `range_callback()` didn't check for NaN/Infinity before using the distance value in math operations. NaN distances would propagate into point cloud data and obstacle markers without any warning.
+- **Fix:** Added `math.isfinite(distance)` check at the start of the callback.
+
+### Bug 133: Marker ID counter grows unbounded
+- **File:** `clean_bot_hardware/clean_bot_hardware/low_obstacle_detector.py`
+- **Problem:** `marker_id_counter` incremented indefinitely with no wraparound. After very long operation (~2 billion markers), the integer would exceed RViz's 32-bit marker ID range.
+- **Fix:** Added modulo 100000 to marker ID assignment to ensure IDs recycle within a safe range.

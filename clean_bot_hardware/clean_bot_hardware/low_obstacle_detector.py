@@ -97,7 +97,9 @@ class LowObstacleDetector(Node):
         """Process ultrasonic range reading."""
         distance = msg.range
         
-        # Validate reading
+        # Validate reading (reject NaN/Infinity)
+        if not math.isfinite(distance):
+            return
         if distance < self.min_dist or distance > self.max_dist:
             return
         
@@ -199,7 +201,7 @@ class LowObstacleDetector(Node):
             marker.header.frame_id = 'map'
             marker.header.stamp = self.get_clock().now().to_msg()
             marker.ns = 'low_obstacles'
-            marker.id = self.marker_id_counter
+            marker.id = self.marker_id_counter % 100000
             self.marker_id_counter += 1
             
             marker.type = Marker.CYLINDER

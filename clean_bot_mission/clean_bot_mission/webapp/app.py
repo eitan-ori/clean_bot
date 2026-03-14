@@ -501,9 +501,16 @@ class WebBridgeNode(Node):
             self.send_velocity(0.0, 0.0)
 
     def send_velocity(self, linear, angular):
+        try:
+            lin_f = float(linear)
+            ang_f = float(angular)
+        except (TypeError, ValueError):
+            return
+        if not (math.isfinite(lin_f) and math.isfinite(ang_f)):
+            return
         t = Twist()
-        t.linear.x = float(linear)
-        t.angular.z = float(angular)
+        t.linear.x = lin_f
+        t.angular.z = ang_f
         self.vel_pub.publish(t)
 
     # ── Room save / load ──────────────────────────────────────────
