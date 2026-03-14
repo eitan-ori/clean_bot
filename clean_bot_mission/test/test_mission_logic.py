@@ -2481,6 +2481,7 @@ class TestPngOptimizeRemoved:
         node._no_go_zones = []
         node._heatmap_width = 0
         node._heatmap_height = 0
+        node._map_image_cache = None
         result = WebBridgeNode.get_map_data(node)
         assert result is not None
         # Verify base64 image is valid
@@ -2514,6 +2515,7 @@ class TestDeterministicObstacleDownsampling:
         node._no_go_zones = []
         node._heatmap_width = 0
         node._heatmap_height = 0
+        node._map_image_cache = None
         result1 = WebBridgeNode.get_map_data(node)
         result2 = WebBridgeNode.get_map_data(node)
         # With deterministic stride, obstacle lists should be identical

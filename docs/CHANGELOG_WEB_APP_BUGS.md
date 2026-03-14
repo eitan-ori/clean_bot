@@ -698,3 +698,13 @@
 - **File:** `clean_bot_mission/clean_bot_mission/frontier_explorer.py`
 - **Problem:** The `main()` function's `except KeyboardInterrupt` block only logged the interruption but did not cancel the current Nav2 goal. If interrupted during navigation, the Nav2 action server would continue executing the goal autonomously.
 - **Fix:** Added `cancel_current_goal()` call in the KeyboardInterrupt handler.
+
+### Bug 141: Scan callback creates numpy array on every frame (~40Hz)
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** `_on_scan()` callback created a numpy array and computed `np.count_nonzero(np.isfinite(arr) & (arr > 0))` on every LiDAR scan (~40 Hz). This computation was only needed for the diagnostics display updated every 0.5s.
+- **Fix:** Moved the valid scan count computation to `_calc_scan_hz()` which runs every 1.0s, reducing numpy array creations from ~40/s to 1/s.
+
+### Bug 142: Map PNG image regenerated on every request even when unchanged
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** `get_map_data()` regenerated the full PNG image (PIL fromarray → PNG encode → base64) on every call, even when the map data hadn't changed. This was the most expensive operation in the function.
+- **Fix:** Added `_map_image_cache` keyed by `map_update_counter`. The PNG is only regenerated when the map actually updates. Robot position and other dynamic data are still computed fresh each call.

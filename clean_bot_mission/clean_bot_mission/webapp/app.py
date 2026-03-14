@@ -118,6 +118,8 @@ class WebBridgeNode(Node):
         self.coverage_state = "UNKNOWN"
         self.map_msg = None
         self.map_update_counter = 0
+        self._map_image_cache = None  # (counter, b64_str)
+        self._heatmap_image_cache = None  # (counter, b64_str)
         self.robot_x = 0.0
         self.robot_y = 0.0
         self.robot_yaw = 0.0
@@ -278,11 +280,6 @@ class WebBridgeNode(Node):
         self.scan_angle_increment = msg.angle_increment
         # Round 40: Track scan frequency
         self._scan_callback_count += 1
-        if msg.ranges:
-            arr = np.array(msg.ranges, dtype=np.float32)
-            self._scan_valid_count = int(np.count_nonzero(np.isfinite(arr) & (arr > 0)))
-        else:
-            self._scan_valid_count = 0
 
     def _on_map(self, msg):
         w, h = msg.info.width, msg.info.height
@@ -411,19 +408,27 @@ class WebBridgeNode(Node):
         rpx = (self.robot_x - ox) / res if res > 0 else 0
         rpy = h - 1 - (self.robot_y - oy) / res if res > 0 else 0
 
-        try:
-            img = Image.fromarray(rgba, "RGBA")
-            # Scale up small maps for clarity
+        # Cache map image keyed by update counter (avoids regenerating PNG every call)
+        counter = self.map_update_counter
+        if self._map_image_cache and self._map_image_cache[0] == counter:
+            b64 = self._map_image_cache[1]
             min_dim = 500
-            if w < min_dim or h < min_dim:
-                scale = max(min_dim / w, min_dim / h, 1.0)
-                img = img.resize((int(w * scale), int(h * scale)), Image.NEAREST)
-            buf = io.BytesIO()
-            img.save(buf, format="PNG")
-            b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-        except (MemoryError, OSError, ValueError) as e:
-            self.get_logger().error(f"Map image generation failed: {e}")
-            return None
+            scale = max(min_dim / w, min_dim / h, 1.0) if (w < min_dim or h < min_dim) else 1.0
+        else:
+            try:
+                img = Image.fromarray(rgba, "RGBA")
+                min_dim = 500
+                scale = 1.0
+                if w < min_dim or h < min_dim:
+                    scale = max(min_dim / w, min_dim / h, 1.0)
+                    img = img.resize((int(w * scale), int(h * scale)), Image.NEAREST)
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+                self._map_image_cache = (counter, b64)
+            except (MemoryError, OSError, ValueError) as e:
+                self.get_logger().error(f"Map image generation failed: {e}")
+                return None
 
         # Round 32: Heatmap data (vectorized with numpy)
         heatmap_b64 = None
@@ -708,6 +713,13 @@ class WebBridgeNode(Node):
             self.scan_hz = self._scan_callback_count / dt
         self._scan_callback_count = 0
         self._scan_hz_last_time = now
+        # Update valid scan point count (moved from _on_scan for performance)
+        ranges = self.scan_ranges
+        if ranges:
+            arr = np.array(ranges, dtype=np.float32)
+            self._scan_valid_count = int(np.count_nonzero(np.isfinite(arr) & (arr > 0)))
+        else:
+            self._scan_valid_count = 0
 
     # ── Round 31: Get statistics ─────────────────────────────────
     def get_stats(self):
