@@ -1307,3 +1307,72 @@ class TestScheduleValidation:
         client, mock_node = flask_client
         resp = client.post('/api/schedules', json={"time": "08:00"})
         assert resp.status_code == 400
+
+
+class TestRoomRenameRoute:
+    """Test PUT /api/rooms/<filename>/rename."""
+
+    def test_rename_success(self, flask_client):
+        client, mock_node = flask_client
+        # rename_room is a static method, so we need to patch it
+        with patch.object(webapp_module.WebBridgeNode, 'rename_room', return_value=(True, "new_room.json")):
+            resp = client.put('/api/rooms/old_room/rename',
+                              json={"name": "new_room"})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['ok'] is True
+
+    def test_rename_missing_name(self, flask_client):
+        client, mock_node = flask_client
+        resp = client.put('/api/rooms/old_room/rename', json={})
+        assert resp.status_code == 400
+
+    def test_rename_failure(self, flask_client):
+        client, mock_node = flask_client
+        with patch.object(webapp_module.WebBridgeNode, 'rename_room', return_value=(False, "Already exists")):
+            resp = client.put('/api/rooms/old_room/rename',
+                              json={"name": "new_room"})
+        assert resp.status_code == 404
+
+
+class TestRoomDeleteRoute:
+    """Test DELETE /api/rooms/<filename>."""
+
+    def test_delete_success(self, flask_client):
+        client, mock_node = flask_client
+        with patch.object(webapp_module.WebBridgeNode, 'delete_room', return_value=True):
+            resp = client.delete('/api/rooms/test_room')
+        assert resp.status_code == 200
+        assert resp.get_json()['ok'] is True
+
+    def test_delete_not_found(self, flask_client):
+        client, mock_node = flask_client
+        with patch.object(webapp_module.WebBridgeNode, 'delete_room', return_value=False):
+            resp = client.delete('/api/rooms/nonexistent')
+        assert resp.status_code == 404
+
+
+class TestScheduleDeleteRoute:
+    """Test DELETE /api/schedules/<schedule_id>."""
+
+    def test_delete_schedule_success(self, flask_client):
+        client, mock_node = flask_client
+        import threading
+        mock_node._schedule_lock = threading.Lock()
+        mock_node._schedules = [{"id": "abc123", "time": "08:00", "days": ["mon"]}]
+        mock_node._save_schedules = lambda: None
+        mock_node._schedule_triggered_keys = {"abc123": "some_key"}
+        resp = client.delete('/api/schedules/abc123')
+        assert resp.status_code == 200
+        assert len(mock_node._schedules) == 0
+
+    def test_delete_nonexistent_schedule_still_200(self, flask_client):
+        """Schedule delete always returns 200 even if ID not found."""
+        client, mock_node = flask_client
+        import threading
+        mock_node._schedule_lock = threading.Lock()
+        mock_node._schedules = []
+        mock_node._save_schedules = lambda: None
+        mock_node._schedule_triggered_keys = {}
+        resp = client.delete('/api/schedules/nonexistent')
+        assert resp.status_code == 200
