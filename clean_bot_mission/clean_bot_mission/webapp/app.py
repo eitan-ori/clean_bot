@@ -286,7 +286,7 @@ class WebBridgeNode(Node):
 
     def _on_map(self, msg):
         w, h = msg.info.width, msg.info.height
-        if w <= 0 or h <= 0 or len(msg.data) != w * h:
+        if w <= 0 or h <= 0 or len(msg.data) != w * h or msg.info.resolution <= 0:
             return
         self.map_msg = msg
         self.map_update_counter += 1
@@ -364,7 +364,7 @@ class WebBridgeNode(Node):
             return None
         m = self.map_msg
         w, h = m.info.width, m.info.height
-        if w <= 0 or h <= 0 or len(m.data) != w * h:
+        if w <= 0 or h <= 0 or len(m.data) != w * h or m.info.resolution <= 0:
             return None
         res = m.info.resolution
         ox = m.info.origin.position.x
@@ -569,7 +569,7 @@ class WebBridgeNode(Node):
             if field not in d:
                 return False, f"Room file missing '{field}'"
         w, h = d["width"], d["height"]
-        if w <= 0 or h <= 0 or len(d["data"]) != w * h:
+        if w <= 0 or h <= 0 or len(d["data"]) != w * h or d["resolution"] <= 0:
             return False, "Invalid room data dimensions"
         # Build an OccupancyGrid from the saved walls-only data
         msg = OccupancyGrid()
@@ -947,7 +947,7 @@ class WebBridgeNode(Node):
             if field not in d:
                 return None
         w, h = d["width"], d["height"]
-        if w <= 0 or h <= 0 or len(d["data"]) != w * h:
+        if w <= 0 or h <= 0 or len(d["data"]) != w * h or d["resolution"] <= 0:
             return None
         res = d["resolution"]
         data = np.array(d["data"], dtype=np.int8).reshape((h, w))

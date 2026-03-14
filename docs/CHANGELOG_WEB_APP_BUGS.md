@@ -548,3 +548,13 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
 - **Problem:** The HTTP velocity route (`/api/velocity`) didn't validate `linear` and `angular` as numbers (unlike the WebSocket handler fixed in Bug 105). Non-numeric values caused a 500 error.
 - **Fix:** Added explicit `float()` conversion with `try/except` returning 400 with "linear and angular must be numbers" message.
+
+### Bug 111: Map callbacks accept zero resolution (division by zero)
+- **Files:** `adaptive_coverage.py`, `frontier_explorer.py`, `webapp/app.py`
+- **Problem:** `map_callback()` and `_on_map()` validated width/height > 0 and data length, but not `resolution > 0`. A malformed ROS OccupancyGrid message with `resolution = 0` would cause `ZeroDivisionError` in all downstream code that divides by resolution (path generation, localization, obstacle inflation, etc.).
+- **Fix:** Added `msg.info.resolution <= 0` check to the guard clause in all three `map_callback`/`_on_map` implementations. Also added the same check to `get_map_data()`.
+
+### Bug 112: `load_and_clean_room` and `load_room_preview` accept zero resolution
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** `load_and_clean_room()` and `load_room_preview()` validated width/height but not resolution. A corrupted saved room JSON with `"resolution": 0` would cause division by zero in localization and rendering.
+- **Fix:** Added `d["resolution"] <= 0` to the validation guard in both functions.

@@ -1852,6 +1852,7 @@ class TestHeatmapDecay:
         msg = MagicMock()
         msg.info.width = 10
         msg.info.height = 10
+        msg.info.resolution = 0.05
         msg.data = [100] * 100
 
         node._on_map(msg)
@@ -2757,3 +2758,61 @@ class TestStopFromPausedState:
         FullMissionController.handle_stop_clean(ctrl)
         # Should NOT change state (still paused from exploring, not coverage)
         assert ctrl.state == MissionState.PAUSED
+
+
+class TestBug111ZeroResolutionGuard:
+    """Bug 111: map_callback should reject maps with resolution <= 0."""
+
+    def test_coverage_planner_rejects_zero_resolution(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner
+        planner = MagicMock(spec=AdaptiveCoveragePlanner)
+        planner.map_array = None
+        planner.map_info = None
+        msg = MagicMock()
+        msg.info.width = 100
+        msg.info.height = 100
+        msg.info.resolution = 0.0
+        msg.data = [0] * 10000
+        AdaptiveCoveragePlanner.map_callback(planner, msg)
+        assert planner.map_array is None  # Should not have been set
+
+    def test_coverage_planner_accepts_positive_resolution(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner
+        planner = MagicMock(spec=AdaptiveCoveragePlanner)
+        planner.map_array = None
+        planner.map_info = None
+        msg = MagicMock()
+        msg.info.width = 10
+        msg.info.height = 10
+        msg.info.resolution = 0.05
+        msg.data = [0] * 100
+        AdaptiveCoveragePlanner.map_callback(planner, msg)
+        assert planner.map_info == msg.info
+
+    def test_frontier_explorer_rejects_zero_resolution(self):
+        from clean_bot_mission.frontier_explorer import FrontierExplorer
+        explorer = MagicMock(spec=FrontierExplorer)
+        explorer.map_array = None
+        explorer.map_info = None
+        explorer.auto_start = False
+        msg = MagicMock()
+        msg.info.width = 100
+        msg.info.height = 100
+        msg.info.resolution = 0.0
+        msg.data = [0] * 10000
+        FrontierExplorer.map_callback(explorer, msg)
+        assert explorer.map_array is None
+
+    def test_frontier_explorer_rejects_negative_resolution(self):
+        from clean_bot_mission.frontier_explorer import FrontierExplorer
+        explorer = MagicMock(spec=FrontierExplorer)
+        explorer.map_array = None
+        explorer.map_info = None
+        explorer.auto_start = False
+        msg = MagicMock()
+        msg.info.width = 50
+        msg.info.height = 50
+        msg.info.resolution = -0.05
+        msg.data = [0] * 2500
+        FrontierExplorer.map_callback(explorer, msg)
+        assert explorer.map_array is None
