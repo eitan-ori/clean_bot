@@ -1293,6 +1293,8 @@ def api_add_no_go_zone():
             return jsonify({"error": f"Missing '{key}'"}), 400
         try:
             data[key] = float(data[key])
+            if not math.isfinite(data[key]):
+                return jsonify({"error": f"'{key}' must be a finite number"}), 400
         except (TypeError, ValueError):
             return jsonify({"error": f"Invalid '{key}'"}), 400
     zone = ros_node.add_no_go_zone({

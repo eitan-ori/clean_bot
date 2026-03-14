@@ -1078,8 +1078,26 @@ class TestNoGoZonesAPI:
         resp = client.get('/api/no_go_zones')
         assert resp.status_code == 503
 
+    def test_add_zone_nan_coordinate(self, flask_client):
+        """Bug 144: NaN coordinate should be rejected."""
+        client, _ = flask_client
+        resp = client.post('/api/no_go_zones',
+                           json={"x1": float('nan'), "y1": 2.0, "x2": 3.0, "y2": 4.0})
+        assert resp.status_code == 400
 
-class TestNoGoZonesHTML:
+    def test_add_zone_inf_coordinate(self, flask_client):
+        """Bug 144: Infinity coordinate should be rejected."""
+        client, _ = flask_client
+        resp = client.post('/api/no_go_zones',
+                           json={"x1": 1.0, "y1": float('inf'), "x2": 3.0, "y2": 4.0})
+        assert resp.status_code == 400
+
+    def test_add_zone_neg_inf_coordinate(self, flask_client):
+        """Bug 144: Negative infinity coordinate should be rejected."""
+        client, _ = flask_client
+        resp = client.post('/api/no_go_zones',
+                           json={"x1": 1.0, "y1": 2.0, "x2": float('-inf'), "y2": 4.0})
+        assert resp.status_code == 400
     def test_nogo_button_in_page(self, flask_client):
         client, _ = flask_client
         resp = client.get('/')

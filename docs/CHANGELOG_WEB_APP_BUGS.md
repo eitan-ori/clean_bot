@@ -713,3 +713,8 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
 - **Problem:** The `/api/navigate` route validated that x,y were numbers but didn't check for NaN or Infinity. Sending `{"x": NaN}` would pass validation and send an invalid goal to Nav2.
 - **Fix:** Added `math.isfinite()` check after float conversion.
+
+### Bug 144: No-go zone API accepts NaN/Infinity coordinates
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** The `POST /api/no_go_zones` route converted coordinate values to float but didn't check for NaN or Infinity. Sending `{"x1": NaN}` would pass validation and persist a malformed zone to disk.
+- **Fix:** Added `math.isfinite()` check after each float conversion.

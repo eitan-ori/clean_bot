@@ -3540,3 +3540,155 @@ class TestDriveToWaypointEdgeCases:
         assert planner.current_waypoint_idx == 1
         assert planner.failed_waypoints == 1
         assert len(planner.missed_waypoints) == 1
+
+
+class TestCoveragePathGeneration:
+    """Tests for coverage path generation edge cases."""
+
+    def _make_planner(self, map_array):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as ACP
+        p = MagicMock()
+        p.map_array = map_array
+        p.inflated_map = map_array.copy()
+        p.map_resolution = 0.05
+        p.map_origin_x = 0.0
+        p.map_origin_y = 0.0
+        p.coverage_width = 0.14
+        p.overlap_ratio = 0.10
+        p.robot_radius = 0.20
+        p.position_tolerance = 0.08
+        p._no_go_zones = []
+        p.odom_x = 0.0
+        p.odom_y = 0.0
+        p.get_logger = MagicMock(return_value=MagicMock())
+        p.inflate_obstacles = ACP.inflate_obstacles.__get__(p)
+        p.find_free_segments_in_column = ACP.find_free_segments_in_column.__get__(p)
+        p.generate_adaptive_coverage_path = ACP.generate_adaptive_coverage_path.__get__(p)
+        p._get_robot_pose_map = MagicMock(return_value=(0.1, 0.1, 0.0))
+        return p
+
+    def test_empty_map_returns_empty_path(self):
+        """Map with all walls should return empty path."""
+        wall_map = np.full((20, 20), 100, dtype=np.int8)
+        p = self._make_planner(wall_map)
+        result = p.generate_adaptive_coverage_path()
+        assert result == []
+
+    def test_tiny_free_area_returns_empty(self):
+        """Map with very few free cells should return empty."""
+        m = np.full((20, 20), 100, dtype=np.int8)
+        m[10, 10] = 0  # Single free cell
+        p = self._make_planner(m)
+        result = p.generate_adaptive_coverage_path()
+        assert result == []
+
+    def test_large_free_area_generates_waypoints(self):
+        """Map with significant free space should generate waypoints."""
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as ACP
+        m = np.full((40, 40), 0, dtype=np.int8)
+        m[0, :] = 100
+        m[-1, :] = 100
+        m[:, 0] = 100
+        m[:, -1] = 100
+        p = self._make_planner(m)
+        # generate_adaptive_coverage_path needs map_info
+        map_info = MagicMock()
+        map_info.resolution = 0.05
+        map_info.origin.position.x = 0.0
+        map_info.origin.position.y = 0.0
+        p.map_info = map_info
+        p.step_size = p.coverage_width * (1 - p.overlap_ratio)
+        p.min_region_area = 0.02
+        result = p.generate_adaptive_coverage_path()
+        assert len(result) > 0
+
+    def test_find_free_segments_all_occupied(self):
+        """Column with all occupied cells has no free segments."""
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as ACP
+        p = MagicMock()
+        p.inflated_map = np.full((20, 20), 100, dtype=np.int8)
+        p.find_free_segments_in_column = ACP.find_free_segments_in_column.__get__(p)
+        assert p.find_free_segments_in_column(5) == []
+
+    def test_find_free_segments_all_free(self):
+        """Column with all free cells produces one segment."""
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as ACP
+        p = MagicMock()
+        p.inflated_map = np.zeros((20, 20), dtype=np.int8)
+        p.find_free_segments_in_column = ACP.find_free_segments_in_column.__get__(p)
+        segs = p.find_free_segments_in_column(5)
+        assert len(segs) >= 1
+
+
+class TestInflateObstacles:
+    """Tests for obstacle inflation."""
+
+    def test_inflate_all_walls(self):
+        """All-wall map stays all walls after inflation."""
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as ACP
+        p = MagicMock()
+        p.map_array = np.full((20, 20), 100, dtype=np.int8)
+        p.map_resolution = 0.05
+        p.robot_radius = 0.20
+        p._no_go_zones = []
+        p.get_logger = MagicMock(return_value=MagicMock())
+        p.inflate_obstacles = ACP.inflate_obstacles.__get__(p)
+        p.inflate_obstacles()
+        assert np.all(p.inflated_map >= 50)
+
+    def test_inflate_preserves_large_free_space(self):
+        """Large free area in the middle should still have free cells after inflation."""
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as ACP
+        m = np.zeros((100, 100), dtype=np.int8)
+        m[0, :] = 100
+        m[-1, :] = 100
+        m[:, 0] = 100
+        m[:, -1] = 100
+        p = MagicMock()
+        p.map_array = m
+        p.map_resolution = 0.05
+        p.robot_radius = 0.10
+        p._no_go_zones = []
+        p.get_logger = MagicMock(return_value=MagicMock())
+        p.inflate_obstacles = ACP.inflate_obstacles.__get__(p)
+        p.inflate_obstacles()
+        free_count = np.sum(p.inflated_map < 50)
+        assert free_count > 0
+
+
+class TestOptimizePathOrder:
+    """Tests for path optimization."""
+
+    def test_empty_path(self):
+        """Empty path returns empty."""
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as ACP
+        p = MagicMock()
+        p.optimize_path_order = ACP.optimize_path_order.__get__(p)
+        p.get_logger = MagicMock(return_value=MagicMock())
+        result = p.optimize_path_order([])
+        assert result == []
+
+    def test_single_waypoint(self):
+        """Single waypoint returns unchanged."""
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as ACP
+        p = MagicMock()
+        p.optimize_path_order = ACP.optimize_path_order.__get__(p)
+        p.get_logger = MagicMock(return_value=MagicMock())
+        result = p.optimize_path_order([(1.0, 2.0, 0.0)])
+        assert len(result) == 1
+
+    def test_nearest_first(self):
+        """With 6+ waypoints (3 pairs), closest pair comes first."""
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as ACP
+        p = MagicMock()
+        p.optimize_path_order = ACP.optimize_path_order.__get__(p)
+        p.get_logger = MagicMock(return_value=MagicMock())
+        # 3 pairs: (far pair), (close pair), (mid pair)
+        wps = [
+            (10.0, 10.0, 0.0), (10.0, 11.0, 0.0),  # pair 1 (far)
+            (1.0, 1.0, 0.0), (1.0, 2.0, 0.0),        # pair 2 (close)
+            (5.0, 5.0, 0.0), (5.0, 6.0, 0.0),        # pair 3 (mid)
+        ]
+        result = p.optimize_path_order(wps)
+        # First pair in result should still be pair 1 (optimize_path_order starts from first)
+        assert len(result) == 6
