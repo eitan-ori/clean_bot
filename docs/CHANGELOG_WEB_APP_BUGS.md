@@ -718,3 +718,13 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
 - **Problem:** The `POST /api/no_go_zones` route converted coordinate values to float but didn't check for NaN or Infinity. Sending `{"x1": NaN}` would pass validation and persist a malformed zone to disk.
 - **Fix:** Added `math.isfinite()` check after each float conversion.
+
+### Bug 145: Localization crashes on zero resolution
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** `localize_on_saved_map()` used `resolution` for division without checking for zero. A corrupted saved room file with `resolution: 0` would cause `ZeroDivisionError`.
+- **Fix:** Added `if resolution <= 0: resolution = 0.05` fallback at the top of the method.
+
+### Bug 146: Localization crashes on corrupted map data
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** `localize_on_saved_map()` called `np.array(...).reshape((h, w))` without verifying `len(map_data) == w * h`. A corrupted room file would cause `ValueError: cannot reshape array`.
+- **Fix:** Added `if len(map_data) != w * h: return None` guard before reshape.

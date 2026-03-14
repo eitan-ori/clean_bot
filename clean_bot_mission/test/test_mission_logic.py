@@ -3371,6 +3371,44 @@ class TestLocalizationFitnessThreshold:
         assert match_pct >= 15  # Should be accepted
 
 
+class TestLocalizationInputValidation:
+    """Bug 145-146: Localization input validation."""
+
+    @pytest.fixture
+    def web_node(self):
+        from clean_bot_mission.webapp.app import WebBridgeNode
+        node = WebBridgeNode.__new__(WebBridgeNode)
+        node.scan_ranges = [1.0] * 360
+        node.scan_angle_min = 0.0
+        node.scan_angle_max = 2 * math.pi
+        node.scan_angle_increment = 2 * math.pi / 360
+        node.get_logger = MagicMock(return_value=MagicMock())
+        return node
+
+    def test_zero_resolution_uses_default(self, web_node):
+        """Bug 145: Resolution=0 should use fallback, not crash."""
+        data = [0] * 100
+        for i in range(10):
+            data[i] = 100  # Some walls
+            data[90 + i] = 100
+        # Should not raise ZeroDivisionError
+        result = web_node.localize_on_saved_map(data, 10, 10, 0.0, 0.0, 0.0)
+        # May return None (not enough data) but should not crash
+        assert result is None or len(result) == 5
+
+    def test_mismatched_map_data_returns_none(self, web_node):
+        """Bug 146: Map data length != w*h should return None."""
+        data = [0] * 50  # Data is 50 elements but we say 10x10=100
+        result = web_node.localize_on_saved_map(data, 10, 10, 0.05, 0.0, 0.0)
+        assert result is None
+
+    def test_negative_resolution_uses_default(self, web_node):
+        """Negative resolution should use fallback."""
+        data = [0] * 100
+        result = web_node.localize_on_saved_map(data, 10, 10, -0.05, 0.0, 0.0)
+        assert result is None or len(result) == 5
+
+
 class TestMissionSafetyBugs:
     """Bug 137-138: Safety-critical state transitions."""
 

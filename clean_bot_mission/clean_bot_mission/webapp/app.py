@@ -822,6 +822,10 @@ class WebBridgeNode(Node):
         points = self._scan_to_points()
         if points is None:
             return None
+        if resolution <= 0:
+            resolution = 0.05
+        if len(map_data) != w * h:
+            return None
 
         grid = np.array(map_data, dtype=np.int8).reshape((h, w))
         wall_mask = grid >= 50
