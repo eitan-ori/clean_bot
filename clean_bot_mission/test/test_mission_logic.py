@@ -3402,3 +3402,141 @@ class TestMissionSafetyBugs:
         msg.data = True
         controller.exploration_complete_callback(msg)
         controller.stop_robot.assert_not_called()
+
+
+# ── Additional edge case tests ────────────────────────────────────────
+
+class TestNormalizeAngle:
+    """Test normalize_angle utility for edge cases."""
+
+    def test_normalize_pi(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as ACP
+        planner = MagicMock()
+        planner.normalize_angle = ACP.normalize_angle.__get__(planner)
+        assert abs(planner.normalize_angle(math.pi) - math.pi) < 1e-10
+
+    def test_normalize_negative_pi(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as ACP
+        planner = MagicMock()
+        planner.normalize_angle = ACP.normalize_angle.__get__(planner)
+        assert abs(planner.normalize_angle(-math.pi) - (-math.pi)) < 1e-10
+
+    def test_normalize_two_pi(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as ACP
+        planner = MagicMock()
+        planner.normalize_angle = ACP.normalize_angle.__get__(planner)
+        assert abs(planner.normalize_angle(2 * math.pi)) < 1e-10
+
+    def test_normalize_nan_returns_zero(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as ACP
+        planner = MagicMock()
+        planner.normalize_angle = ACP.normalize_angle.__get__(planner)
+        assert planner.normalize_angle(float('nan')) == 0.0
+
+    def test_normalize_inf_returns_zero(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as ACP
+        planner = MagicMock()
+        planner.normalize_angle = ACP.normalize_angle.__get__(planner)
+        assert planner.normalize_angle(float('inf')) == 0.0
+
+
+class TestGetRobotPoseMapFallback:
+    """Test _get_robot_pose_map TF fallback logic."""
+
+    def test_tf_failure_falls_back_to_odom(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as ACP
+        planner = MagicMock()
+        planner.tf_buffer = MagicMock()
+        planner.tf_buffer.lookup_transform.side_effect = Exception("TF not available")
+        planner.global_frame = "map"
+        planner.base_frame = "base_link"
+        planner._tf_pose_warned = False
+        planner.robot_x = 1.5
+        planner.robot_y = 2.5
+        planner.robot_yaw = 0.5
+        planner._map_odom_offset = None
+        planner.get_logger = MagicMock(return_value=MagicMock())
+        planner.normalize_angle = ACP.normalize_angle.__get__(planner)
+        planner._get_robot_pose_map = ACP._get_robot_pose_map.__get__(planner)
+        x, y, yaw = planner._get_robot_pose_map()
+        assert x == 1.5
+        assert y == 2.5
+        assert abs(yaw - 0.5) < 1e-10
+
+    def test_tf_failure_with_offset_applies_correction(self):
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as ACP
+        planner = MagicMock()
+        planner.tf_buffer = MagicMock()
+        planner.tf_buffer.lookup_transform.side_effect = Exception("TF not available")
+        planner.global_frame = "map"
+        planner.base_frame = "base_link"
+        planner._tf_pose_warned = True  # already warned
+        planner.robot_x = 1.0
+        planner.robot_y = 2.0
+        planner.robot_yaw = 0.0
+        planner._map_odom_offset = (0.5, -0.3, 0.1)
+        planner.get_logger = MagicMock(return_value=MagicMock())
+        planner.normalize_angle = ACP.normalize_angle.__get__(planner)
+        planner._get_robot_pose_map = ACP._get_robot_pose_map.__get__(planner)
+        x, y, yaw = planner._get_robot_pose_map()
+        assert abs(x - 1.5) < 1e-10
+        assert abs(y - 1.7) < 1e-10
+        assert abs(yaw - 0.1) < 1e-10
+
+
+class TestDriveToWaypointEdgeCases:
+    """Test drive_to_waypoint with edge case inputs."""
+
+    def test_at_target_advances_waypoint(self):
+        """Robot already at waypoint should advance to next."""
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as ACP
+        planner = MagicMock()
+        planner.position_tolerance = 0.08
+        planner.angle_tolerance = 0.18
+        planner.angular_speed = 1.0
+        planner.linear_speed = 0.15
+        planner.current_waypoint_idx = 0
+        planner.waypoints = [(1.0, 2.0, 0.0), (3.0, 4.0, 0.0)]
+        planner.successful_waypoints = 0
+        planner._waypoint_start_time = 100.0
+        planner._last_debug_time = 0.0
+        planner.timeout = 30.0
+        planner.dead_zone = 0.05
+        planner.get_logger = MagicMock(return_value=MagicMock())
+        planner.get_clock = MagicMock()
+        planner._get_robot_pose_map = MagicMock(return_value=(1.0, 2.0, 0.0))
+        planner.normalize_angle = ACP.normalize_angle.__get__(planner)
+        planner.drive_to_waypoint = ACP.drive_to_waypoint.__get__(planner)
+        planner.drive_to_waypoint(1.0, 2.0, 200.0)
+        planner.stop_robot.assert_called_once()
+        assert planner.current_waypoint_idx == 1
+        assert planner.successful_waypoints == 1
+
+    def test_timeout_skips_waypoint(self):
+        """Stuck waypoint should be skipped after timeout."""
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as ACP
+        planner = MagicMock()
+        planner.position_tolerance = 0.08
+        planner.angle_tolerance = 0.18
+        planner.angular_speed = 1.0
+        planner.linear_speed = 0.15
+        planner.current_waypoint_idx = 0
+        planner.waypoints = [(5.0, 5.0, 0.0), (3.0, 4.0, 0.0)]
+        planner.successful_waypoints = 0
+        planner.failed_waypoints = 0
+        planner.missed_waypoints = []
+        planner._waypoint_start_time = 100.0
+        planner._last_debug_time = 0.0
+        planner.timeout = 30.0
+        planner.dead_zone = 0.05
+        planner.get_logger = MagicMock(return_value=MagicMock())
+        planner.get_clock = MagicMock()
+        planner._get_robot_pose_map = MagicMock(return_value=(0.0, 0.0, 0.0))
+        planner.normalize_angle = ACP.normalize_angle.__get__(planner)
+        planner.drive_to_waypoint = ACP.drive_to_waypoint.__get__(planner)
+        # now=200 means 100s elapsed, timeout=30 → should skip
+        planner.drive_to_waypoint(5.0, 5.0, 200.0)
+        planner.stop_robot.assert_called_once()
+        assert planner.current_waypoint_idx == 1
+        assert planner.failed_waypoints == 1
+        assert len(planner.missed_waypoints) == 1
