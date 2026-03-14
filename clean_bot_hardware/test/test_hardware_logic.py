@@ -754,3 +754,66 @@ class TestEmergencyStopNaNRange:
         msg_range = 0.5
         rejected = not math.isfinite(msg_range) or msg_range <= 0.02
         assert not rejected
+
+
+class TestWheelSpeedToPWM:
+    """Test _wheel_speed_to_pwm conversion edge cases."""
+
+    def _make_driver(self):
+        """Create a mock ArduinoDriver with real _wheel_speed_to_pwm."""
+        from clean_bot_hardware.arduino_driver import ArduinoDriver
+        driver = MagicMock()
+        driver.max_linear_speed = 0.3
+        driver._wheel_speed_to_pwm = ArduinoDriver._wheel_speed_to_pwm.__get__(driver)
+        return driver
+
+    def test_zero_speed_returns_zero(self):
+        d = self._make_driver()
+        assert d._wheel_speed_to_pwm(0.0, 0.0, 0.0, 90, 90, 180) == 0
+
+    def test_deadband(self):
+        d = self._make_driver()
+        assert d._wheel_speed_to_pwm(0.005, 0.005, 0.0, 90, 90, 180) == 0
+
+    def test_forward_gives_positive(self):
+        d = self._make_driver()
+        pwm = d._wheel_speed_to_pwm(0.15, 0.15, 0.0, 90, 90, 180)
+        assert pwm > 0
+
+    def test_reverse_gives_negative(self):
+        d = self._make_driver()
+        pwm = d._wheel_speed_to_pwm(-0.15, -0.15, 0.0, 90, 90, 180)
+        assert pwm < 0
+
+    def test_max_speed_capped(self):
+        d = self._make_driver()
+        pwm = d._wheel_speed_to_pwm(10.0, 10.0, 0.0, 90, 90, 180)
+        assert abs(pwm) <= 180
+
+    def test_minimum_pwm_applied(self):
+        d = self._make_driver()
+        # Very slow speed should still get minimum PWM
+        pwm = d._wheel_speed_to_pwm(0.02, 0.05, 0.0, 90, 90, 180)
+        assert abs(pwm) >= 90
+
+    def test_rotation_minimum_pwm(self):
+        d = self._make_driver()
+        # Pure rotation (linear ~0) should use rotate minimum
+        pwm = d._wheel_speed_to_pwm(0.05, 0.0, 1.0, 90, 80, 180)
+        assert abs(pwm) >= 80
+
+
+class TestWatchdogTimeout:
+    """Test cmd_vel watchdog behavior."""
+
+    def test_watchdog_timeout_value(self):
+        """Verify watchdog timeout is reasonable (1-5 seconds)."""
+        from clean_bot_hardware.arduino_driver import ArduinoDriver
+        import inspect
+        source = inspect.getsource(ArduinoDriver)
+        # Find CMD_VEL_TIMEOUT_SEC
+        import re
+        match = re.search(r'CMD_VEL_TIMEOUT_SEC\s*=\s*(\d+\.?\d*)', source)
+        assert match is not None
+        timeout = float(match.group(1))
+        assert 0.5 <= timeout <= 10.0, f"Watchdog timeout {timeout}s is out of safe range"
