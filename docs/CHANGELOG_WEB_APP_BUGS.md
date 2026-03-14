@@ -708,3 +708,8 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
 - **Problem:** `get_map_data()` regenerated the full PNG image (PIL fromarray → PNG encode → base64) on every call, even when the map data hadn't changed. This was the most expensive operation in the function.
 - **Fix:** Added `_map_image_cache` keyed by `map_update_counter`. The PNG is only regenerated when the map actually updates. Robot position and other dynamic data are still computed fresh each call.
+
+### Bug 143: Navigate API accepts NaN/Infinity coordinates
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** The `/api/navigate` route validated that x,y were numbers but didn't check for NaN or Infinity. Sending `{"x": NaN}` would pass validation and send an invalid goal to Nav2.
+- **Fix:** Added `math.isfinite()` check after float conversion.

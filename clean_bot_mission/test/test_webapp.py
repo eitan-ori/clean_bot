@@ -1149,6 +1149,22 @@ class TestBug109NavigateValidation:
         assert resp.status_code == 200
         mock_node.navigate_to_pose.assert_called_once_with(1.5, 2.3)
 
+    def test_navigate_with_nan_coords(self, flask_client):
+        """Bug 143: NaN/Infinity coordinates should be rejected."""
+        client, mock_node = flask_client
+        resp = client.post('/api/navigate',
+                           json={"x": float('nan'), "y": 1.0},
+                           content_type='application/json')
+        assert resp.status_code == 400
+        assert 'finite' in resp.get_json().get('error', '').lower()
+
+    def test_navigate_with_inf_coords(self, flask_client):
+        client, mock_node = flask_client
+        resp = client.post('/api/navigate',
+                           json={"x": 1.0, "y": float('inf')},
+                           content_type='application/json')
+        assert resp.status_code == 400
+
 
 class TestBug110VelocityHTTPValidation:
     """Bug 110: /api/velocity should validate linear and angular as numbers."""

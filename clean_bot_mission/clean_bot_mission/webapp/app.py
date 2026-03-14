@@ -1191,6 +1191,8 @@ def api_navigate():
         y = float(body.get("y", 0.0))
     except (TypeError, ValueError):
         return jsonify({"error": "x and y must be numbers"}), 400
+    if not (math.isfinite(x) and math.isfinite(y)):
+        return jsonify({"error": "x and y must be finite numbers"}), 400
     try:
         ok, info = ros_node.navigate_to_pose(x, y)
     except Exception as e:
