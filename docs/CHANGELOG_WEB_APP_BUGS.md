@@ -578,3 +578,38 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/templates/index.html`
 - **Problem:** `window.cleanRoom()` had no guard against rapid double-clicks. Two fast clicks would fire two concurrent `/api/rooms/<name>/load_and_clean` requests, potentially starting two overlapping missions.
 - **Fix:** Added `_cleanBusy` flag that blocks new requests until the previous one completes (`.finally()` resets it).
+
+### Bug 117: _load_schedules() silently swallows file errors
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** `_load_schedules()` had a bare `except: pass` that silently swallowed JSON decode errors and file read failures. If the schedules file was corrupted, the user would see an empty schedule list with no indication of the problem.
+- **Fix:** Changed to `except Exception as e:` with `logging.warning()` so corrupted schedule files are reported in logs.
+
+### Bug 118: _load_no_go_zones() silently swallows file errors
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** Same pattern as Bug 117 — bare `except: pass` in `_load_no_go_zones()` hid corrupted no-go zone files.
+- **Fix:** Changed to `except Exception as e:` with `logging.warning()`.
+
+### Bug 119: list_rooms() silently skips corrupted room files
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** `list_rooms()` had bare `except: pass` when iterating room JSON files. Corrupted files were silently dropped from the room list with no log message.
+- **Fix:** Changed to `except Exception as e:` with `logging.warning()` including the corrupted filename.
+
+### Bug 120: _update_pose() loses error details
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** The TF lookup exception handler set `self._tf_healthy = False` without logging the error. If TF lookups started failing, the only symptom was an unhealthy indicator — no log message to diagnose why.
+- **Fix:** Added `self.get_logger().warning()` on the first failure (when transitioning from healthy to unhealthy) to log the specific TF error.
+
+### Bug 121: Centroid division by zero in cell decomposition
+- **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py`
+- **Problem:** `sum(xs)/len(xs)` in the cell centroid calculation could divide by zero if a cell had an empty segments list (edge case during map processing).
+- **Fix:** Added `if not xs: data['centroid'] = (0.0, 0.0); continue` guard.
+
+### Bug 122: No-go zone resolution not validated before division
+- **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py`
+- **Problem:** In `inflate_obstacles()`, no-go zone grid coordinate calculations divided by `res` (map resolution) without validating it wasn't zero. While the map_callback has a resolution guard (Bug 111), a stale or corrupt `map_info` could still cause division by zero.
+- **Fix:** Added `if res <= 0: res = 0.05` fallback after reading resolution.
+
+### Bug 123: drawMap() division by zero on zero-dimension maps
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/templates/index.html`
+- **Problem:** `canvas.width / data.width` and `canvas.height / data.height` in `drawMap()`, the click-to-navigate handler, and the no-go zone mouseup handler would produce `Infinity`/`NaN` if map data had zero dimensions. All subsequent canvas operations (robot position, path trail, no-go zone rendering) would silently fail.
+- **Fix:** Added `if (!data.width || !data.height) return;` guard in all three locations.

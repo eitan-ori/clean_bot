@@ -327,7 +327,9 @@ class WebBridgeNode(Node):
                         removed = len(trail) - 500
                         self.path_trail = trail[-500:]
                         self._trail_sent_index = max(0, self._trail_sent_index - removed)
-        except Exception:
+        except Exception as e:
+            if self._tf_healthy:
+                self.get_logger().warning(f"TF lookup failed: {e}")
             self._tf_healthy = False
 
     def _push_status(self):
@@ -642,8 +644,10 @@ class WebBridgeNode(Node):
             try:
                 with open(SCHEDULES_FILE) as f:
                     return json.load(f)
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.getLogger("cleanbot.schedules").warning(
+                    "Failed to load schedules: %s", e)
         return []
 
     def _save_schedules(self):
@@ -709,8 +713,10 @@ class WebBridgeNode(Node):
             try:
                 with open(NOGO_ZONES_FILE) as f:
                     return json.load(f)
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.getLogger("cleanbot.nogo").warning(
+                    "Failed to load no-go zones: %s", e)
         return []
 
     def _save_no_go_zones(self):
@@ -909,8 +915,10 @@ class WebBridgeNode(Node):
                     "height": d.get("height", 0),
                     "resolution": d.get("resolution", 0),
                 })
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.getLogger("cleanbot.rooms").warning(
+                    "Skipping corrupted room file %s: %s", p.name, e)
         return rooms
 
     @staticmethod

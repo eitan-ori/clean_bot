@@ -815,6 +815,8 @@ class AdaptiveCoveragePlanner(Node):
         # Apply no-go zones as obstacles before inflation
         if self._no_go_zones and self.map_info:
             res = self.map_info.resolution
+            if res <= 0:
+                res = 0.05
             ox = self.map_info.origin.position.x
             oy = self.map_info.origin.position.y
             h, w = self.map_array.shape
@@ -1025,6 +1027,9 @@ class AdaptiveCoveragePlanner(Node):
         for cid, data in cells.items():
             xs = [s[0] for s in data['segments']]
             ys = [s[1] for s in data['segments']] # use starty approx
+            if not xs:
+                data['centroid'] = (0.0, 0.0)
+                continue
             data['centroid'] = (sum(xs)/len(xs), sum(ys)/len(ys))
         
         # Start with closest cell to robot's actual position

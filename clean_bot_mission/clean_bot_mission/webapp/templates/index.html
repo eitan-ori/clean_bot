@@ -759,6 +759,7 @@ function drawMap(data) {
     }
   }
 
+  if (!data.width || !data.height) return;
   const sx = canvas.width / data.width;
   const sy = canvas.height / data.height;
   const rpx = data.robot_px * sx;
@@ -894,6 +895,7 @@ canvas.addEventListener('click', e => {
   const cx = (e.clientX - rect.left) * scaleX;
   const cy = (e.clientY - rect.top) * scaleY;
   const data = lastMapData;
+  if (!data.width || !data.height) return;
   const sx = canvas.width / data.width;
   const sy = canvas.height / data.height;
   // Convert pixel to map grid coords, then to world coords
@@ -1441,6 +1443,7 @@ canvas.addEventListener('mousemove', e => {
 canvas.addEventListener('mouseup', e => {
   if (!nogoStart || !nogoCurrent || !lastMapData) return;
   const data = lastMapData;
+  if (!data.width || !data.height) return;
   const sx = canvas.width / data.width;
   const sy = canvas.height / data.height;
   // Convert canvas coords to world coords
