@@ -1264,36 +1264,31 @@ class AdaptiveCoveragePlanner(Node):
         remaining_pairs = list(pairs[1:])
         
         while remaining_pairs:
-            last_pair = ordered_pairs[-1]
-            last_point = last_pair[1]  # End of last pair
+            last_point = ordered_pairs[-1][1]  # End of last pair
+            lx, ly = last_point[0], last_point[1]
             
-            # Find nearest remaining pair
-            min_dist = float('inf')
+            min_dist_sq = float('inf')
             nearest_idx = 0
+            nearest_reverse = False
             
             for i, pair in enumerate(remaining_pairs):
-                # Distance to start of pair
-                dist_to_start = math.sqrt((pair[0][0] - last_point[0])**2 + (pair[0][1] - last_point[1])**2)
-                # Distance to end of pair (in case we reverse)
-                dist_to_end = math.sqrt((pair[1][0] - last_point[0])**2 + (pair[1][1] - last_point[1])**2)
+                d_start = (pair[0][0] - lx)**2 + (pair[0][1] - ly)**2
+                d_end = (pair[1][0] - lx)**2 + (pair[1][1] - ly)**2
                 
-                dist = min(dist_to_start, dist_to_end)
-                if dist < min_dist:
-                    min_dist = dist
+                if d_end < d_start:
+                    d, rev = d_end, True
+                else:
+                    d, rev = d_start, False
+                if d < min_dist_sq:
+                    min_dist_sq = d
                     nearest_idx = i
+                    nearest_reverse = rev
             
-            # Add the nearest pair, possibly reversed if closer to end
-            nearest_pair = remaining_pairs[nearest_idx]
-            dist_to_start = math.sqrt((nearest_pair[0][0] - last_point[0])**2 + (nearest_pair[0][1] - last_point[1])**2)
-            dist_to_end = math.sqrt((nearest_pair[1][0] - last_point[0])**2 + (nearest_pair[1][1] - last_point[1])**2)
-            
-            if dist_to_end < dist_to_start:
-                # Reverse the pair
+            nearest_pair = remaining_pairs.pop(nearest_idx)
+            if nearest_reverse:
                 ordered_pairs.append((nearest_pair[1], nearest_pair[0]))
             else:
                 ordered_pairs.append(nearest_pair)
-            
-            remaining_pairs.pop(nearest_idx)
         
         # Flatten back to list of waypoints
         ordered_waypoints = []

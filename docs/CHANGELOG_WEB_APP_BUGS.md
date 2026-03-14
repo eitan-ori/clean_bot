@@ -638,3 +638,13 @@
 - **File:** `clean_bot_hardware/clean_bot_hardware/emergency_stop.py`
 - **Problem:** The `range_callback()` only checked `msg.range <= 0.02` to filter invalid readings. NaN and Infinity values from sensor noise passed this check (NaN comparisons return False), corrupting `self.current_distance` and causing undefined behavior in the velocity scaling math.
 - **Fix:** Added `math.isfinite(msg.range)` check before the minimum range threshold.
+
+### Bug 129: Map image generation can crash on memory error
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** `Image.fromarray()`, `img.resize()`, and `img.save()` in `get_map_data()` had no error handling. A very large map or low memory situation would crash with an unhandled `MemoryError` or `OSError`, killing the map update loop.
+- **Fix:** Wrapped main image and heatmap image generation in `try/except (MemoryError, OSError, ValueError)`.
+
+### Bug 130: optimize_path_order uses redundant sqrt and double distance calculations
+- **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py`
+- **Problem:** `optimize_path_order()` called `math.sqrt()` for every distance comparison (2× per pair per iteration), then recalculated the same distances for the nearest pair after selection. Since only ordering matters, squared distances suffice for comparisons.
+- **Fix:** Replaced `math.sqrt()` with squared distance comparisons, eliminated duplicate distance calculation by tracking the reverse flag during search, and combined the search and reversal logic into a single pass.

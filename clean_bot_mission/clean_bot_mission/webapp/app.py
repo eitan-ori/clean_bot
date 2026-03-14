@@ -411,15 +411,19 @@ class WebBridgeNode(Node):
         rpx = (self.robot_x - ox) / res if res > 0 else 0
         rpy = h - 1 - (self.robot_y - oy) / res if res > 0 else 0
 
-        img = Image.fromarray(rgba, "RGBA")
-        # Scale up small maps for clarity
-        min_dim = 500
-        if w < min_dim or h < min_dim:
-            scale = max(min_dim / w, min_dim / h, 1.0)
-            img = img.resize((int(w * scale), int(h * scale)), Image.NEAREST)
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        try:
+            img = Image.fromarray(rgba, "RGBA")
+            # Scale up small maps for clarity
+            min_dim = 500
+            if w < min_dim or h < min_dim:
+                scale = max(min_dim / w, min_dim / h, 1.0)
+                img = img.resize((int(w * scale), int(h * scale)), Image.NEAREST)
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        except (MemoryError, OSError, ValueError) as e:
+            self.get_logger().error(f"Map image generation failed: {e}")
+            return None
 
         # Round 32: Heatmap data (vectorized with numpy)
         heatmap_b64 = None
@@ -452,12 +456,15 @@ class WebBridgeNode(Node):
                 hm_rgba[mask, 1] = g
                 hm_rgba[mask, 2] = b
                 hm_rgba[mask, 3] = a
-                hm_img = Image.fromarray(hm_rgba, "RGBA")
-                if w < min_dim or h < min_dim:
-                    hm_img = hm_img.resize((int(w * scale), int(h * scale)), Image.NEAREST)
-                hm_buf = io.BytesIO()
-                hm_img.save(hm_buf, format="PNG")
-                heatmap_b64 = base64.b64encode(hm_buf.getvalue()).decode("ascii")
+                try:
+                    hm_img = Image.fromarray(hm_rgba, "RGBA")
+                    if w < min_dim or h < min_dim:
+                        hm_img = hm_img.resize((int(w * scale), int(h * scale)), Image.NEAREST)
+                    hm_buf = io.BytesIO()
+                    hm_img.save(hm_buf, format="PNG")
+                    heatmap_b64 = base64.b64encode(hm_buf.getvalue()).decode("ascii")
+                except (MemoryError, OSError, ValueError):
+                    pass
 
         return {
             "image_b64": b64,
