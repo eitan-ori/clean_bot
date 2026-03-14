@@ -937,7 +937,10 @@ class WebBridgeNode(Node):
         path = WebBridgeNode._safe_room_path(filename)
         if path is None or not path.exists():
             return False
-        path.unlink()
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            return False
         return True
 
     @staticmethod
@@ -1202,6 +1205,12 @@ def api_add_schedule():
     days = body.get("days", [])
     if not sched_time or not days:
         return jsonify({"error": "Time and days required"}), 400
+    import re
+    if not re.match(r'^[0-2]\d:[0-5]\d$', sched_time):
+        return jsonify({"error": "Invalid time format (expected HH:MM)"}), 400
+    valid_days = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+    if not isinstance(days, list) or not all(d in valid_days for d in days):
+        return jsonify({"error": "Invalid days"}), 400
     sched = {
         "id": str(int(time.time() * 1000)),
         "time": sched_time,

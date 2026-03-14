@@ -1218,3 +1218,42 @@ class TestLoadAndCleanRoom:
         resp = client.post('/api/rooms/test_room/load_and_clean')
         assert resp.status_code == 503
         app_mod.ros_node = mock_node
+
+
+class TestScheduleValidation:
+    """Test schedule input validation."""
+
+    def test_valid_schedule(self, flask_client):
+        client, mock_node = flask_client
+        mock_node._schedule_lock = __import__('threading').Lock()
+        mock_node._schedules = []
+        mock_node._save_schedules = lambda: None
+        resp = client.post('/api/schedules', json={"time": "08:30", "days": ["mon", "wed"]})
+        assert resp.status_code == 200
+
+    def test_invalid_time_format(self, flask_client):
+        client, mock_node = flask_client
+        resp = client.post('/api/schedules', json={"time": "25:99", "days": ["mon"]})
+        assert resp.status_code == 400
+        assert "Invalid time" in resp.get_json()["error"]
+
+    def test_invalid_time_letters(self, flask_client):
+        client, mock_node = flask_client
+        resp = client.post('/api/schedules', json={"time": "abc", "days": ["mon"]})
+        assert resp.status_code == 400
+
+    def test_invalid_day_names(self, flask_client):
+        client, mock_node = flask_client
+        resp = client.post('/api/schedules', json={"time": "08:00", "days": ["monday"]})
+        assert resp.status_code == 400
+        assert "Invalid days" in resp.get_json()["error"]
+
+    def test_missing_time(self, flask_client):
+        client, mock_node = flask_client
+        resp = client.post('/api/schedules', json={"days": ["mon"]})
+        assert resp.status_code == 400
+
+    def test_missing_days(self, flask_client):
+        client, mock_node = flask_client
+        resp = client.post('/api/schedules', json={"time": "08:00"})
+        assert resp.status_code == 400

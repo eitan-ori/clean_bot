@@ -840,9 +840,9 @@ class TestEdgeCases:
         assert resp.status_code == 400
 
     def test_schedule_with_invalid_time(self, client, node):
-        """Schedule with malformed time is still accepted (no time validation)."""
+        """Schedule with malformed time is rejected by validation."""
         resp = client.post('/api/schedules', json={"time": "not-a-time", "days": ["mon"]})
-        assert resp.status_code == 200
+        assert resp.status_code == 400
 
     def test_schedule_with_empty_days_list(self, client, node):
         """Schedule with empty days list is rejected."""

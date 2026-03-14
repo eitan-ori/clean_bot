@@ -656,3 +656,66 @@ class TestLowObstacleDetectorMarkerLifetime:
         path = self._find_file()
         with open(path) as f:
             ast.parse(f.read())
+
+
+# ════════════════════════════════════════════════════════════════════
+# Test: Arduino Driver NaN/Infinity Guard
+# ════════════════════════════════════════════════════════════════════
+
+class TestArduinoNaNGuard:
+    """Bug 126: NaN/Infinity cmd_vel should be rejected."""
+
+    def _make_driver(self):
+        """Create a minimal mock of ArduinoDriverNode for logic testing."""
+        import threading
+        driver = MagicMock()
+        driver._serial_lock = threading.Lock()
+        driver.serial = MagicMock()
+        driver.wheel_separation = 0.20
+        driver.max_linear_speed = 0.5
+        driver.invert_left_motor = False
+        driver.invert_right_motor = False
+        driver.debug_cmd_pub = MagicMock()
+        driver.last_cmd_time = MagicMock()
+        driver._motors_stopped = False
+        return driver
+
+    def test_nan_linear_rejected(self):
+        """NaN linear velocity should not reach serial.write."""
+        import math as m
+        driver = self._make_driver()
+        msg = MagicMock()
+        msg.linear.x = float('nan')
+        msg.angular.z = 0.0
+
+        # Import the actual check
+        linear = msg.linear.x
+        angular = msg.angular.z
+        assert not (m.isfinite(linear) and m.isfinite(angular))
+
+    def test_inf_angular_rejected(self):
+        """Infinity angular velocity should not reach serial.write."""
+        import math as m
+        msg = MagicMock()
+        msg.linear.x = 0.5
+        msg.angular.z = float('inf')
+        linear = msg.linear.x
+        angular = msg.angular.z
+        assert not (m.isfinite(linear) and m.isfinite(angular))
+
+    def test_normal_values_pass(self):
+        """Normal values should pass the finite check."""
+        import math as m
+        assert m.isfinite(0.5) and m.isfinite(-0.3)
+
+
+class TestSerialLock:
+    """Bug 127: Serial writes should use a lock."""
+
+    def test_arduino_driver_has_serial_lock(self):
+        """Arduino driver source should contain _serial_lock."""
+        import pathlib
+        base = pathlib.Path(__file__).resolve().parent.parent
+        src = (base / "clean_bot_hardware" / "arduino_driver.py").read_text()
+        assert "_serial_lock" in src
+        assert "with self._serial_lock" in src

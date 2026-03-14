@@ -29,7 +29,9 @@
 ###############################################################################
 """
 
+import math
 import serial
+import threading
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
@@ -92,6 +94,8 @@ class ArduinoDriver(Node):
             self.get_logger().error('  3. User has permission (sudo usermod -a -G dialout $USER)')
             raise SystemExit(1)
 
+        self._serial_lock = threading.Lock()
+
         # ===================== Publishers =====================
         self.range_pub = self.create_publisher(Range, 'ultrasonic_range', 10)
         
@@ -125,7 +129,8 @@ class ArduinoDriver(Node):
     def send_command(self, command: str):
         """Send a command to Arduino."""
         try:
-            self.serial.write(f"{command}\n".encode('utf-8'))
+            with self._serial_lock:
+                self.serial.write(f"{command}\n".encode('utf-8'))
             self.get_logger().info(f'📤 Sent: {command}')
             return True
         except serial.SerialException as e:
@@ -160,6 +165,9 @@ class ArduinoDriver(Node):
         """Convert Twist message to motor PWM commands and send to Arduino."""
         linear = msg.linear.x
         angular = msg.angular.z
+
+        if not (math.isfinite(linear) and math.isfinite(angular)):
+            return
 
         # CRITICAL FIX: Negate angular to match robot's physical wiring
         # The robot turns opposite to ROS convention without this
@@ -198,7 +206,8 @@ class ArduinoDriver(Node):
         # Send to Arduino
         command = f"{left_pwm},{right_pwm}\n"
         try:
-            self.serial.write(command.encode('utf-8'))
+            with self._serial_lock:
+                self.serial.write(command.encode('utf-8'))
         except serial.SerialException as e:
             self.get_logger().warning(f'Serial write error: {e}')
         
@@ -242,7 +251,8 @@ class ArduinoDriver(Node):
             if elapsed > self.CMD_VEL_TIMEOUT_SEC:
                 self.get_logger().warn('⚠️ cmd_vel timeout — stopping motors')
                 try:
-                    self.serial.write(b"0,0\n")
+                    with self._serial_lock:
+                        self.serial.write(b"0,0\n")
                 except serial.SerialException:
                     pass
                 self._motors_stopped = True
@@ -284,8 +294,9 @@ class ArduinoDriver(Node):
         """Clean shutdown - stop motors and cleaning system."""
         if hasattr(self, 'serial') and self.serial.is_open:
             try:
-                self.serial.write(b"0,0\n")         # Stop motors
-                self.serial.write(b"CLEAN_STOP\n")  # Stop cleaning
+                with self._serial_lock:
+                    self.serial.write(b"0,0\n")         # Stop motors
+                    self.serial.write(b"CLEAN_STOP\n")  # Stop cleaning
                 self.serial.close()
             except Exception:
                 pass

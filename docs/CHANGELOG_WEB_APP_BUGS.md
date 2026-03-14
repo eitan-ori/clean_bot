@@ -613,3 +613,23 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/templates/index.html`
 - **Problem:** `canvas.width / data.width` and `canvas.height / data.height` in `drawMap()`, the click-to-navigate handler, and the no-go zone mouseup handler would produce `Infinity`/`NaN` if map data had zero dimensions. All subsequent canvas operations (robot position, path trail, no-go zone rendering) would silently fail.
 - **Fix:** Added `if (!data.width || !data.height) return;` guard in all three locations.
+
+### Bug 124: Schedule API accepts invalid time formats
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** The `POST /api/schedules` route accepted any string as a time value (e.g., "25:99", "abc"). These invalid schedules would silently never fire, with no error to the user.
+- **Fix:** Added regex validation (`^[0-2]\d:[0-5]\d$`) for time format and whitelist validation for day names ("mon"–"sun").
+
+### Bug 125: delete_room crashes if file disappears between check and unlink
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** `delete_room()` checked `path.exists()` then called `path.unlink()` without exception handling. If the file was deleted between the check and the unlink (TOCTOU race), the function would crash with `FileNotFoundError`.
+- **Fix:** Wrapped `path.unlink()` in `try/except FileNotFoundError`.
+
+### Bug 126: Arduino driver accepts NaN/Infinity cmd_vel values
+- **File:** `clean_bot_hardware/clean_bot_hardware/arduino_driver.py`
+- **Problem:** `cmd_vel_callback()` did not validate that `linear.x` and `angular.z` were finite numbers. NaN or Infinity values would propagate through all differential drive math and send garbage strings like "nan,-inf\n" to the Arduino, potentially crashing the firmware.
+- **Fix:** Added `if not (math.isfinite(linear) and math.isfinite(angular)): return` guard at the start of `cmd_vel_callback()`.
+
+### Bug 127: Arduino serial writes not thread-safe
+- **File:** `clean_bot_hardware/clean_bot_hardware/arduino_driver.py`
+- **Problem:** `cmd_vel_callback()` (from `/cmd_vel` subscription), `send_command()` (from mission commands), and `update_loop()` (timer-based watchdog) all wrote to the serial port without synchronization. Concurrent writes from different ROS callback threads could interleave bytes, sending corrupted commands to the Arduino.
+- **Fix:** Added `threading.Lock` (`_serial_lock`) and wrapped all `self.serial.write()` calls with `with self._serial_lock:`.
