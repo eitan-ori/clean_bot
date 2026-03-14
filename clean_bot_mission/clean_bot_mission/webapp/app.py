@@ -600,8 +600,12 @@ class WebBridgeNode(Node):
         msg.info.height = h
         msg.info.resolution = float(d["resolution"])
         msg.info.origin = Pose()
-        msg.info.origin.position.x = float(d.get("origin_x", 0.0))
-        msg.info.origin.position.y = float(d.get("origin_y", 0.0))
+        try:
+            msg.info.origin.position.x = float(d.get("origin_x", 0.0))
+            msg.info.origin.position.y = float(d.get("origin_y", 0.0))
+        except (TypeError, ValueError):
+            msg.info.origin.position.x = 0.0
+            msg.info.origin.position.y = 0.0
         msg.info.origin.orientation.w = 1.0
         msg.data = [int(v) for v in d["data"]]
         # Publish to ROS so SLAM/Nav2/coverage planner pick it up.
@@ -611,9 +615,13 @@ class WebBridgeNode(Node):
         self.get_logger().info(f"Published saved room map '{room_name}' ({w}x{h})")
 
         # ── Localize robot on the saved map using LiDAR scan matching ──
+        try:
+            ox = float(d.get("origin_x", 0.0))
+            oy = float(d.get("origin_y", 0.0))
+        except (TypeError, ValueError):
+            ox, oy = 0.0, 0.0
         loc_result = self.localize_on_saved_map(
-            d["data"], w, h, float(d["resolution"]),
-            float(d.get("origin_x", 0.0)), float(d.get("origin_y", 0.0)))
+            d["data"], w, h, float(d["resolution"]), ox, oy)
 
         loc_msg = ""
         if loc_result is not None:
@@ -1100,6 +1108,8 @@ def api_velocity():
         ang = float(body.get("angular", 0.0))
     except (TypeError, ValueError):
         return jsonify({"error": "linear and angular must be numbers"}), 400
+    if not (math.isfinite(lin) and math.isfinite(ang)):
+        return jsonify({"error": "linear and angular must be finite numbers"}), 400
     try:
         ros_node.send_velocity(lin, ang)
     except Exception as e:

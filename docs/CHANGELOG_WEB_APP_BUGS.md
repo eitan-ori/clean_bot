@@ -728,3 +728,13 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
 - **Problem:** `localize_on_saved_map()` called `np.array(...).reshape((h, w))` without verifying `len(map_data) == w * h`. A corrupted room file would cause `ValueError: cannot reshape array`.
 - **Fix:** Added `if len(map_data) != w * h: return None` guard before reshape.
+
+### Bug 147: Velocity API accepts NaN/Infinity values
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** The `/api/velocity` route validated that linear and angular were numbers but didn't check for NaN or Infinity. While `send_velocity()` had server-side NaN guards, the API should reject invalid input early.
+- **Fix:** Added `math.isfinite()` check after float conversion.
+
+### Bug 148: Room origin values not protected from corrupted data
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** `load_and_clean_room()` called `float(d.get("origin_x", 0.0))` without try/except. If a saved room file had a non-numeric `origin_x` value, the function would crash with `ValueError`.
+- **Fix:** Wrapped origin parsing in try/except, defaulting to (0.0, 0.0) on error.

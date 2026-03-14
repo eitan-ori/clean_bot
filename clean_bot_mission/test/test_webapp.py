@@ -1204,6 +1204,22 @@ class TestBug110VelocityHTTPValidation:
         assert resp.status_code == 200
         mock_node.send_velocity.assert_called_once_with(0.5, 0.1)
 
+    def test_velocity_nan_rejected(self, flask_client):
+        """Bug 147: NaN velocity should be rejected."""
+        client, mock_node = flask_client
+        resp = client.post('/api/velocity',
+                           json={"linear": float('nan'), "angular": 0.0},
+                           content_type='application/json')
+        assert resp.status_code == 400
+
+    def test_velocity_inf_rejected(self, flask_client):
+        """Bug 147: Infinity velocity should be rejected."""
+        client, mock_node = flask_client
+        resp = client.post('/api/velocity',
+                           json={"linear": 0.0, "angular": float('inf')},
+                           content_type='application/json')
+        assert resp.status_code == 400
+
 
 # ── Tests for previously untested routes ──────────────────────────────
 
