@@ -1171,13 +1171,17 @@ window.previewRoom = function(filename, name) {
   }).catch(() => toast(t('preview_failed')));
 };
 
+let _cleanBusy = false;
 window.cleanRoom = function(filename) {
+  if (_cleanBusy) return;
+  _cleanBusy = true;
   toast(t('clean_saved_room'));
   fetch('/api/rooms/' + filename + '/load_and_clean', {method:'POST'})
     .then(r => r.json()).then(d => {
       if (d.ok) toast(d.message || t('clean_room'));
       else toast(d.error || t('failed'));
-    }).catch(() => toast(t('failed')));
+    }).catch(() => toast(t('failed')))
+    .finally(() => { _cleanBusy = false; });
 };
 
 window.deleteRoom = function(filename) {

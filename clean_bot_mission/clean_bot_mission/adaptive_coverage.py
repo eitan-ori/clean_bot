@@ -807,6 +807,8 @@ class AdaptiveCoveragePlanner(Node):
 
     def inflate_obstacles(self):
         """Inflate obstacles by robot radius for safe navigation."""
+        if self.map_info is None:
+            return
         # Create obstacle mask
         obstacle_mask = self.map_array >= OCCUPIED_THRESHOLD
         

@@ -568,3 +568,13 @@
 - **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py`
 - **Problem:** `drive_to_waypoint()` had no timeout mechanism. If the robot gets stuck (e.g., blocked by obstacle not on costmap), it would attempt the same waypoint forever, blocking the entire coverage mission. The `timeout_per_waypoint` parameter (90s) was declared but never used in direct drive mode.
 - **Fix:** Track `_waypoint_start_time` for each waypoint. If elapsed time exceeds `timeout`, skip the waypoint, add it to `missed_waypoints` for retry, and advance.
+
+### Bug 115: inflate_obstacles crashes if map_info is None
+- **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py`
+- **Problem:** `inflate_obstacles()` accessed `self.map_info.resolution` (line 835) without checking if `map_info` is None. While `start_coverage_mission()` checks `map_array is None`, it doesn't check `map_info is None` separately. A race condition where map_info is cleared but map_array isn't would crash.
+- **Fix:** Added `if self.map_info is None: return` guard at the start of `inflate_obstacles()`.
+
+### Bug 116: cleanRoom double-click fires multiple missions
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/templates/index.html`
+- **Problem:** `window.cleanRoom()` had no guard against rapid double-clicks. Two fast clicks would fire two concurrent `/api/rooms/<name>/load_and_clean` requests, potentially starting two overlapping missions.
+- **Fix:** Added `_cleanBusy` flag that blocks new requests until the previous one completes (`.finally()` resets it).
