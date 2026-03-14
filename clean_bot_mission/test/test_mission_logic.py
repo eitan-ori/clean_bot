@@ -3367,3 +3367,36 @@ class TestLocalizationFitnessThreshold:
         lx, ly, lyaw, score, total = loc_result
         match_pct = (score / total * 100) if total > 0 else 0
         assert match_pct >= 15  # Should be accepted
+
+
+class TestMissionSafetyBugs:
+    """Bug 137-138: Safety-critical state transitions."""
+
+    def test_exploration_complete_stops_robot(self):
+        """Bug 137: Robot motors must stop when exploration completes."""
+        from clean_bot_mission.full_mission import FullMissionController, MissionState
+        controller = MagicMock()
+        controller.state = MissionState.EXPLORING
+        controller.exploration_complete = False
+        controller.get_logger = MagicMock(return_value=MagicMock())
+        controller.exploration_complete_callback = (
+            FullMissionController.exploration_complete_callback.__get__(controller)
+        )
+        msg = MagicMock()
+        msg.data = True
+        controller.exploration_complete_callback(msg)
+        controller.stop_robot.assert_called_once()
+        assert controller.state == MissionState.WAITING_FOR_CLEAN
+
+    def test_exploration_complete_ignored_in_wrong_state(self):
+        """Exploration complete ignored if not in EXPLORING state."""
+        from clean_bot_mission.full_mission import FullMissionController, MissionState
+        controller = MagicMock()
+        controller.state = MissionState.WAITING_FOR_SCAN
+        controller.exploration_complete_callback = (
+            FullMissionController.exploration_complete_callback.__get__(controller)
+        )
+        msg = MagicMock()
+        msg.data = True
+        controller.exploration_complete_callback(msg)
+        controller.stop_robot.assert_not_called()

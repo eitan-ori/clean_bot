@@ -678,3 +678,13 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
 - **Problem:** `load_and_clean_room()` published the localized pose via `_publish_localized_pose()` regardless of match quality. A scan match with only 2% of points hitting walls would still be accepted, potentially sending the robot to a completely wrong position on the saved map.
 - **Fix:** Added a 15% minimum match threshold. Below this, localization is skipped with a warning and the robot proceeds with coverage using default position.
+
+### Bug 137: Robot motors not stopped when exploration completes
+- **File:** `clean_bot_mission/clean_bot_mission/full_mission.py`
+- **Problem:** When `exploration_complete_callback()` received the exploration-done signal, it transitioned the state to WAITING_FOR_CLEAN without calling `stop_robot()`. The frontier explorer's last navigation goal may have completed, but momentum or a final cmd_vel message could leave the robot drifting.
+- **Fix:** Added `stop_robot()` call immediately after setting `exploration_complete = True`.
+
+### Bug 138: KeyboardInterrupt leaves cleaning relay ON
+- **File:** `clean_bot_mission/clean_bot_mission/full_mission.py`
+- **Problem:** The `main()` function's `except KeyboardInterrupt` block only logged the interruption but did not stop the robot or deactivate the cleaning hardware. If Ctrl+C was pressed during active cleaning, the relay powering the cleaning mechanism would stay energized.
+- **Fix:** Added `stop_robot()` and `_deactivate_cleaning_hardware()` calls in the KeyboardInterrupt handler before cleanup.

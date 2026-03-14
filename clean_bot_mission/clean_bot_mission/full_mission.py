@@ -413,6 +413,7 @@ class FullMissionController(Node):
         """Called when exploration finishes automatically."""
         if msg.data and self.state == MissionState.EXPLORING:
             self.exploration_complete = True
+            self.stop_robot()
             self.get_logger().info('')
             self.get_logger().info('✅ Exploration phase complete!')
             self.get_logger().info('')
@@ -551,6 +552,8 @@ def main(args=None):
         executor.spin()
     except KeyboardInterrupt:
         mission_controller.get_logger().info('Mission interrupted by user')
+        mission_controller.stop_robot()
+        mission_controller._deactivate_cleaning_hardware()
     finally:
         executor.shutdown()
         mission_controller.destroy_node()
