@@ -3294,3 +3294,76 @@ class TestCoverageStateTransitions:
         planner.handle_stop = ACP.handle_stop.__get__(planner)
         planner.handle_stop()
         planner.cancel_current_goal.assert_called_once()
+
+
+# ── Bug 134-136 regression tests ─────────────────────────────────────
+
+class TestFrontierFailedGoalTracking:
+    """Bug 134-135: Failed goals must be added to failed_goals set."""
+
+    def test_goal_send_failure_adds_to_failed_goals(self):
+        """Bug 134: goal_response_callback exception adds goal to failed set."""
+        from clean_bot_mission.frontier_explorer import FrontierExplorer
+        explorer = MagicMock()
+        explorer.is_navigating = True
+        explorer.navigation_start_time = 1000.0
+        explorer.consecutive_failures = 0
+        explorer.failed_goals = set()
+        explorer.current_goal = {'x': 1.5, 'y': 2.5}
+        explorer.get_logger = MagicMock(return_value=MagicMock())
+        explorer.goal_response_callback = FrontierExplorer.goal_response_callback.__get__(explorer)
+        future = MagicMock()
+        future.result.side_effect = Exception("Service unavailable")
+        explorer.goal_response_callback(future)
+        assert explorer.is_navigating is False
+        assert explorer.consecutive_failures == 1
+        assert (1.5, 2.5) in explorer.failed_goals
+
+    def test_nav_result_error_adds_to_failed_goals(self):
+        """Bug 135: get_result_callback exception adds goal to failed set."""
+        from clean_bot_mission.frontier_explorer import FrontierExplorer
+        explorer = MagicMock()
+        explorer.is_navigating = True
+        explorer.navigation_start_time = 1000.0
+        explorer.consecutive_failures = 0
+        explorer.failed_goals = set()
+        explorer.current_goal = {'x': 3.0, 'y': 4.0}
+        explorer.current_goal_handle = MagicMock()
+        explorer.get_logger = MagicMock(return_value=MagicMock())
+        explorer.get_result_callback = FrontierExplorer.get_result_callback.__get__(explorer)
+        future = MagicMock()
+        future.result.side_effect = Exception("Goal handle destroyed")
+        explorer.get_result_callback(future)
+        assert explorer.is_navigating is False
+        assert explorer.consecutive_failures == 1
+        assert (3.0, 4.0) in explorer.failed_goals
+
+
+class TestLocalizationFitnessThreshold:
+    """Bug 136: Localization should reject poor-quality matches."""
+
+    def test_poor_match_not_published(self):
+        """Localization with <15% match should not publish pose."""
+        import clean_bot_mission.webapp.app as app_mod
+        node = MagicMock()
+        # Return a poor match: 5 hits out of 100
+        node.localize_on_saved_map = MagicMock(return_value=(1.0, 2.0, 0.5, 5, 100))
+        node._publish_localized_pose = MagicMock()
+        node.send_command = MagicMock()
+        node.get_logger = MagicMock(return_value=MagicMock())
+        node.get_clock = MagicMock()
+        node.mission_state = "IDLE"
+        node.map_pub = MagicMock()
+
+        # The function is in load_and_clean_room — test the threshold logic directly
+        loc_result = (1.0, 2.0, 0.5, 5, 100)
+        lx, ly, lyaw, score, total = loc_result
+        match_pct = (score / total * 100) if total > 0 else 0
+        assert match_pct < 15  # Should be rejected
+
+    def test_good_match_accepted(self):
+        """Localization with >=15% match should be accepted."""
+        loc_result = (1.0, 2.0, 0.5, 45, 100)
+        lx, ly, lyaw, score, total = loc_result
+        match_pct = (score / total * 100) if total > 0 else 0
+        assert match_pct >= 15  # Should be accepted

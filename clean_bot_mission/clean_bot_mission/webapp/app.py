@@ -614,10 +614,15 @@ class WebBridgeNode(Node):
         if loc_result is not None:
             lx, ly, lyaw, score, total = loc_result
             match_pct = (score / total * 100) if total > 0 else 0
-            self._publish_localized_pose(lx, ly, lyaw)
-            loc_msg = (f" Localized at ({lx:.2f}, {ly:.2f}, "
-                       f"{math.degrees(lyaw):.0f}°) [{match_pct:.0f}% match]")
-            self.get_logger().info(f"🎯 Scan matching: {score}/{total} hits ({match_pct:.0f}%)")
+            if match_pct < 15:
+                self.get_logger().warn(
+                    f"⚠️ Scan matching too poor: {score}/{total} hits ({match_pct:.0f}%)")
+                loc_msg = " (localization skipped — match quality too low)"
+            else:
+                self._publish_localized_pose(lx, ly, lyaw)
+                loc_msg = (f" Localized at ({lx:.2f}, {ly:.2f}, "
+                           f"{math.degrees(lyaw):.0f}°) [{match_pct:.0f}% match]")
+                self.get_logger().info(f"🎯 Scan matching: {score}/{total} hits ({match_pct:.0f}%)")
         else:
             self.get_logger().warn("⚠️ Scan matching failed — no LiDAR data or poor match")
             loc_msg = " (localization skipped — ensure robot is near walls)"
@@ -991,14 +996,17 @@ class WebBridgeNode(Node):
             rgba[partial, 2] = g
         rgba = rgba[::-1]
 
-        img = Image.fromarray(rgba, "RGBA")
-        min_dim = 400
-        if w < min_dim or h < min_dim:
-            scale = max(min_dim / w, min_dim / h, 1.0)
-            img = img.resize((int(w * scale), int(h * scale)), Image.NEAREST)
-        buf = io.BytesIO()
-        img.save(buf, format="PNG", optimize=True)
-        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        try:
+            img = Image.fromarray(rgba, "RGBA")
+            min_dim = 400
+            if w < min_dim or h < min_dim:
+                scale = max(min_dim / w, min_dim / h, 1.0)
+                img = img.resize((int(w * scale), int(h * scale)), Image.NEAREST)
+            buf = io.BytesIO()
+            img.save(buf, format="PNG", optimize=True)
+            b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        except (MemoryError, OSError, ValueError):
+            return None
         return {
             "image_b64": b64,
             "name": d.get("name", filename),

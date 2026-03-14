@@ -663,3 +663,18 @@
 - **File:** `clean_bot_hardware/clean_bot_hardware/low_obstacle_detector.py`
 - **Problem:** `marker_id_counter` incremented indefinitely with no wraparound. After very long operation (~2 billion markers), the integer would exceed RViz's 32-bit marker ID range.
 - **Fix:** Added modulo 100000 to marker ID assignment to ensure IDs recycle within a safe range.
+
+### Bug 134: Room preview image generation missing error handling
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** `load_room_preview()` generated a PIL image without try/except for MemoryError/OSError/ValueError. A corrupted or extremely large saved map could crash the Flask route. The same error handling existed in `get_map_data()` but was missing here.
+- **Fix:** Wrapped image creation, resize, and save in `try/except (MemoryError, OSError, ValueError)` returning `None`.
+
+### Bug 135: Frontier explorer fails to record failed goals on exception
+- **File:** `clean_bot_mission/clean_bot_mission/frontier_explorer.py`
+- **Problem:** In `goal_response_callback()` and `get_result_callback()`, when an exception occurred (e.g., Nav2 service unavailable, goal handle destroyed), the code incremented `consecutive_failures` but did NOT add the goal to `failed_goals`. This meant the same unreachable frontier could be retried indefinitely, causing an infinite loop.
+- **Fix:** Added `failed_goals.add(key)` in both exception handlers, matching the existing pattern used for rejected/aborted goals.
+
+### Bug 136: Localization publishes pose with arbitrarily poor match quality
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** `load_and_clean_room()` published the localized pose via `_publish_localized_pose()` regardless of match quality. A scan match with only 2% of points hitting walls would still be accepted, potentially sending the robot to a completely wrong position on the saved map.
+- **Fix:** Added a 15% minimum match threshold. Below this, localization is skipped with a warning and the robot proceeds with coverage using default position.

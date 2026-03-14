@@ -597,6 +597,9 @@ class FrontierExplorer(Node):
             self.is_navigating = False
             self.navigation_start_time = None
             self.consecutive_failures += 1
+            if self.current_goal:
+                key = (round(self.current_goal['x'], 1), round(self.current_goal['y'], 1))
+                self.failed_goals.add(key)
             return
         
         if not goal_handle.accepted:
@@ -624,6 +627,9 @@ class FrontierExplorer(Node):
             self.navigation_start_time = None
             self.current_goal_handle = None
             self.consecutive_failures += 1
+            if self.current_goal:
+                key = (round(self.current_goal['x'], 1), round(self.current_goal['y'], 1))
+                self.failed_goals.add(key)
             return
         
         self.is_navigating = False
