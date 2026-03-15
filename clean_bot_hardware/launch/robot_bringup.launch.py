@@ -235,6 +235,8 @@ def generate_launch_description():
                 'init_pose_from_topic': '',
                 'freq': 10.0,                            # Process every incoming scan
             }],
+            # Belt-and-suspenders: remap at RMW level too, in case the parameter is ignored
+            remappings=[('/scan', '/scan_raw')],
         ),
         # ==================== SLAM Toolbox ====================
         Node(
