@@ -178,6 +178,7 @@ class WebBridgeNode(Node):
 
         # ── No-go zones ──
         self._no_go_zones = self._load_no_go_zones()
+        self._nogo_lock = threading.Lock()
         self._nogo_pub = self.create_publisher(String, "no_go_zones", 10)
 
         # ── Localization: publish initial pose for AMCL/SLAM + coverage planner ──
@@ -484,7 +485,7 @@ class WebBridgeNode(Node):
             "obstacles": obs_world,
             "map_updates": self.map_update_counter,
             "heatmap_b64": heatmap_b64,
-            "no_go_zones": self._no_go_zones,
+            "no_go_zones": list(self._no_go_zones),  # snapshot for thread safety
         }
 
     def _emit_map(self):
@@ -568,7 +569,12 @@ class WebBridgeNode(Node):
             if new_path != path:
                 with open(new_path, "w") as f:
                     json.dump(d, f)
-                path.unlink()
+                try:
+                    path.unlink()
+                except OSError:
+                    # New file created but old file couldn't be removed
+                    new_path.unlink(missing_ok=True)
+                    return False, "Failed to remove old file"
             else:
                 with open(path, "w") as f:
                     json.dump(d, f)
@@ -768,31 +774,36 @@ class WebBridgeNode(Node):
     def _publish_no_go_zones(self):
         """Publish zones to ROS so coverage/explorer nodes can respect them."""
         msg = String()
-        msg.data = json.dumps(self._no_go_zones)
+        with self._nogo_lock:
+            msg.data = json.dumps(self._no_go_zones)
         self._nogo_pub.publish(msg)
 
     def add_no_go_zone(self, zone):
         """Add a no-go zone. zone = {x1, y1, x2, y2, name?}."""
         zone["id"] = str(uuid.uuid4())[:8]
-        self._no_go_zones.append(zone)
-        self._save_no_go_zones()
+        with self._nogo_lock:
+            self._no_go_zones.append(zone)
+            self._save_no_go_zones()
         self._publish_no_go_zones()
         return zone
 
     def remove_no_go_zone(self, zone_id):
         """Remove a no-go zone by id."""
-        before = len(self._no_go_zones)
-        self._no_go_zones = [z for z in self._no_go_zones if z.get("id") != zone_id]
-        if len(self._no_go_zones) < before:
-            self._save_no_go_zones()
+        with self._nogo_lock:
+            before = len(self._no_go_zones)
+            self._no_go_zones = [z for z in self._no_go_zones if z.get("id") != zone_id]
+            changed = len(self._no_go_zones) < before
+            if changed:
+                self._save_no_go_zones()
+        if changed:
             self._publish_no_go_zones()
-            return True
-        return False
+        return changed
 
     def clear_no_go_zones(self):
         """Remove all no-go zones."""
-        self._no_go_zones = []
-        self._save_no_go_zones()
+        with self._nogo_lock:
+            self._no_go_zones = []
+            self._save_no_go_zones()
         self._publish_no_go_zones()
 
     # ── Scan-to-Map Localization ─────────────────────────────────
@@ -1270,7 +1281,7 @@ def api_add_schedule():
     }
     with ros_node._schedule_lock:
         ros_node._schedules.append(sched)
-    ros_node._save_schedules()
+        ros_node._save_schedules()
     return jsonify({"ok": True, "schedule": sched})
 
 
@@ -1283,7 +1294,7 @@ def api_delete_schedule(schedule_id):
         ros_node._schedules = [s for s in ros_node._schedules if s.get("id") != schedule_id]
         # Clean up triggered-key entry so it doesn't leak memory
         ros_node._schedule_triggered_keys.pop(schedule_id, None)
-    ros_node._save_schedules()
+        ros_node._save_schedules()
     return jsonify({"ok": True})
 
 
@@ -1292,7 +1303,7 @@ def api_delete_schedule(schedule_id):
 def api_get_no_go_zones():
     if ros_node is None:
         return jsonify({"error": "ROS not connected"}), 503
-    return jsonify(ros_node._no_go_zones)
+    return jsonify(list(ros_node._no_go_zones))  # shallow copy for thread safety
 
 
 @app.route("/api/no_go_zones", methods=["POST"])

@@ -1138,7 +1138,7 @@ function fetchRooms() {
 
 function renderRooms(rooms) {
   const el = document.getElementById('roomList');
-  if (!rooms.length) { el.innerHTML = '<div style="color:var(--text-dim);font-size:.82rem;padding:.3rem">' + t('no_saved_rooms') + '</div>'; return; }
+  if (!rooms || !rooms.length) { el.innerHTML = '<div style="color:var(--text-dim);font-size:.82rem;padding:.3rem">' + t('no_saved_rooms') + '</div>'; return; }
   el.innerHTML = rooms.map(r => {
     const date = r.saved_at ? new Date(r.saved_at).toLocaleDateString() : '';
     return '<div class="room-item">' +
@@ -1360,7 +1360,7 @@ function fetchSchedules() {
 }
 function renderSchedules(scheds) {
   const el = document.getElementById('schedList');
-  if (!scheds.length) { el.innerHTML = '<div style="color:var(--text-dim);font-size:.8rem;padding:.3rem">' + t('no_schedules') + '</div>'; return; }
+  if (!scheds || !scheds.length) { el.innerHTML = '<div style="color:var(--text-dim);font-size:.8rem;padding:.3rem">' + t('no_schedules') + '</div>'; return; }
   el.innerHTML = scheds.map(s => {
     const days = (s.days || []).join(', ');
     return '<div class="sched-item">' +

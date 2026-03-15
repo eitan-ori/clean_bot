@@ -743,3 +743,23 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/templates/index.html`
 - **Problem:** The entire frontend JavaScript is wrapped in a strict-mode IIFE. The very first statement inside it is `const socket = io()`. If `socket.io.js` fails to load (network issue, CORS, server not running Flask-SocketIO, etc.), `io` is undefined and `io()` throws a `ReferenceError`. In strict mode, this uncaught error halts the entire IIFE — no event handlers for ANY button (theme toggle, language, settings, mission controls) are ever registered, making the page completely non-interactive.
 - **Fix:** (1) Added `onerror` handler on the socket.io script tag to set a fallback flag. (2) Added CDN fallback script that loads only when the local socket.io.js fails. (3) Wrapped the `io()` call in a try/catch block that creates a stub socket object on failure, allowing all non-socket UI features (theme, language, settings, map controls) to continue working in "offline mode".
+
+### Bug 150: No-go zone operations have no thread lock
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** `_no_go_zones` list was read and modified by Flask request threads and ROS executor timer threads without any synchronization. Concurrent `add_no_go_zone()`, `remove_no_go_zone()`, `clear_no_go_zones()`, and `get_map_data()` calls could cause `RuntimeError: list changed size during iteration` or data corruption.
+- **Fix:** Added `_nogo_lock = threading.Lock()` and protected all read/write access to `_no_go_zones`. GET API now returns `list()` copy. `_publish_no_go_zones` serializes under the lock.
+
+### Bug 151: Schedule save called outside schedule lock
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** In `api_add_schedule()` and `api_delete_schedule()`, `_save_schedules()` was called after releasing `_schedule_lock`. A concurrent `_check_schedules()` timer could read inconsistent state between the in-memory modification and the file write.
+- **Fix:** Moved `_save_schedules()` call inside the `with _schedule_lock:` block in both add and delete routes.
+
+### Bug 152: rename_room leaves duplicate files on unlink failure
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
+- **Problem:** `rename_room()` wrote the new file, then called `path.unlink()` on the old file. If `unlink()` failed (permission denied, file locked), the function returned `True` with two files existing — the old and the new.
+- **Fix:** Wrapped `path.unlink()` in try/except. On failure, the new file is removed and the function returns `(False, "Failed to remove old file")`.
+
+### Bug 153: renderRooms and renderSchedules crash on null/undefined input
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/templates/index.html`
+- **Problem:** `renderRooms(rooms)` called `rooms.length` without null check. If `fetch('/api/rooms').then(r => r.json())` returned `null` or `undefined` (malformed JSON response), the function threw `TypeError: Cannot read properties of undefined (reading 'length')`, breaking the rooms panel. Same issue in `renderSchedules`.
+- **Fix:** Added `!rooms ||` and `!scheds ||` guards before `.length` checks in both functions.

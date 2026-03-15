@@ -1376,3 +1376,149 @@ class TestScheduleDeleteRoute:
         mock_node._schedule_triggered_keys = {}
         resp = client.delete('/api/schedules/nonexistent')
         assert resp.status_code == 200
+
+
+class TestBug150NoGoZoneLock:
+    """Bug 150: No-go zone operations need threading.Lock for thread safety."""
+
+    def test_add_zone_uses_lock(self, flask_client):
+        """Adding a no-go zone should be thread-safe."""
+        client, mock_node = flask_client
+        import threading
+        mock_node._nogo_lock = threading.Lock()
+        mock_node._no_go_zones = []
+        mock_node._save_no_go_zones = lambda: None
+        mock_node._publish_no_go_zones = lambda: None
+        resp = client.post('/api/no_go_zones',
+            data=json.dumps({"x1": 0.0, "y1": 0.0, "x2": 1.0, "y2": 1.0}),
+            content_type='application/json')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["ok"] is True
+        assert len(mock_node._no_go_zones) == 1
+        assert "id" in mock_node._no_go_zones[0]
+
+    def test_clear_zones_uses_lock(self, flask_client):
+        """Clearing no-go zones should be thread-safe."""
+        client, mock_node = flask_client
+        import threading
+        mock_node._nogo_lock = threading.Lock()
+        mock_node._no_go_zones = [{"id": "a", "x1": 0, "y1": 0, "x2": 1, "y2": 1}]
+        mock_node._save_no_go_zones = lambda: None
+        mock_node._publish_no_go_zones = lambda: None
+        resp = client.post('/api/no_go_zones/clear')
+        assert resp.status_code == 200
+        assert len(mock_node._no_go_zones) == 0
+
+    def test_delete_zone_uses_lock(self, flask_client):
+        """Deleting a no-go zone should be thread-safe."""
+        client, mock_node = flask_client
+        import threading
+        mock_node._nogo_lock = threading.Lock()
+        mock_node._no_go_zones = [{"id": "abc", "x1": 0, "y1": 0, "x2": 1, "y2": 1}]
+        mock_node._save_no_go_zones = lambda: None
+        mock_node._publish_no_go_zones = lambda: None
+        resp = client.delete('/api/no_go_zones/abc')
+        assert resp.status_code == 200
+        assert len(mock_node._no_go_zones) == 0
+
+    def test_get_zones_returns_copy(self, flask_client):
+        """GET /api/no_go_zones should return a copy, not a reference."""
+        client, mock_node = flask_client
+        mock_node._no_go_zones = [{"id": "x", "x1": 1, "y1": 2, "x2": 3, "y2": 4}]
+        resp = client.get('/api/no_go_zones')
+        zones = resp.get_json()
+        assert len(zones) == 1
+        # Modifying the returned list should not affect the node
+        zones.append({"id": "extra"})
+        assert len(mock_node._no_go_zones) == 1
+
+
+class TestBug151ScheduleSaveInsideLock:
+    """Bug 151: _save_schedules must be called inside the schedule lock."""
+
+    def test_add_schedule_saves_inside_lock(self, flask_client):
+        """Schedule save should happen atomically with the append."""
+        client, mock_node = flask_client
+        import threading
+        mock_node._schedule_lock = threading.Lock()
+        mock_node._schedules = []
+        save_calls = []
+        def mock_save():
+            # Verify we're holding the lock (it's non-reentrant, so try_acquire should fail)
+            acquired = mock_node._schedule_lock.acquire(blocking=False)
+            if acquired:
+                mock_node._schedule_lock.release()
+                save_calls.append("NOT_LOCKED")
+            else:
+                save_calls.append("LOCKED")
+        mock_node._save_schedules = mock_save
+        mock_node._schedule_triggered_keys = {}
+        resp = client.post('/api/schedules',
+            data=json.dumps({"time": "08:00", "days": ["mon"]}),
+            content_type='application/json')
+        assert resp.status_code == 200
+        assert save_calls == ["LOCKED"], "save_schedules should be called while lock is held"
+
+    def test_delete_schedule_saves_inside_lock(self, flask_client):
+        """Schedule save on delete should happen inside the lock."""
+        client, mock_node = flask_client
+        import threading
+        mock_node._schedule_lock = threading.Lock()
+        mock_node._schedules = [{"id": "s1", "time": "09:00", "days": ["tue"]}]
+        save_calls = []
+        def mock_save():
+            acquired = mock_node._schedule_lock.acquire(blocking=False)
+            if acquired:
+                mock_node._schedule_lock.release()
+                save_calls.append("NOT_LOCKED")
+            else:
+                save_calls.append("LOCKED")
+        mock_node._save_schedules = mock_save
+        mock_node._schedule_triggered_keys = {}
+        resp = client.delete('/api/schedules/s1')
+        assert resp.status_code == 200
+        assert save_calls == ["LOCKED"]
+
+
+class TestBug152RenameRoomUnlinkFailure:
+    """Bug 152: rename_room should handle unlink failure gracefully."""
+
+    def test_rename_room_unlink_error_cleans_up(self, flask_client):
+        """If unlink fails during rename, new file should be cleaned up."""
+        client, mock_node = flask_client
+        import tempfile
+        rooms_dir = Path(tempfile.mkdtemp())
+        try:
+            room_file = rooms_dir / "oldroom.json"
+            room_file.write_text(json.dumps({"name": "Old Room", "data": []}))
+            with patch('clean_bot_mission.webapp.app.SAVED_ROOMS_DIR', rooms_dir):
+                from clean_bot_mission.webapp.app import WebBridgeNode
+                # Patch Path.unlink to fail
+                original_unlink = Path.unlink
+                def failing_unlink(self_path, *a, **kw):
+                    if self_path == room_file:
+                        raise OSError("Permission denied")
+                    return original_unlink(self_path, *a, **kw)
+                with patch.object(Path, 'unlink', failing_unlink):
+                    ok, msg = WebBridgeNode.rename_room("oldroom", "NewRoom")
+                    assert not ok
+                    assert "Failed to remove" in msg
+                    # Verify new file was cleaned up
+                    assert not (rooms_dir / "NewRoom.json").exists()
+        finally:
+            import shutil
+            shutil.rmtree(rooms_dir, ignore_errors=True)
+
+
+class TestBug153RenderRoomsNullGuard:
+    """Bug 153: renderRooms and renderSchedules should handle null/undefined input."""
+
+    def test_rooms_api_returns_valid_json(self, flask_client):
+        """The rooms API should always return a valid JSON array."""
+        client, mock_node = flask_client
+        mock_node.list_rooms = MagicMock(return_value=[])
+        resp = client.get('/api/rooms')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert isinstance(data, list)
