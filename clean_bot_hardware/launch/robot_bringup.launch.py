@@ -50,7 +50,7 @@ def generate_launch_description():
     
     # Hardware ports
     arduino_port = LaunchConfiguration('arduino_port', default='/dev/ttyACM0')
-    lidar_port = LaunchConfiguration('lidar_port', default='/dev/ttyUSB1')
+    lidar_port = LaunchConfiguration('lidar_port', default='/dev/lidar')
     i2c_bus = LaunchConfiguration('i2c_bus', default='1')
     
     # Robot parameters (for calibration)
@@ -73,7 +73,7 @@ def generate_launch_description():
         DeclareLaunchArgument('use_sim_time', default_value='false'),
         DeclareLaunchArgument('arduino_port', default_value='/dev/ttyACM0',
                               description='Serial port for Arduino'),
-        DeclareLaunchArgument('lidar_port', default_value='/dev/ttyUSB1',
+        DeclareLaunchArgument('lidar_port', default_value='/dev/lidar',
                               description='Serial port for RPLidar'),
         DeclareLaunchArgument('i2c_bus', default_value='1',
                               description='I2C bus number for IMU'),
