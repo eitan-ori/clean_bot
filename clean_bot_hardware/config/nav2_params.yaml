@@ -10,7 +10,7 @@
 # KEY PARAMETERS:
 # - robot_model_type: DifferentialMotionModel (For two-wheeled drive).
 # - inflation_layer: Configured for a small (~20cm) footprint.
-# - scan_topic: /scan_throttled (Used for both localization and obstacle avoidance).
+# - scan_topic: /scan (Used for both localization and obstacle avoidance).
 # - odom_frame: odom.
 # - base_frame: base_link.
 #
@@ -63,7 +63,7 @@ amcl:
     z_max: 0.05
     z_rand: 0.5
     z_short: 0.05
-    scan_topic: scan_throttled
+    scan_topic: scan
 
 bt_navigator:
   ros__parameters:
@@ -215,7 +215,7 @@ local_costmap:
         observation_sources: scan low_obstacles
         # Lidar at 17cm height - walls, furniture, large obstacles
         scan:
-          topic: /scan_throttled
+          topic: /scan
           sensor_frame: laser
           max_obstacle_height: 2.0
           min_obstacle_height: 0.0
@@ -260,7 +260,7 @@ global_costmap:
         observation_sources: scan low_obstacles
         # Lidar at 17cm height
         scan:
-          topic: /scan_throttled
+          topic: /scan
           sensor_frame: laser
           max_obstacle_height: 2.0
           min_obstacle_height: 0.0

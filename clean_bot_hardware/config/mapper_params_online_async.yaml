@@ -36,7 +36,7 @@ slam_toolbox:
     odom_frame: odom
     map_frame: map
     base_frame: base_link
-    scan_topic: /scan_throttled
+    scan_topic: /scan
     mode: mapping # localization
 
     # Mapping / SLAM Params

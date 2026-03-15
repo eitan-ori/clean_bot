@@ -134,7 +134,7 @@ def generate_launch_description():
                 'inverted': True,  # LiDAR mounted 180 degrees rotated
                 'angle_compensate': True,
                 'scan_mode': '',  # Auto-detect scan mode
-                'scan_frequency': 10.0,  # Target scan frequency
+                'scan_frequency': 5.0,  # Reduced from 10Hz for Pi CPU performance
             }],
             # Respawn if it crashes - allows recovery if LIDAR reconnects
             respawn=False,  # Set to True to auto-restart on failure
@@ -207,15 +207,6 @@ def generate_launch_description():
                 ('imu/data', 'imu/data'),
             ]
         ),
-        # ==================== Scan Throttler ====================
-        # Throttle lidar scan rate from 10Hz to 5Hz to reduce CPU load
-        Node(
-            package='topic_tools',
-            executable='throttle',
-            name='scan_throttler',
-            output='screen',
-            arguments=['messages', '/scan', '5.0', '/scan_throttled']
-        ),
         # ==================== RF2O Laser Odometry ====================
         # CRITICAL: This is the ONLY source of odometry (no wheel encoders!)
         # Provides odom->base_link TF based on laser scan matching
@@ -225,13 +216,13 @@ def generate_launch_description():
             name='rf2o_laser_odometry',
             output='screen',
             parameters=[{
-                'laser_scan_topic': '/scan_throttled',   # Use throttled scan (5Hz) for odometry
+                'laser_scan_topic': '/scan',   # Direct scan (LiDAR at 5Hz now)
                 'odom_topic': '/odom',
                 'publish_tf': True,
                 'base_frame_id': 'base_link',
                 'odom_frame_id': 'odom',
                 'init_pose_from_topic': '',
-                'freq': 5.0,                             # Match throttled scan rate
+                'freq': 5.0,                             # Match LiDAR scan rate
             }],
         ),
         # ==================== SLAM Toolbox ====================
