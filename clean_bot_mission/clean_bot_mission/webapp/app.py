@@ -1187,7 +1187,10 @@ def api_rename_room(filename):
     new_name = body.get("name", "").strip()
     if not new_name:
         return jsonify({"error": "New name required"}), 400
-    ok, info = WebBridgeNode.rename_room(filename, new_name)
+    try:
+        ok, info = WebBridgeNode.rename_room(filename, new_name)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
     if ok:
         return jsonify({"ok": True, "new_filename": info})
     return jsonify({"error": info}), 404
@@ -1267,7 +1270,7 @@ def api_add_schedule():
     if not sched_time or not days:
         return jsonify({"error": "Time and days required"}), 400
     import re
-    if not re.match(r'^[0-2]\d:[0-5]\d$', sched_time):
+    if not re.match(r'^([01]\d|2[0-3]):[0-5]\d$', sched_time):
         return jsonify({"error": "Invalid time format (expected HH:MM)"}), 400
     valid_days = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
     if not isinstance(days, list) or not all(d in valid_days for d in days):
