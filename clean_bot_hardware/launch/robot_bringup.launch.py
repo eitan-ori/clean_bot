@@ -227,7 +227,7 @@ def generate_launch_description():
             name='rf2o_laser_odometry',
             output='screen',
             parameters=[{
-                'laser_scan_topic': '/scan',   # Throttled to 5Hz by scan_throttle node
+                'laser_scan_topic': '/scan_raw',  # Raw LiDAR (NOT /scan — avoids deadlock with scan_throttle)
                 'odom_topic': '/odom',
                 'publish_tf': True,
                 'base_frame_id': 'base_link',
