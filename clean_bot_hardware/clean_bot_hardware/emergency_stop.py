@@ -64,8 +64,12 @@ class EmergencyStopController(Node):
         # ===================== Subscribers =====================
         self.range_sub = self.create_subscription(
             Range, 'ultrasonic_range', self.range_callback, 10)
-        # Subscribe to cmd_vel (output of Nav2 velocity_smoother)
+        # Subscribe to cmd_vel_nav (Nav2 controller output, before velocity_smoother)
+        # Also subscribe to cmd_vel (velocity_smoother output, manual joystick, etc.)
+        # Whichever fires last wins — both feed through safety filter to cmd_vel_safe.
         self.cmd_vel_sub = self.create_subscription(
+            Twist, 'cmd_vel_nav', self.cmd_vel_callback, 10)
+        self.cmd_vel_sub2 = self.create_subscription(
             Twist, 'cmd_vel', self.cmd_vel_callback, 10)
 
         # ===================== State =====================

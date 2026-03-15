@@ -106,6 +106,10 @@ class ArduinoDriver(Node):
         # Subscribe to cmd_vel_safe (emergency_stop output) — final vetted commands
         self.cmd_vel_sub = self.create_subscription(
             Twist, 'cmd_vel_safe', self.cmd_vel_callback, 10)
+        # Fallback: also subscribe to cmd_vel_nav directly in case emergency_stop
+        # is not running. This ensures the robot can still move.
+        self.cmd_vel_nav_sub = self.create_subscription(
+            Twist, 'cmd_vel_nav', self.cmd_vel_callback, 10)
         
         # Subscribe to mission commands for cleaning control (legacy)
         self.mission_cmd_sub = self.create_subscription(
