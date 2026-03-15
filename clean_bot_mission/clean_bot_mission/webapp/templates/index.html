@@ -1687,8 +1687,10 @@ window.closeSettings = function(e) {
   settingsOverlay.classList.remove('active');
 };
 window.saveSettings = function() {
-  const mapRate = parseFloat(document.getElementById('setMapRate').value);
-  const driveSpeed = parseFloat(document.getElementById('setDriveSpeed').value);
+  let mapRate = parseFloat(document.getElementById('setMapRate').value);
+  if (!isFinite(mapRate) || mapRate <= 0) mapRate = 0.5;
+  let driveSpeed = parseFloat(document.getElementById('setDriveSpeed').value);
+  if (!isFinite(driveSpeed) || driveSpeed <= 0) driveSpeed = 0.15;
   const notifOn = document.getElementById('setNotifSound').checked;
   const theme = document.getElementById('setTheme').value;
   const lang = document.getElementById('setLang').value;

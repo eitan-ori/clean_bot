@@ -1365,6 +1365,7 @@ class AdaptiveCoveragePlanner(Node):
             self.get_logger().warn(f'   ⚠️ Goal send failed: {e}')
             self.failed_waypoints += 1
             self.is_navigating = False
+            self.current_goal_handle = None
             self.current_waypoint_idx += 1
             self.send_next_goal()
             return
@@ -1377,6 +1378,7 @@ class AdaptiveCoveragePlanner(Node):
                 self.missed_waypoints.append(self.waypoints[self.current_waypoint_idx])
             
             self.is_navigating = False
+            self.current_goal_handle = None
             self.current_waypoint_idx += 1
             self.send_next_goal()
             return

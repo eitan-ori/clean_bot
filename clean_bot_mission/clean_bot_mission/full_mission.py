@@ -101,6 +101,7 @@ class FullMissionController(Node):
         self.state = MissionState.WAITING_FOR_SCAN
         self.previous_state = None  # For pause/resume
         self.start_time = None
+        self._auto_start_timer = None
         self.exploration_complete = False
         self.coverage_complete = False
 
@@ -427,6 +428,8 @@ class FullMissionController(Node):
 
     def start_coverage(self):
         """Trigger coverage phase."""
+        if self.start_time is None:
+            self.start_time = time.time()
         self.get_logger().info('')
         self.get_logger().info('🧹 Starting coverage/cleaning phase...')
         self._activate_cleaning_hardware()

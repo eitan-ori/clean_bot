@@ -3730,3 +3730,110 @@ class TestOptimizePathOrder:
         result = p.optimize_path_order(wps)
         # First pair in result should still be pair 1 (optimize_path_order starts from first)
         assert len(result) == 6
+
+
+# ══════════════════════════════════════════════════════════════════
+# Bug 155: Coverage planner stale goal handle on error/rejection
+# ══════════════════════════════════════════════════════════════════
+
+class TestBug155StaleGoalHandle:
+    """Bug 155: current_goal_handle should be cleared on goal send failure and rejection."""
+
+    def test_goal_send_failure_clears_handle(self):
+        """When goal_response_callback gets an exception, current_goal_handle should be None."""
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as ACP
+        p = MagicMock()
+        p.goal_response_callback = ACP.goal_response_callback.__get__(p)
+        p.current_goal_handle = MagicMock()  # Old handle
+        p.is_navigating = True
+        p.failed_waypoints = 0
+        p.current_waypoint_idx = 0
+        p.waypoints = [(1.0, 2.0, 0.0), (3.0, 4.0, 0.0)]
+
+        future = MagicMock()
+        future.result.side_effect = Exception("send failed")
+
+        p.goal_response_callback(future)
+
+        assert p.current_goal_handle is None
+        assert p.is_navigating is False
+        assert p.failed_waypoints == 1
+        assert p.current_waypoint_idx == 1
+
+    def test_goal_rejected_clears_handle(self):
+        """When goal is rejected, current_goal_handle should be None."""
+        from clean_bot_mission.adaptive_coverage import AdaptiveCoveragePlanner as ACP
+        p = MagicMock()
+        p.goal_response_callback = ACP.goal_response_callback.__get__(p)
+        p.current_goal_handle = MagicMock()  # Old handle
+        p.is_navigating = True
+        p.failed_waypoints = 0
+        p.current_waypoint_idx = 0
+        p.missed_waypoints = []
+        p.waypoints = [(1.0, 2.0, 0.0), (3.0, 4.0, 0.0)]
+
+        goal_handle = MagicMock()
+        goal_handle.accepted = False
+        future = MagicMock()
+        future.result.return_value = goal_handle
+
+        p.goal_response_callback(future)
+
+        assert p.current_goal_handle is None
+        assert p.is_navigating is False
+        assert p.failed_waypoints == 1
+
+
+# ══════════════════════════════════════════════════════════════════
+# Bug 156: start_time not set when coverage starts directly
+# ══════════════════════════════════════════════════════════════════
+
+class TestBug156StartTimeCoverage:
+    """Bug 156: start_time should be set when start_coverage is called
+    from WAITING_FOR_SCAN (without exploration first)."""
+
+    def test_start_coverage_sets_start_time(self):
+        """start_coverage should set start_time if not already set."""
+        from clean_bot_mission.full_mission import FullMissionController as FMC
+        m = MagicMock()
+        m.start_coverage = FMC.start_coverage.__get__(m)
+        m.start_time = None
+        m.exploration_complete_pub = MagicMock()
+        m.coverage_control_pub = MagicMock()
+
+        m.start_coverage()
+
+        assert m.start_time is not None
+        assert m.start_time > 0
+
+    def test_start_coverage_preserves_existing_start_time(self):
+        """start_coverage should NOT overwrite start_time if already set."""
+        from clean_bot_mission.full_mission import FullMissionController as FMC
+        m = MagicMock()
+        m.start_coverage = FMC.start_coverage.__get__(m)
+        m.start_time = 12345.0
+        m.exploration_complete_pub = MagicMock()
+        m.coverage_control_pub = MagicMock()
+
+        m.start_coverage()
+
+        assert m.start_time == 12345.0
+
+    def test_direct_clean_without_scan_has_valid_elapsed(self):
+        """When starting clean from WAITING_FOR_SCAN, finish_mission should report valid time."""
+        from clean_bot_mission.full_mission import FullMissionController as FMC, MissionState
+        m = MagicMock()
+        m.start_coverage = FMC.start_coverage.__get__(m)
+        m.finish_mission = FMC.finish_mission.__get__(m)
+        m.cmd_vel_pub = MagicMock()
+        m.state = MissionState.WAITING_FOR_SCAN
+        m.start_time = None
+        m.exploration_complete_pub = MagicMock()
+        m.coverage_control_pub = MagicMock()
+
+        m.start_coverage()
+        assert m.start_time is not None
+
+        # finish_mission should not crash and should compute valid elapsed
+        m.finish_mission()
+        assert m.state == MissionState.COMPLETE

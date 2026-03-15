@@ -763,3 +763,23 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/templates/index.html`
 - **Problem:** `renderRooms(rooms)` called `rooms.length` without null check. If `fetch('/api/rooms').then(r => r.json())` returned `null` or `undefined` (malformed JSON response), the function threw `TypeError: Cannot read properties of undefined (reading 'length')`, breaking the rooms panel. Same issue in `renderSchedules`.
 - **Fix:** Added `!rooms ||` and `!scheds ||` guards before `.length` checks in both functions.
+
+### Bug 154: Settings NaN validation
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/templates/index.html`
+- **Problem:** `saveSettings()` used `parseFloat()` on user input without validating the result. If user entered non-numeric text, `NaN` was stored in localStorage and emitted to the server, causing invalid map update rates and drive speeds.
+- **Fix:** Added `isFinite()` checks with fallback defaults (0.5 for mapRate, 0.15 for driveSpeed).
+
+### Bug 155: Coverage planner stale goal handle on error/rejection
+- **File:** `clean_bot_mission/clean_bot_mission/adaptive_coverage.py`
+- **Problem:** In `goal_response_callback`, when a goal send failed (exception) or was rejected, `current_goal_handle` was not cleared. If `cancel_current_goal()` was called before the next successful goal, it would attempt to cancel an outdated handle from a previous navigation cycle.
+- **Fix:** Added `self.current_goal_handle = None` in both the exception handler and the rejection branch.
+
+### Bug 156: start_time not set when starting coverage directly
+- **File:** `clean_bot_mission/clean_bot_mission/full_mission.py`
+- **Problem:** `start_coverage()` did not set `start_time`. When a user sent `start_clean` from `WAITING_FOR_SCAN` state (cleaning a saved room without scanning first), `start_time` remained `None`. The mission completion message reported "0.0 minutes" elapsed time.
+- **Fix:** Added `if self.start_time is None: self.start_time = time.time()` at the start of `start_coverage()`.
+
+### Bug 157: _auto_start_timer attribute not initialized defensively
+- **File:** `clean_bot_mission/clean_bot_mission/full_mission.py`
+- **Problem:** `_auto_start_timer` was only created inside an `if self.auto_start:` block. If `auto_start=False`, the attribute never existed on the instance. Any future code referencing it (e.g., cleanup logic) would raise `AttributeError`.
+- **Fix:** Added `self._auto_start_timer = None` initialization before the conditional block.
