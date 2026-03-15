@@ -136,8 +136,24 @@ def generate_launch_description():
                 'scan_mode': '',  # Auto-detect scan mode
                 'scan_frequency': 10.0,  # 10Hz = ~800 points/scan, fast rf2o processing
             }],
-            # Respawn if it crashes - allows recovery if LIDAR reconnects
-            respawn=False,  # Set to True to auto-restart on failure
+            # Publish raw scans at full rate; throttle node limits rate for consumers
+            remappings=[('/scan', '/scan_raw')],
+            respawn=False,
+        ),
+        # ==================== Scan Throttle ====================
+        # Pi 4 can't process 10Hz scans across all consumers (rf2o, SLAM, 2 costmaps).
+        # Throttle to 5Hz so every scan gets a matching TF from rf2o.
+        Node(
+            package='topic_tools',
+            executable='throttle',
+            name='scan_throttle',
+            output='screen',
+            parameters=[{
+                'input_topic': '/scan_raw',
+                'output_topic': '/scan',
+                'throttle_type': 'messages',
+                'msgs_per_sec': 5.0,
+            }],
         ),
 
         # ==================== IMU Publisher ====================
@@ -216,13 +232,13 @@ def generate_launch_description():
             name='rf2o_laser_odometry',
             output='screen',
             parameters=[{
-                'laser_scan_topic': '/scan',   # Direct scan (LiDAR at 5Hz now)
+                'laser_scan_topic': '/scan',   # Throttled to 5Hz by scan_throttle node
                 'odom_topic': '/odom',
                 'publish_tf': True,
                 'base_frame_id': 'base_link',
                 'odom_frame_id': 'odom',
                 'init_pose_from_topic': '',
-                'freq': 5.0,                             # Match LiDAR scan rate
+                'freq': 10.0,                            # Process every incoming scan
             }],
         ),
         # ==================== SLAM Toolbox ====================
