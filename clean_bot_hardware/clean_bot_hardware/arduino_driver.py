@@ -268,7 +268,8 @@ class ArduinoDriver(Node):
                     # Try to parse as distance (single number)
                     try:
                         distance_cm = float(line)
-                        self._publish_range(distance_cm, now)
+                        if 0 <= distance_cm <= 500:
+                            self._publish_range(distance_cm, now)
                     except ValueError:
                         pass  # Not a distance reading, ignore
                         

@@ -783,3 +783,13 @@
 - **File:** `clean_bot_mission/clean_bot_mission/full_mission.py`
 - **Problem:** `_auto_start_timer` was only created inside an `if self.auto_start:` block. If `auto_start=False`, the attribute never existed on the instance. Any future code referencing it (e.g., cleanup logic) would raise `AttributeError`.
 - **Fix:** Added `self._auto_start_timer = None` initialization before the conditional block.
+
+### Bug 158: create_map_image returns None instead of tuple on malformed data
+- **File:** `clean_bot_mission/scripts/telegram_bridge.py`
+- **Problem:** `create_map_image()` returned `None` (not a tuple) when map data was malformed (line 175), but all callers unpacked the result as `image, info = ros_node.create_map_image()`. This caused `TypeError: cannot unpack non-iterable NoneType object`, crashing the Telegram `/map` command and mission-complete auto-send.
+- **Fix:** Changed `return None` to `return None, "Malformed map data"` to match the expected tuple return type.
+
+### Bug 159: Ultrasonic distance values not validated before publishing
+- **File:** `clean_bot_hardware/clean_bot_hardware/arduino_driver.py`
+- **Problem:** Distance values parsed from Arduino serial output were published as Range messages without bounds validation. Negative values, extremely large values (sensor noise), or garbled data (e.g., `-999.5`, `1000000.0`) would be published as valid Range messages, confusing downstream obstacle detection.
+- **Fix:** Added bounds check `if 0 <= distance_cm <= 500` before publishing. Values outside 0-500cm (0-5m) range are silently dropped.

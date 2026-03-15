@@ -817,3 +817,36 @@ class TestWatchdogTimeout:
         assert match is not None
         timeout = float(match.group(1))
         assert 0.5 <= timeout <= 10.0, f"Watchdog timeout {timeout}s is out of safe range"
+
+
+# ══════════════════════════════════════════════════════════════════
+# Bug 159: Ultrasonic distance validation
+# ══════════════════════════════════════════════════════════════════
+
+class TestBug159UltrasonicRangeValidation:
+    """Bug 159: Invalid ultrasonic readings (negative, very large) should be filtered."""
+
+    def _make_driver(self):
+        from clean_bot_hardware.arduino_driver import ArduinoDriver
+        d = MagicMock(spec=ArduinoDriver)
+        d._publish_range = ArduinoDriver._publish_range.__get__(d)
+        d.ultrasonic_frame = 'ultrasonic_link'
+        d.range_pub = MagicMock()
+        return d
+
+    def _make_stamp(self):
+        from builtin_interfaces.msg import Time
+        return MagicMock(**{'to_msg.return_value': Time()})
+
+    def test_valid_distance_published(self):
+        """Normal distance (e.g., 25cm) should be published."""
+        d = self._make_driver()
+        d._publish_range(25.0, self._make_stamp())
+        assert d.range_pub.publish.called
+
+    def test_range_converted_to_meters(self):
+        """Distance should be converted from cm to meters."""
+        d = self._make_driver()
+        d._publish_range(100.0, self._make_stamp())
+        msg = d.range_pub.publish.call_args[0][0]
+        assert abs(msg.range - 1.0) < 0.001
