@@ -738,3 +738,8 @@
 - **File:** `clean_bot_mission/clean_bot_mission/webapp/app.py`
 - **Problem:** `load_and_clean_room()` called `float(d.get("origin_x", 0.0))` without try/except. If a saved room file had a non-numeric `origin_x` value, the function would crash with `ValueError`.
 - **Fix:** Wrapped origin parsing in try/except, defaulting to (0.0, 0.0) on error.
+
+### Bug 149: All web UI buttons unclickable when socket.io.js fails to load
+- **File:** `clean_bot_mission/clean_bot_mission/webapp/templates/index.html`
+- **Problem:** The entire frontend JavaScript is wrapped in a strict-mode IIFE. The very first statement inside it is `const socket = io()`. If `socket.io.js` fails to load (network issue, CORS, server not running Flask-SocketIO, etc.), `io` is undefined and `io()` throws a `ReferenceError`. In strict mode, this uncaught error halts the entire IIFE — no event handlers for ANY button (theme toggle, language, settings, mission controls) are ever registered, making the page completely non-interactive.
+- **Fix:** (1) Added `onerror` handler on the socket.io script tag to set a fallback flag. (2) Added CDN fallback script that loads only when the local socket.io.js fails. (3) Wrapped the `io()` call in a try/catch block that creates a stub socket object on failure, allowing all non-socket UI features (theme, language, settings, map controls) to continue working in "offline mode".

@@ -657,13 +657,27 @@ html.light .toast{background:#fff;color:var(--text)}
 <div class="toast-container" id="toasts"></div>
 
 <!-- ═══ Scripts ═══ -->
-<script src="/socket.io/socket.io.js"></script>
+<script src="/socket.io/socket.io.js" onerror="window._sioFail=true"></script>
+<script>if(window._sioFail){document.write('<scr'+'ipt src="https://cdn.socket.io/4.7.5/socket.io.min.js"><\/scr'+'ipt>')}</script>
 <script>
 (function(){
 "use strict";
 
 /* ── Socket.IO ─────────────────────────────────── */
-const socket = io();
+let socket;
+try {
+  socket = io();
+} catch(e) {
+  // socket.io.js failed to load — create a stub so the page still works
+  const _noop = function(){};
+  const _stubOn = {};
+  socket = {
+    on: function(ev, fn){ if(!_stubOn[ev]) _stubOn[ev]=[]; _stubOn[ev].push(fn); },
+    off: _noop, emit: _noop, connected: false,
+    _callbacks: {}
+  };
+  console.warn('Socket.IO unavailable — running in offline mode', e);
+}
 const connDot = document.getElementById('connDot');
 const connLabel = document.getElementById('connLabel');
 
