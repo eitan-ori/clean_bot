@@ -69,7 +69,8 @@ slam_toolbox:
 
     # Transform Publishing - CRITICAL for navigation!
     # Without this, SLAM won't publish map→odom TF and coverage will fail
-    transform_publish_period: 0.05
+    # 0.5s = 2Hz is enough for map→odom (low-bandwidth); 0.05 floods Pi TF system
+    transform_publish_period: 0.5
 
     # Probability / Clearing Params
     laserscan_adaptive_vals: false

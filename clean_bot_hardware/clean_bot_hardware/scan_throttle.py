@@ -18,14 +18,19 @@ class ScanThrottle(Node):
         self.period = 1.0 / max(rate, 0.1)
         self.last_publish = 0.0
 
-        qos = QoSProfile(
+        sub_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             durability=DurabilityPolicy.VOLATILE,
             depth=1,
         )
-        self.pub = self.create_publisher(LaserScan, '/scan', qos)
+        pub_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.VOLATILE,
+            depth=5,
+        )
+        self.pub = self.create_publisher(LaserScan, '/scan', pub_qos)
         self.sub = self.create_subscription(
-            LaserScan, '/scan_raw', self._on_scan, qos
+            LaserScan, '/scan_raw', self._on_scan, sub_qos
         )
         self.get_logger().info(
             f'Throttling /scan_raw -> /scan at {rate:.1f} Hz'
