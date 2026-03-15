@@ -134,7 +134,7 @@ def generate_launch_description():
                 'inverted': True,  # LiDAR mounted 180 degrees rotated
                 'angle_compensate': True,
                 'scan_mode': '',  # Auto-detect scan mode
-                'scan_frequency': 5.0,  # Reduced from 10Hz for Pi CPU performance
+                'scan_frequency': 10.0,  # 10Hz = ~800 points/scan, fast rf2o processing
             }],
             # Respawn if it crashes - allows recovery if LIDAR reconnects
             respawn=False,  # Set to True to auto-restart on failure
