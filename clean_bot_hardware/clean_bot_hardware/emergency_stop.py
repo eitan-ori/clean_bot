@@ -7,13 +7,13 @@
 # modifies incoming velocity commands from navigation to prevent collisions.
 #
 # MAIN FUNCTIONS:
-# 1. Subscribes to /cmd_vel_nav (input from the navigation stack).
+# 1. Subscribes to /cmd_vel (input from velocity_smoother, which gets Nav2 output).
 # 2. Subscribes to /ultrasonic_range (real-time distance to obstacles).
 # 3. Filters forward velocity:
 #    - Obstacle < distance_stop: Linear velocity set to 0 (Full Stop).
 #    - Obstacle < distance_slow: Linear velocity scaled down (Caution).
 #    - Obstacle > distance_slow: Velocity passes through unchanged.
-# 4. Publishes final vetted commands to /cmd_vel.
+# 4. Publishes final vetted commands to /cmd_vel_safe.
 #
 # PARAMETERS & VALUES:
 # - emergency_stop_distance: 0.10 m (Triggers immediate halt).
@@ -23,7 +23,7 @@
 # - timeout_sec: 0.5 s (Safety fallback if sensor data stops arriving).
 #
 # ASSUMPTIONS:
-# - The navigation stack outputs to /cmd_vel_nav instead of /cmd_vel.
+# - The velocity_smoother outputs smoothed commands to /cmd_vel.
 # - The ultrasonic sensor is facing forward and providing accurate range data.
 # - Rotation is always allowed even in stop state (to let the robot turn away).
 ###############################################################################
@@ -57,14 +57,16 @@ class EmergencyStopController(Node):
         self.timeout = self.get_parameter('timeout_sec').value
 
         # ===================== Publishers =====================
-        self.cmd_vel_pub = self.create_publisher(Twist, 'cmd_vel', 10)
+        # Output to cmd_vel_safe — arduino_driver subscribes to this
+        self.cmd_vel_pub = self.create_publisher(Twist, 'cmd_vel_safe', 10)
         self.obstacle_pub = self.create_publisher(Bool, 'obstacle_detected', 10)
 
         # ===================== Subscribers =====================
         self.range_sub = self.create_subscription(
             Range, 'ultrasonic_range', self.range_callback, 10)
+        # Subscribe to cmd_vel (output of Nav2 velocity_smoother)
         self.cmd_vel_sub = self.create_subscription(
-            Twist, 'cmd_vel_nav', self.cmd_vel_callback, 10)
+            Twist, 'cmd_vel', self.cmd_vel_callback, 10)
 
         # ===================== State =====================
         self.current_distance = 100

@@ -136,7 +136,9 @@ controller_server:
     goal_checker_plugins: ["general_goal_checker"]
     controller_plugins: ["FollowPath"]
     # Output to cmd_vel_nav - emergency_stop filters and sends to cmd_vel
-    cmd_vel_topic: "cmd_vel_nav"
+    # NOTE: Do NOT set cmd_vel_topic here - the Nav2 launch file already
+    # remaps cmd_vel -> cmd_vel_nav at the RMW level.  Setting the parameter
+    # too would double-remap and break the velocity_smoother chain.
 
     # Progress checker - more forgiving for slow exploration
     progress_checker:

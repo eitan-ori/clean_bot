@@ -7,7 +7,7 @@
 # to control motors, relay, servo, and retrieve sensor feedback (ultrasonic).
 #
 # MAIN FUNCTIONS:
-# 1. Subscribes to /cmd_vel and converts twist commands into motor PWM values.
+# 1. Subscribes to /cmd_vel_safe and converts twist commands into motor PWM values.
 # 2. Receives and publishes ultrasonic range data for obstacle avoidance.
 # 3. Handles cleaning commands (start_clean/stop_clean) - controls relay & servo.
 #
@@ -103,8 +103,9 @@ class ArduinoDriver(Node):
         self.debug_cmd_pub = self.create_publisher(Twist, 'cmd_vel_debug', 10)
         
         # ===================== Subscribers =====================
+        # Subscribe to cmd_vel_safe (emergency_stop output) — final vetted commands
         self.cmd_vel_sub = self.create_subscription(
-            Twist, 'cmd_vel', self.cmd_vel_callback, 10)
+            Twist, 'cmd_vel_safe', self.cmd_vel_callback, 10)
         
         # Subscribe to mission commands for cleaning control (legacy)
         self.mission_cmd_sub = self.create_subscription(
