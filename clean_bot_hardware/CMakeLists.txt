@@ -50,6 +50,12 @@ install(PROGRAMS
   RENAME emergency_stop
 )
 
+install(PROGRAMS
+  clean_bot_hardware/scan_throttle.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME scan_throttle
+)
+
 # Install launch files
 install(DIRECTORY launch/
   DESTINATION share/${PROJECT_NAME}/launch

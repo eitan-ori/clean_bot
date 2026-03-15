@@ -144,16 +144,11 @@ def generate_launch_description():
         # Pi 4 can't process 10Hz scans across all consumers (rf2o, SLAM, 2 costmaps).
         # Throttle to 5Hz so every scan gets a matching TF from rf2o.
         Node(
-            package='topic_tools',
-            executable='throttle',
+            package='clean_bot_hardware',
+            executable='scan_throttle',
             name='scan_throttle',
             output='screen',
-            parameters=[{
-                'input_topic': '/scan_raw',
-                'output_topic': '/scan',
-                'throttle_type': 'messages',
-                'msgs_per_sec': 5.0,
-            }],
+            parameters=[{'rate': 5.0}],
         ),
 
         # ==================== IMU Publisher ====================
