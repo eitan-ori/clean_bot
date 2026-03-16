@@ -44,6 +44,9 @@ setup(
             
             # Web control panel
             'web_control = clean_bot_mission.webapp.app:main',
+            
+            # Diagnostic monitor for scan mode
+            'scan_monitor = clean_bot_mission.scan_monitor:main',
         ],
     },
 )
