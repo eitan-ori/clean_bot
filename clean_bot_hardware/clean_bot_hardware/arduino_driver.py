@@ -81,22 +81,9 @@ class ArduinoDriver(Node):
         self.get_logger().info(f'Arduino Driver v3.0 (No Encoders, With Relay) [velocity_factor={self.velocity_factor}]')
         
         # ===================== Serial Connection =====================
-        try:
-            self.serial = serial.Serial(
-                self.serial_port, 
-                self.baud_rate, 
-                timeout=0.1
-            )
-            self.get_logger().info(f'✅ Connected to Arduino on {self.serial_port}')
-        except serial.SerialException as e:
-            self.get_logger().error(f'❌ Failed to connect to Arduino: {e}')
-            self.get_logger().error('Make sure:')
-            self.get_logger().error('  1. Arduino is connected via USB')
-            self.get_logger().error('  2. Serial port is correct (check with: ls /dev/ttyUSB* /dev/ttyACM*)')
-            self.get_logger().error('  3. User has permission (sudo usermod -a -G dialout $USER)')
-            raise SystemExit(1)
-
+        self.serial = None
         self._serial_lock = threading.Lock()
+        self._connect_serial()
 
         # ===================== Publishers =====================
         self.range_pub = self.create_publisher(Range, 'ultrasonic_range', 10)
@@ -130,11 +117,35 @@ class ArduinoDriver(Node):
         # ===================== Timer =====================
         timer_period = 1.0 / publish_rate
         self.timer = self.create_timer(timer_period, self.update_loop)
+        self.retry_timer = self.create_timer(5.0, self._retry_serial)
         
         self.get_logger().info(f'Arduino Driver started (with cleaning control)')
 
+    def _connect_serial(self):
+        """Try to open the serial port. Sets self.serial on success, None on failure."""
+        try:
+            self.serial = serial.Serial(
+                self.serial_port,
+                self.baud_rate,
+                timeout=0.1
+            )
+            self.get_logger().info(f'✅ Connected to Arduino on {self.serial_port}')
+        except serial.SerialException as e:
+            self.serial = None
+            self.get_logger().error(f'❌ Failed to connect to Arduino: {e}')
+            self.get_logger().error(f'  Node stays alive (dry-run mode). Will retry every 5s.')
+            self.get_logger().error(f'  Check: ls /dev/ttyUSB* /dev/ttyACM*')
+
+    def _retry_serial(self):
+        """Periodically retry serial connection if not connected."""
+        if self.serial is None or not self.serial.is_open:
+            self._connect_serial()
+
     def send_command(self, command: str):
         """Send a command to Arduino."""
+        if self.serial is None:
+            self.get_logger().warning(f'📤 [DRY-RUN] Would send: {command}')
+            return False
         try:
             with self._serial_lock:
                 self.serial.write(f"{command}\n".encode('utf-8'))
@@ -142,6 +153,7 @@ class ArduinoDriver(Node):
             return True
         except serial.SerialException as e:
             self.get_logger().warning(f'Serial write error: {e}')
+            self.serial = None
             return False
 
     def mission_command_callback(self, msg: String):
@@ -210,13 +222,18 @@ class ArduinoDriver(Node):
         if left_pwm != 0 or right_pwm != 0:
             self.get_logger().info(f'CMD: lin={linear:.2f} ang={angular:.2f} -> PWM L={left_pwm} R={right_pwm}')
         
-        # Send to Arduino
-        command = f"{left_pwm},{right_pwm}\n"
-        try:
-            with self._serial_lock:
-                self.serial.write(command.encode('utf-8'))
-        except serial.SerialException as e:
-            self.get_logger().warning(f'Serial write error: {e}')
+        # Send to Arduino (or log in dry-run mode)
+        command = f"{left_pwm},{right_pwm}"
+        if self.serial is not None:
+            try:
+                with self._serial_lock:
+                    self.serial.write(f"{command}\n".encode('utf-8'))
+            except serial.SerialException as e:
+                self.get_logger().warning(f'Serial write error: {e}')
+                self.serial = None
+        else:
+            if left_pwm != 0 or right_pwm != 0:
+                self.get_logger().info(f'🔌 [NO SERIAL] PWM L={left_pwm} R={right_pwm} (not sent)')
         
         self.last_cmd_time = self.get_clock().now()
         self._motors_stopped = (left_pwm == 0 and right_pwm == 0)
@@ -257,14 +274,17 @@ class ArduinoDriver(Node):
             elapsed = (now - self.last_cmd_time).nanoseconds / 1e9
             if elapsed > self.CMD_VEL_TIMEOUT_SEC:
                 self.get_logger().warn('⚠️ cmd_vel timeout — stopping motors')
-                try:
-                    with self._serial_lock:
-                        self.serial.write(b"0,0\n")
-                except serial.SerialException:
-                    pass
+                if self.serial is not None:
+                    try:
+                        with self._serial_lock:
+                            self.serial.write(b"0,0\n")
+                    except serial.SerialException:
+                        self.serial = None
                 self._motors_stopped = True
         
         # Read data from Arduino
+        if self.serial is None:
+            return
         try:
             if not self.serial.is_open:
                 return
@@ -300,7 +320,7 @@ class ArduinoDriver(Node):
 
     def destroy_node(self):
         """Clean shutdown - stop motors and cleaning system."""
-        if hasattr(self, 'serial') and self.serial.is_open:
+        if self.serial is not None and self.serial.is_open:
             try:
                 with self._serial_lock:
                     self.serial.write(b"0,0\n")         # Stop motors
