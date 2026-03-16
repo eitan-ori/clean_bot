@@ -72,11 +72,11 @@ class FrontierExplorer(Node):
         super().__init__('frontier_explorer')
 
         # ===================== Parameters =====================
-        self.declare_parameter('min_frontier_size', 5)       # Min cells for valid frontier
+        self.declare_parameter('min_frontier_size', 10)      # Min cells for valid frontier (filter noise)
         self.declare_parameter('robot_radius', 0.18)         # For safety margin
         self.declare_parameter('exploration_timeout', 600.0) # 10 minutes max
         self.declare_parameter('goal_tolerance', 0.3)        # How close to get to frontier
-        self.declare_parameter('min_goal_distance', 0.5)     # Don't go to very close frontiers
+        self.declare_parameter('min_goal_distance', 0.3)     # Reduced — don't skip nearby frontiers
         self.declare_parameter('navigation_timeout', 60.0)   # Single goal timeout
         self.declare_parameter('auto_start', False)          # Wait for explicit start command
         
@@ -137,7 +137,7 @@ class FrontierExplorer(Node):
         self.goals_attempted = 0
         self.goals_reached = 0
         self.consecutive_failures = 0      # Track consecutive navigation failures
-        self.max_consecutive_failures = 3  # Finish if too many failures in a row
+        self.max_consecutive_failures = 8  # More attempts before giving up
         self._retry_after_clear = False
         self._last_no_map_warn = 0.0
         self._no_map_warn_period_s = 5.0
@@ -648,8 +648,14 @@ class FrontierExplorer(Node):
                 self.failed_goals.add(key)
             # Check if too many consecutive failures
             if self.consecutive_failures >= self.max_consecutive_failures:
-                self.get_logger().warn(f'⚠️ {self.consecutive_failures} consecutive failures - finishing exploration')
-                self.finish_exploration()
+                if not self._retry_after_clear:
+                    self.get_logger().warn(f'⚠️ {self.consecutive_failures} consecutive failures - clearing failed goals and retrying')
+                    self.failed_goals.clear()
+                    self.consecutive_failures = 0
+                    self._retry_after_clear = True
+                else:
+                    self.get_logger().warn(f'⚠️ {self.consecutive_failures} consecutive failures after retry - finishing exploration')
+                    self.finish_exploration()
         elif status == 5:  # CANCELED
             self.get_logger().info('   🛑 Navigation was canceled')
             self.consecutive_failures += 1
