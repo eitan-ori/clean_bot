@@ -139,6 +139,7 @@ def generate_launch_description():
                 'angle_compensate': True,
                 'scan_mode': '',  # Auto-detect scan mode
                 'scan_frequency': 10.0,  # 10Hz = ~800 points/scan, fast rf2o processing
+                'force_scan': True,  # Force scan bypasses motor speed check (fixes laser timeout)
             }],
             # Publish raw scans at full rate; throttle node limits rate for consumers
             remappings=[('/scan', '/scan_raw')],
