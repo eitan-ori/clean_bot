@@ -634,8 +634,16 @@ class AdaptiveCoveragePlanner(Node):
 
     def start_coverage_mission(self):
         """Generate coverage path and start executing it."""
+        # Wait for map with retries (TRANSIENT_LOCAL may take a moment)
         if self.map_array is None:
-            self.get_logger().error('❌ No map available! Make sure SLAM is running.')
+            self.get_logger().warn('⏳ Map not received yet, waiting for SLAM map...')
+            for i in range(10):
+                rclpy.spin_once(self, timeout_sec=1.0)
+                if self.map_array is not None:
+                    self.get_logger().info('✅ Map received after %d second(s)' % (i + 1))
+                    break
+        if self.map_array is None:
+            self.get_logger().error('❌ No map available after 10s! Make sure SLAM is running.')
             self.get_logger().error('   Try running /scan first to build a map.')
             return
         
