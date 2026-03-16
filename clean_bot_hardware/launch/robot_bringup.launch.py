@@ -115,12 +115,7 @@ def generate_launch_description():
             parameters=[{
                 'serial_port': arduino_port,
                 'baud_rate': 57600,
-                'wheel_radius': wheel_radius,
                 'wheel_separation': wheel_separation,
-                'ticks_per_revolution': 1320,  # Not used - no encoders
-                'publish_tf': False,  # RF2O publishes odom->base_link (LIDAR required!)
-                'odom_frame_id': 'odom',
-                'base_frame_id': 'base_link',
                 'velocity_factor': velocity_factor,
             }]
         ),
