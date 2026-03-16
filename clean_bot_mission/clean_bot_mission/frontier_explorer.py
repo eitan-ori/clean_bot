@@ -72,7 +72,7 @@ class FrontierExplorer(Node):
         super().__init__('frontier_explorer')
 
         # ===================== Parameters =====================
-        self.declare_parameter('min_frontier_size', 10)      # Min cells for valid frontier (filter noise)
+        self.declare_parameter('min_frontier_size', 20)      # Min cells for valid frontier (filter wall-edge noise)
         self.declare_parameter('robot_radius', 0.18)         # For safety margin
         self.declare_parameter('exploration_timeout', 600.0) # 10 minutes max
         self.declare_parameter('goal_tolerance', 0.3)        # How close to get to frontier
@@ -397,7 +397,7 @@ class FrontierExplorer(Node):
                 'size': size,
             })
 
-        self.get_logger().debug(f'Found {len(frontiers)} frontiers')
+        self.get_logger().info(f'🔍 Found {len(frontiers)} frontiers (filtered {num_features - len(frontiers)} too small)')
         return frontiers
 
     def select_best_frontier(self):
