@@ -58,7 +58,8 @@ def generate_launch_description():
                 '║  Scan will auto-start 5s after launch           ║\n'
                 '╚══════════════════════════════════════════════════╝\n'),
 
-        # ── 1. Robot hardware + SLAM + Nav2 (suppress verbose nodes) ──
+        # ── 1. Robot hardware + SLAM + Nav2 ──
+        # emergency_stop disabled for debugging — arduino_driver gets cmd_vel_nav directly
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 os.path.join(hardware_pkg, 'launch', 'robot_bringup.launch.py')
@@ -68,6 +69,7 @@ def generate_launch_description():
                 'lidar_port': lidar_port,
                 'use_slam': 'true',
                 'use_nav2': 'true',
+                'use_emergency_stop': 'false',
             }.items()
         ),
 

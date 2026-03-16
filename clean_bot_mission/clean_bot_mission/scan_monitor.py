@@ -44,18 +44,13 @@ class ScanMonitor(Node):
         self.get_logger().info('╔══════════════════════════════════════════════════╗')
         self.get_logger().info('║       🔍  SCAN DIAGNOSTIC MONITOR  🔍          ║')
         self.get_logger().info('╠══════════════════════════════════════════════════╣')
-        self.get_logger().info('║  Velocity chain being monitored:                ║')
+        self.get_logger().info('║  Velocity chain (emergency_stop OFF):           ║')
         self.get_logger().info('║                                                 ║')
         self.get_logger().info('║  frontier_explorer                              ║')
         self.get_logger().info('║    → /navigate_to_pose (action)                 ║')
-        self.get_logger().info('║  bt_navigator                                   ║')
-        self.get_logger().info('║    → controller_server                          ║')
-        self.get_logger().info('║      → /cmd_vel_nav  (Twist)                    ║')
-        self.get_logger().info('║  velocity_smoother                              ║')
-        self.get_logger().info('║    → /cmd_vel  (Twist)                          ║')
-        self.get_logger().info('║  emergency_stop_controller                      ║')
-        self.get_logger().info('║    → /cmd_vel_safe  (Twist)                     ║')
-        self.get_logger().info('║  arduino_driver                                 ║')
+        self.get_logger().info('║  bt_navigator → controller_server               ║')
+        self.get_logger().info('║    → /cmd_vel_nav  (Twist)                      ║')
+        self.get_logger().info('║  arduino_driver  (direct, no emergency_stop)    ║')
         self.get_logger().info('║    → /cmd_vel_debug (PWM L,R)                   ║')
         self.get_logger().info('║    → serial "L,R\\n" → Arduino → motors          ║')
         self.get_logger().info('╚══════════════════════════════════════════════════╝')
@@ -168,29 +163,16 @@ class ScanMonitor(Node):
     def _on_cmd_vel_nav(self, msg: Twist):
         lin, ang = msg.linear.x, msg.angular.z
         if abs(lin) < 0.001 and abs(ang) < 0.001:
-            return  # skip zero commands to reduce noise
+            return
         self.get_logger().info(
             f'⚡ /cmd_vel_nav  lin={lin:+.3f} ang={ang:+.3f}  '
-            f'[publisher: controller_server]  '
-            f'[subscribers: velocity_smoother, emergency_stop, arduino_driver]')
+            f'[publisher: controller_server → arduino_driver]')
 
     def _on_cmd_vel(self, msg: Twist):
-        lin, ang = msg.linear.x, msg.angular.z
-        if abs(lin) < 0.001 and abs(ang) < 0.001:
-            return
-        self.get_logger().info(
-            f'  ↳ /cmd_vel      lin={lin:+.3f} ang={ang:+.3f}  '
-            f'[publisher: velocity_smoother]  '
-            f'[subscriber: emergency_stop]')
+        pass  # emergency_stop disabled, velocity_smoother output not relevant
 
     def _on_cmd_vel_safe(self, msg: Twist):
-        lin, ang = msg.linear.x, msg.angular.z
-        if abs(lin) < 0.001 and abs(ang) < 0.001:
-            return
-        self.get_logger().info(
-            f'    ↳ /cmd_vel_safe lin={lin:+.3f} ang={ang:+.3f}  '
-            f'[publisher: emergency_stop]  '
-            f'[subscriber: arduino_driver → serial → motors]')
+        pass  # emergency_stop disabled
 
     def _on_cmd_vel_debug(self, msg: Twist):
         left_pwm = int(msg.linear.x)

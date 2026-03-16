@@ -60,6 +60,7 @@ def generate_launch_description():
     # Enable/disable components
     use_nav2 = LaunchConfiguration('use_nav2', default='true')
     use_slam = LaunchConfiguration('use_slam', default='true')
+    use_emergency_stop = LaunchConfiguration('use_emergency_stop', default='true')
     
     # ==================== Robot Description ====================
     xacro_file = os.path.join(description_pkg, 'urdf', 'robot.urdf.xacro')
@@ -85,6 +86,8 @@ def generate_launch_description():
                               description='Launch Nav2 navigation stack'),
         DeclareLaunchArgument('use_slam', default_value='true',
                               description='Launch SLAM Toolbox for mapping'),
+        DeclareLaunchArgument('use_emergency_stop', default_value='true',
+                              description='Launch emergency stop safety node'),
 
         # ==================== Robot State Publisher ====================
         Node(
@@ -189,6 +192,7 @@ def generate_launch_description():
             executable='emergency_stop',
             name='emergency_stop_controller',
             output='screen',
+            condition=IfCondition(use_emergency_stop),
             parameters=[{
                 'emergency_stop_distance': 0.10,   # 10cm - full stop
                 'slow_down_distance': 0.30,        # 30cm - reduce speed
@@ -225,7 +229,7 @@ def generate_launch_description():
             package='rf2o_laser_odometry',
             executable='rf2o_laser_odometry_node',
             name='rf2o_laser_odometry',
-            output='screen',
+            output='log',
             parameters=[{
                 'laser_scan_topic': '/scan_raw',  # Raw LiDAR (NOT /scan — avoids deadlock with scan_throttle)
                 'odom_topic': '/odom',
