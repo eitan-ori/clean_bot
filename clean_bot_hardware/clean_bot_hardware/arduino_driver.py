@@ -206,13 +206,6 @@ class ArduinoDriver(Node):
             # CRITICAL FIX: Negate angular to match robot's physical wiring
             angular = -angular
 
-            # Spin-or-drive: if angular is significant, spin in place; otherwise drive straight
-            ANGULAR_THRESHOLD = 0.1  # rad/s — above this, pure spin
-            if abs(angular) > ANGULAR_THRESHOLD:
-                linear = 0.0  # Pure spin
-            else:
-                angular = 0.0  # Pure drive
-
             # PWM limits (tuned for this robot)
             MIN_PWM_FORWARD = 90
             MIN_PWM_ROTATE = 90

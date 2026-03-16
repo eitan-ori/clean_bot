@@ -154,14 +154,15 @@ controller_server:
       yaw_goal_tolerance: 0.25  # ~15 degrees
 
     # DWB Controller - good for differential drive
+    # Configured for spin-then-drive: robot rotates to face goal, then drives straight
     FollowPath:
       plugin: "dwb_core::DWBLocalPlanner"
       debug_trajectory_details: True
-      min_vel_x: 0.0           # Allow pure rotation (sign fix in arduino_driver handles direction)
+      min_vel_x: 0.0           # Allow pure rotation
       min_vel_y: 0.0
       max_vel_x: 0.15          # Max forward speed (m/s)
       max_vel_y: 0.0           # No lateral movement (diff drive)
-      max_vel_theta: 0.8       # Normal rotation speed for small indoor robot
+      max_vel_theta: 0.8       # Normal rotation speed
       min_speed_xy: 0.0        # Allow stopping for in-place rotation
       max_speed_xy: 0.15
       min_speed_theta: 0.0
@@ -173,7 +174,7 @@ controller_server:
       decel_lim_theta: -0.5
       vx_samples: 20
       vy_samples: 0
-      vtheta_samples: 20       # Default sample count for rotation trajectories
+      vtheta_samples: 20
       sim_time: 2.0
       linear_granularity: 0.05
       angular_granularity: 0.025
@@ -190,7 +191,11 @@ controller_server:
       GoalAlign.scale: 24.0
       GoalAlign.forward_point_distance: 0.2
       PathDist.scale: 32.0
-      GoalDist.scale: 24.0     # Slightly lower - safety over speed
+      GoalDist.scale: 24.0
+      # RotateToGoal: rotate in place first, then drive straight
+      RotateToGoal.scale: 48.0
+      RotateToGoal.slowing_factor: 5.0
+      RotateToGoal.lookahead_time: -1.0
 
 local_costmap:
   local_costmap:
