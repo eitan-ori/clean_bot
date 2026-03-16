@@ -112,6 +112,8 @@ def generate_launch_description():
             executable='arduino_driver',
             name='arduino_driver',
             output='screen',
+            respawn=True,
+            respawn_delay=10.0,
             parameters=[{
                 'serial_port': arduino_port,
                 'baud_rate': 57600,
