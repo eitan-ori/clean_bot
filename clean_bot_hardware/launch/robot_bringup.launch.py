@@ -61,6 +61,7 @@ def generate_launch_description():
     use_nav2 = LaunchConfiguration('use_nav2', default='true')
     use_slam = LaunchConfiguration('use_slam', default='true')
     use_emergency_stop = LaunchConfiguration('use_emergency_stop', default='true')
+    velocity_factor = LaunchConfiguration('velocity_factor', default='1.0')
     
     # ==================== Robot Description ====================
     xacro_file = os.path.join(description_pkg, 'urdf', 'robot.urdf.xacro')
@@ -88,6 +89,8 @@ def generate_launch_description():
                               description='Launch SLAM Toolbox for mapping'),
         DeclareLaunchArgument('use_emergency_stop', default_value='true',
                               description='Launch emergency stop safety node'),
+        DeclareLaunchArgument('velocity_factor', default_value='1.0',
+                              description='Velocity multiplier (2.0 = twice as fast)'),
 
         # ==================== Robot State Publisher ====================
         Node(
@@ -118,6 +121,7 @@ def generate_launch_description():
                 'publish_tf': False,  # RF2O publishes odom->base_link (LIDAR required!)
                 'odom_frame_id': 'odom',
                 'base_frame_id': 'base_link',
+                'velocity_factor': velocity_factor,
             }]
         ),
 

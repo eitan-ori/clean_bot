@@ -39,6 +39,7 @@ def generate_launch_description():
 
     arduino_port = LaunchConfiguration('arduino_port', default='/dev/ttyACM0')
     lidar_port = LaunchConfiguration('lidar_port', default='/dev/lidar')
+    velocity_factor = LaunchConfiguration('velocity_factor', default='1.0')
 
     return LaunchDescription([
         # ── Arguments ──
@@ -46,6 +47,8 @@ def generate_launch_description():
                               description='Arduino serial port'),
         DeclareLaunchArgument('lidar_port', default_value='/dev/lidar',
                               description='LiDAR serial port (use /dev/lidar if udev rule set)'),
+        DeclareLaunchArgument('velocity_factor', default_value='1.0',
+                              description='Velocity multiplier (2.0 = twice as fast)'),
 
         # Reduce console noise from Nav2 and other infrastructure
         SetEnvironmentVariable('RCUTILS_CONSOLE_OUTPUT_FORMAT',
@@ -70,6 +73,7 @@ def generate_launch_description():
                 'use_slam': 'true',
                 'use_nav2': 'true',
                 'use_emergency_stop': 'false',
+                'velocity_factor': velocity_factor,
             }.items()
         ),
 

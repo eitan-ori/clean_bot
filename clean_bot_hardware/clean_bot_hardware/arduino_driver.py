@@ -64,6 +64,7 @@ class ArduinoDriver(Node):
         
         # Options
         self.declare_parameter('publish_rate', 20.0)  # Hz
+        self.declare_parameter('velocity_factor', 1.0)  # Multiply all velocities (2.0 = twice as fast)
         
         # Get parameters
         self.serial_port = self.get_parameter('serial_port').value
@@ -75,8 +76,9 @@ class ArduinoDriver(Node):
         self.invert_right_motor = bool(self.get_parameter('invert_right_motor').value)
         self.ultrasonic_frame = self.get_parameter('ultrasonic_frame_id').value
         publish_rate = self.get_parameter('publish_rate').value
+        self.velocity_factor = self.get_parameter('velocity_factor').value
         
-        self.get_logger().info('Arduino Driver v3.0 (No Encoders, With Relay)')
+        self.get_logger().info(f'Arduino Driver v3.0 (No Encoders, With Relay) [velocity_factor={self.velocity_factor}]')
         
         # ===================== Serial Connection =====================
         try:
@@ -168,8 +170,8 @@ class ArduinoDriver(Node):
 
     def cmd_vel_callback(self, msg: Twist):
         """Convert Twist message to motor PWM commands and send to Arduino."""
-        linear = msg.linear.x
-        angular = msg.angular.z
+        linear = msg.linear.x * self.velocity_factor
+        angular = msg.angular.z * self.velocity_factor
 
         if not (math.isfinite(linear) and math.isfinite(angular)):
             return
