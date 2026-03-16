@@ -404,11 +404,11 @@ class FrontierExplorer(Node):
         """
         Select the best frontier to explore.
         Strategy: Balance between distance and frontier size.
+        When struggling (consecutive failures), prefer larger frontiers over closer ones.
         """
         if not self.frontiers:
             return None
 
-        # Get current robot position (approximate from map center if unknown)
         robot_x, robot_y = self.get_robot_position()
         
         best_frontier = None
@@ -416,36 +416,37 @@ class FrontierExplorer(Node):
         skipped_failed = 0
         skipped_too_close = 0
         skipped_nogo = 0
+
+        # When struggling, shift preference toward bigger frontiers farther away
+        if self.consecutive_failures >= 3:
+            size_weight = 0.7
+            dist_weight = 0.3
+        else:
+            size_weight = 0.3
+            dist_weight = 0.7
         
         for frontier in self.frontiers:
-            # Skip frontiers inside no-go zones
             if self._point_in_no_go_zone(frontier['x'], frontier['y']):
                 skipped_nogo += 1
                 continue
 
-            # Skip if we've failed to reach this area before
             key = (round(frontier['x'], 1), round(frontier['y'], 1))
             if key in self.failed_goals:
                 skipped_failed += 1
                 continue
             
-            # Calculate distance
             dx = frontier['x'] - robot_x
             dy = frontier['y'] - robot_y
             distance = math.sqrt(dx * dx + dy * dy)
             
-            # Skip very close frontiers (likely unreachable due to obstacles)
             if distance < self.min_goal_distance:
                 skipped_too_close += 1
                 continue
             
-            # Score: prefer larger frontiers that are closer
-            # Normalize size and distance
-            size_score = frontier['size'] / 100.0  # Normalize
-            distance_score = 1.0 / (distance + 0.1)  # Inverse distance
+            size_score = frontier['size'] / 100.0
+            distance_score = 1.0 / (distance + 0.1)
             
-            # Combined score (tune weights as needed)
-            score = size_score * 0.3 + distance_score * 0.7
+            score = size_score * size_weight + distance_score * dist_weight
             
             if score > best_score:
                 best_score = score
@@ -453,11 +454,15 @@ class FrontierExplorer(Node):
 
         if best_frontier is None:
             self.get_logger().warn(
-                f'⚠️ No suitable frontier selected (frontiers={len(self.frontiers)}, '
-                f'skipped_failed={skipped_failed}, skipped_too_close={skipped_too_close}, '
-                f'skipped_nogo={skipped_nogo}). '
-                'This can happen if TF map->base_link is missing/wrong or Nav2 keeps failing goals.'
-            )
+                f'⚠️ No suitable frontier (total={len(self.frontiers)}, '
+                f'failed={skipped_failed}, close={skipped_too_close}, nogo={skipped_nogo})')
+        else:
+            dx = best_frontier['x'] - robot_x
+            dy = best_frontier['y'] - robot_y
+            dist = math.sqrt(dx*dx + dy*dy)
+            self.get_logger().info(
+                f'🎯 Selected frontier: size={best_frontier["size"]} dist={dist:.1f}m '
+                f'(weights: size={size_weight}, dist={dist_weight})')
 
         return best_frontier
 
