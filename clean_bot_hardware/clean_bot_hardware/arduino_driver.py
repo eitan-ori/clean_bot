@@ -267,8 +267,8 @@ class ArduinoDriver(Node):
 
         Uses a minimum PWM threshold so the motors actually move.
         """
-        # Deadband
-        if abs(wheel_speed_mps) < 0.01:
+        # Deadband — only zero out if BOTH linear and angular commands are near zero
+        if abs(wheel_speed_mps) < 0.005 and abs(linear_mps) < 0.01 and abs(angular_rps) < 0.01:
             return 0
 
         pwm = int((abs(wheel_speed_mps) / float(self.max_linear_speed)) * max_pwm)
