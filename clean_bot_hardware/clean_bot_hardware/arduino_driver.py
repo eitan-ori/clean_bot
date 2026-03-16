@@ -48,27 +48,21 @@ class ArduinoDriver(Node):
         )
 
         # ===================== Parameters =====================
-        # Serial connection
-        self.declare_parameter('serial_port', '/dev/ttyACM0')
-        self.declare_parameter('baud_rate', 57600)
-        
-        # Velocity conversion (for cmd_vel -> PWM)
-        self.declare_parameter('max_linear_speed', 0.3)      # m/s at PWM 255
-        self.declare_parameter('max_pwm', 255)
+        # Safe declare: skip if already declared by launch overrides
+        def _safe_declare(name, default):
+            if not self.has_parameter(name):
+                self.declare_parameter(name, default)
 
-        # Differential drive geometry
-        self.declare_parameter('wheel_separation', 0.20)      # meters (distance between wheels)
-
-        # Motor wiring/inversion (kept configurable)
-        self.declare_parameter('invert_left_motor', True)
-        self.declare_parameter('invert_right_motor', True)
-        
-        # Frame IDs
-        self.declare_parameter('ultrasonic_frame_id', 'ultrasonic_link')
-        
-        # Options
-        self.declare_parameter('publish_rate', 20.0)  # Hz
-        self.declare_parameter('velocity_factor', 1.0)  # Multiply all velocities (2.0 = twice as fast)
+        _safe_declare('serial_port', '/dev/ttyACM0')
+        _safe_declare('baud_rate', 57600)
+        _safe_declare('max_linear_speed', 0.3)
+        _safe_declare('max_pwm', 255)
+        _safe_declare('wheel_separation', 0.20)
+        _safe_declare('invert_left_motor', True)
+        _safe_declare('invert_right_motor', True)
+        _safe_declare('ultrasonic_frame_id', 'ultrasonic_link')
+        _safe_declare('publish_rate', 20.0)
+        _safe_declare('velocity_factor', 1.0)
         
         # Get parameters
         self.serial_port = self.get_parameter('serial_port').value
