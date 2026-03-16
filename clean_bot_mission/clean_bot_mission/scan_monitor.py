@@ -56,7 +56,8 @@ class ScanMonitor(Node):
         self.get_logger().info('║  emergency_stop_controller                      ║')
         self.get_logger().info('║    → /cmd_vel_safe  (Twist)                     ║')
         self.get_logger().info('║  arduino_driver                                 ║')
-        self.get_logger().info('║    → serial → motors                            ║')
+        self.get_logger().info('║    → /cmd_vel_debug (PWM L,R)                   ║')
+        self.get_logger().info('║    → serial "L,R\\n" → Arduino → motors          ║')
         self.get_logger().info('╚══════════════════════════════════════════════════╝')
         self.get_logger().info('')
 
@@ -86,6 +87,8 @@ class ScanMonitor(Node):
             Twist, 'cmd_vel', self._on_cmd_vel, reliable)
         self.create_subscription(
             Twist, 'cmd_vel_safe', self._on_cmd_vel_safe, reliable)
+        self.create_subscription(
+            Twist, 'cmd_vel_debug', self._on_cmd_vel_debug, reliable)
 
         # ── Periodic readiness check (every 5 s) ──
         self._check_timer = self.create_timer(5.0, self._readiness_check)
@@ -188,6 +191,15 @@ class ScanMonitor(Node):
             f'    ↳ /cmd_vel_safe lin={lin:+.3f} ang={ang:+.3f}  '
             f'[publisher: emergency_stop]  '
             f'[subscriber: arduino_driver → serial → motors]')
+
+    def _on_cmd_vel_debug(self, msg: Twist):
+        left_pwm = int(msg.linear.x)
+        right_pwm = int(msg.linear.y)
+        if left_pwm == 0 and right_pwm == 0:
+            return
+        self.get_logger().info(
+            f'      ↳ ARDUINO   PWM L={left_pwm:+d} R={right_pwm:+d}  '
+            f'[arduino_driver → serial "{left_pwm},{right_pwm}\\n" → motors]')
 
 
 def main(args=None):
