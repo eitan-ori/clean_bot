@@ -195,7 +195,7 @@ controller_server:
       # RotateToGoal: rotate in place first, then drive straight
       RotateToGoal.scale: 48.0
       RotateToGoal.slowing_factor: 5.0
-      RotateToGoal.lookahead_time: -1.0
+      RotateToGoal.lookahead_time: 1.0
 
 local_costmap:
   local_costmap:
