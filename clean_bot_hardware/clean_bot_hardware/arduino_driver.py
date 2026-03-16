@@ -113,11 +113,13 @@ class ArduinoDriver(Node):
         self.last_cmd_time = self.get_clock().now()
         self._motors_stopped = True  # Track whether motors are already at zero
         self.CMD_VEL_TIMEOUT_SEC = 0.5  # Stop motors if no cmd_vel for this long
+        self._msg_count = 0  # Count received velocity messages
         
         # ===================== Timer =====================
         timer_period = 1.0 / publish_rate
         self.timer = self.create_timer(timer_period, self.update_loop)
         self.retry_timer = self.create_timer(5.0, self._retry_serial)
+        self._heartbeat_timer = self.create_timer(3.0, self._heartbeat)
         
         self.get_logger().info(f'Arduino Driver started (with cleaning control)')
 
@@ -140,6 +142,13 @@ class ArduinoDriver(Node):
         """Periodically retry serial connection if not connected."""
         if self.serial is None or not self.serial.is_open:
             self._connect_serial()
+
+    def _heartbeat(self):
+        """Periodic status so we can verify the node is alive."""
+        serial_status = '✅ connected' if (self.serial and self.serial.is_open) else '❌ disconnected'
+        self.get_logger().info(
+            f'💓 HEARTBEAT: msgs_received={self._msg_count}  serial={serial_status}  '
+            f'subs=[cmd_vel_safe, cmd_vel_nav]')
 
     def send_command(self, command: str):
         """Send a command to Arduino."""
@@ -182,6 +191,7 @@ class ArduinoDriver(Node):
 
     def cmd_vel_callback(self, msg: Twist):
         """Convert Twist message to motor PWM commands and send to Arduino."""
+        self._msg_count += 1
         linear = msg.linear.x * self.velocity_factor
         angular = msg.angular.z * self.velocity_factor
 
