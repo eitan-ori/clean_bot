@@ -231,8 +231,7 @@ def generate_launch_description():
             package='rf2o_laser_odometry',
             executable='rf2o_laser_odometry_node',
             name='rf2o_laser_odometry',
-            output='log',
-            arguments=['--ros-args', '--log-level', 'warn'],
+            output='screen',
             parameters=[{
                 'laser_scan_topic': '/scan_raw',  # Raw LiDAR (NOT /scan — avoids deadlock with scan_throttle)
                 'odom_topic': '/odom',

@@ -148,7 +148,7 @@ controller_server:
 
     # Goal checker - for coverage, we need precise positioning
     general_goal_checker:
-      stateful: True
+      stateful: False  # was True: caused false "reached" when position latch wasn't reset
       plugin: "nav2_controller::SimpleGoalChecker"
       xy_goal_tolerance: 0.10  # 10cm tolerance
       yaw_goal_tolerance: 0.25  # ~15 degrees
