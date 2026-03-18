@@ -2,21 +2,15 @@
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" >
 
     <!--
-    This file adds a 2D LiDAR (laser) sensor to the robot model. It defines the 
-    physical mounting link and the virtual Gazebo sensor plugin required for simulation.
+    This file defines the 2D LiDAR (laser) sensor frame on the robot model.
+    On the physical robot, the RPLidar A1M8 driver publishes to /scan directly.
 
     Physical Properties:
     - Joint: laser_joint (fixed to chassis at center-front, top).
     - Link: laser (cylindrical shape, 5cm radius, 4cm thickness).
 
-    Gazebo Sensor Parameters:
-    - Type: ray sensor.
-    - Update Rate: 10 Hz.
-    - Samples: 360 (one per degree).
-    - Range: 0.3m to 12.0m.
-    - FoV: 360 degrees (-3.14 to 3.14 rad).
-    - ROS Topic: /scan.
-    - Output Type: sensor_msgs/LaserScan.
+    Note: The <gazebo> sensor plugin block below is only used if the model is
+    loaded in a Gazebo simulation. It is safely ignored by robot_state_publisher.
 
     Assumptions:
     - The LiDAR is mounted such that its center of rotation is at the origin of the laser link.
@@ -75,7 +69,7 @@
                     <argument>~/out:=scan</argument>
                 </ros>
                 <output_type>sensor_msgs/LaserScan</output_type>
-                <frame_name>laser_frame</frame_name>
+                <frame_name>laser</frame_name>
             </plugin>
         </sensor>
     </gazebo>

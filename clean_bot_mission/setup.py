@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 import os
 from glob import glob
 
@@ -7,7 +7,7 @@ package_name = 'clean_bot_mission'
 setup(
     name=package_name,
     version='1.0.0',
-    packages=[package_name],
+    packages=find_packages(),
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
@@ -17,7 +17,15 @@ setup(
         # Install scripts
         (os.path.join('share', package_name, 'scripts'), glob('scripts/*.py')),
     ],
-    install_requires=['setuptools', 'numpy', 'scipy'],
+    package_data={
+        package_name: [
+            'webapp/templates/*.html',
+            'webapp/static/**/*',
+            'webapp/saved_rooms/.gitkeep',
+        ],
+    },
+    include_package_data=True,
+    install_requires=['setuptools', 'numpy', 'scipy', 'flask', 'flask-socketio', 'pillow'],
     zip_safe=True,
     maintainer='user',
     maintainer_email='user@todo.todo',
@@ -34,10 +42,11 @@ setup(
             'adaptive_coverage = clean_bot_mission.adaptive_coverage:main',
             'simple_coverage = clean_bot_mission.simple_coverage:main',
             
-            # Legacy nodes (for backward compatibility)
-            'mission_node = clean_bot_mission.mission:main',
-            'exploration_node = clean_bot_mission.exploration:main',
-            'coverage_mission = clean_bot_mission.coverage_mission:main',
+            # Web control panel
+            'web_control = clean_bot_mission.webapp.app:main',
+            
+            # Diagnostic monitor for scan mode
+            'scan_monitor = clean_bot_mission.scan_monitor:main',
         ],
     },
 )

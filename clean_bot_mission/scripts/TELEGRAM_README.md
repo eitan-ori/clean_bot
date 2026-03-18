@@ -40,9 +40,13 @@ Control your Clean Bot robot remotely via Telegram!
    scp pi@<robot_ip>:~/robot_ws/src/clean_bot_mission/scripts/telegram_bridge.py .
    ```
 
-5. **Edit the script to add your Telegram token:**
+5. **Set your bot token** in `telegram_bridge.py`:
    ```python
    TELEGRAM_TOKEN = 'your_token_from_botfather'
+   ```
+
+   Optionally, edit the script to restrict access:
+   ```python
    ALLOWED_USER_IDS = [your_telegram_id]  # Optional: restrict access
    ```
 
@@ -73,7 +77,7 @@ Control your Clean Bot robot remotely via Telegram!
 | `/start` | Show welcome message and available commands |
 | `/scan` | Start exploration/scanning |
 | `/stopscan` | Stop scanning and wait for clean command |
-| `/clean` | Start cleaning/coverage |
+| `/clean` | Start cleaning (map-based coverage) |
 | `/stopclean` | Stop cleaning |
 | `/home` | Return to home position |
 | `/reset` | Reset mission to initial state |
@@ -89,7 +93,7 @@ Control your Clean Bot robot remotely via Telegram!
 2. Start the Telegram bridge on your PC
 3. Send `/scan` to start exploration
 4. Wait for exploration to complete, or send `/stopscan`
-5. Send `/clean` to start cleaning
+5. Send `/clean` to start cleaning (map-based coverage)
 6. Send `/map` to see progress
 7. Send `/stopclean` when done, or wait for completion
 
@@ -139,7 +143,7 @@ export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 1. Open Telegram and search for `@BotFather`
 2. Send `/newbot`
 3. Follow the instructions to create your bot
-4. Copy the token and paste it in `telegram_bridge.py`
+4. Copy the token and paste it into `telegram_bridge.py` as the `TELEGRAM_TOKEN` value
 
 ## Security Notes
 

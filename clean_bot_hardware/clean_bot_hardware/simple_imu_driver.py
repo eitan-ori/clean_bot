@@ -122,7 +122,8 @@ class SimpleIMU:
             # Convert to Tesla (sensitivity: 0.15 uT/LSB)
             scale = 0.15
             return (x * scale) * 1e-6, (y * scale) * 1e-6, (z * scale) * 1e-6
-        except:
+        except Exception as e:
+            print(f"Magnetometer read error: {e}")
             return 0.0, 0.0, 0.0
 
 

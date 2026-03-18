@@ -13,7 +13,7 @@
 # 5. Sensor Fusion: Configures EKF (robot_localization) if available.
 #
 # PARAMETERS & VALUES:
-# - use_sim_time: false (Set to true only when running in Gazebo).
+# - use_sim_time: false (Always false for physical robot).
 # - arduino_port: /dev/ttyUSB0 (Primary motor/sensor interface).
 # - lidar_port: /dev/ttyUSB1 (Laser scanner interface).
 # - i2c_bus: 1 (I2C interface for the IMU).
@@ -50,7 +50,7 @@ def generate_launch_description():
     
     # Hardware ports
     arduino_port = LaunchConfiguration('arduino_port', default='/dev/ttyACM0')
-    lidar_port = LaunchConfiguration('lidar_port', default='/dev/ttyUSB0')
+    lidar_port = LaunchConfiguration('lidar_port', default='/dev/lidar')
     i2c_bus = LaunchConfiguration('i2c_bus', default='1')
     
     # Robot parameters (for calibration)
@@ -60,6 +60,8 @@ def generate_launch_description():
     # Enable/disable components
     use_nav2 = LaunchConfiguration('use_nav2', default='true')
     use_slam = LaunchConfiguration('use_slam', default='true')
+    use_emergency_stop = LaunchConfiguration('use_emergency_stop', default='true')
+    velocity_factor = LaunchConfiguration('velocity_factor', default='1.0')
     
     # ==================== Robot Description ====================
     xacro_file = os.path.join(description_pkg, 'urdf', 'robot.urdf.xacro')
@@ -67,18 +69,17 @@ def generate_launch_description():
 
     # ==================== Config Files ====================
     slam_config = os.path.join(hardware_pkg, 'config', 'mapper_params_online_async.yaml')
-    ekf_config = os.path.join(hardware_pkg, 'config', 'ekf.yaml')
     
     return LaunchDescription([
         # ==================== Declare Arguments ====================
         DeclareLaunchArgument('use_sim_time', default_value='false'),
-        DeclareLaunchArgument('arduino_port', default_value='/dev/ttyUSB0',
+        DeclareLaunchArgument('arduino_port', default_value='/dev/ttyACM0',
                               description='Serial port for Arduino'),
-        DeclareLaunchArgument('lidar_port', default_value='/dev/ttyUSB1',
+        DeclareLaunchArgument('lidar_port', default_value='/dev/lidar',
                               description='Serial port for RPLidar'),
         DeclareLaunchArgument('i2c_bus', default_value='1',
                               description='I2C bus number for IMU'),
-        DeclareLaunchArgument('wheel_radius', default_value='0.034',
+        DeclareLaunchArgument('wheel_radius', default_value='0.0335',
                               description='Wheel radius in meters'),
         DeclareLaunchArgument('wheel_separation', default_value='0.20',
                               description='Distance between wheels in meters'),
@@ -86,6 +87,10 @@ def generate_launch_description():
                               description='Launch Nav2 navigation stack'),
         DeclareLaunchArgument('use_slam', default_value='true',
                               description='Launch SLAM Toolbox for mapping'),
+        DeclareLaunchArgument('use_emergency_stop', default_value='true',
+                              description='Launch emergency stop safety node'),
+        DeclareLaunchArgument('velocity_factor', default_value='1.0',
+                              description='Velocity multiplier (2.0 = twice as fast)'),
 
         # ==================== Robot State Publisher ====================
         Node(
@@ -107,15 +112,13 @@ def generate_launch_description():
             executable='arduino_driver',
             name='arduino_driver',
             output='screen',
+            respawn=True,
+            respawn_delay=10.0,
             parameters=[{
                 'serial_port': arduino_port,
                 'baud_rate': 57600,
-                'wheel_radius': wheel_radius,
                 'wheel_separation': wheel_separation,
-                'ticks_per_revolution': 1320,  # Not used - no encoders
-                'publish_tf': False,  # RF2O publishes odom->base_link (LIDAR required!)
-                'odom_frame_id': 'odom',
-                'base_frame_id': 'base_link',
+                'velocity_factor': velocity_factor,
             }]
         ),
 
@@ -135,10 +138,22 @@ def generate_launch_description():
                 'inverted': True,  # LiDAR mounted 180 degrees rotated
                 'angle_compensate': True,
                 'scan_mode': '',  # Auto-detect scan mode
-                'scan_frequency': 10.0,  # Target scan frequency
+                'scan_frequency': 10.0,  # 10Hz = ~800 points/scan, fast rf2o processing
+                'force_scan': True,  # Force scan bypasses motor speed check (fixes laser timeout)
             }],
-            # Respawn if it crashes - allows recovery if LIDAR reconnects
-            respawn=False,  # Set to True to auto-restart on failure
+            # Publish raw scans at full rate; throttle node limits rate for consumers
+            remappings=[('/scan', '/scan_raw')],
+            respawn=False,
+        ),
+        # ==================== Scan Throttle ====================
+        # Pi 4 can't process 10Hz scans across all consumers (rf2o, SLAM, 2 costmaps).
+        # Throttle to 5Hz so every scan gets a matching TF from rf2o.
+        Node(
+            package='clean_bot_hardware',
+            executable='scan_throttle',
+            name='scan_throttle',
+            output='screen',
+            parameters=[{'rate': 5.0}],
         ),
 
         # ==================== IMU Publisher ====================
@@ -179,6 +194,7 @@ def generate_launch_description():
             executable='emergency_stop',
             name='emergency_stop_controller',
             output='screen',
+            condition=IfCondition(use_emergency_stop),
             parameters=[{
                 'emergency_stop_distance': 0.10,   # 10cm - full stop
                 'slow_down_distance': 0.30,        # 30cm - reduce speed
@@ -208,15 +224,6 @@ def generate_launch_description():
                 ('imu/data', 'imu/data'),
             ]
         ),
-        # ==================== Scan Throttler ====================
-        # מוריד את קצב הלייזר מ-10/15 הרץ ל-5 הרץ כדי להקל על המעבד
-        Node(
-            package='topic_tools',
-            executable='throttle',
-            name='scan_throttler',
-            output='screen',
-            arguments=['messages', '/scan', '5.0', '/scan_throttled']
-        ),
         # ==================== RF2O Laser Odometry ====================
         # CRITICAL: This is the ONLY source of odometry (no wheel encoders!)
         # Provides odom->base_link TF based on laser scan matching
@@ -226,14 +233,16 @@ def generate_launch_description():
             name='rf2o_laser_odometry',
             output='screen',
             parameters=[{
-                'laser_scan_topic': '/scan_throttled',   # <--- שינוי: מקשיב לנתיב האיטי
+                'laser_scan_topic': '/scan_raw',  # Raw LiDAR (NOT /scan — avoids deadlock with scan_throttle)
                 'odom_topic': '/odom',
                 'publish_tf': True,
                 'base_frame_id': 'base_link',
                 'odom_frame_id': 'odom',
                 'init_pose_from_topic': '',
-                'freq': 5.0,                             # <--- שינוי: תדר נמוך שתואם ל-Throttle
+                'freq': 10.0,                            # Process every incoming scan
             }],
+            # Belt-and-suspenders: remap at RMW level too, in case the parameter is ignored
+            remappings=[('/scan', '/scan_raw')],
         ),
         # ==================== SLAM Toolbox ====================
         Node(

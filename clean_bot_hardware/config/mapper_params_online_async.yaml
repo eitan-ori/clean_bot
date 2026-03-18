@@ -54,8 +54,8 @@ slam_toolbox:
     # Trust scan matching 100%, odometry is just a hint
     use_scan_matching: true
     use_scan_barycenter: true
-    minimum_travel_distance: 0.0    # Process EVERY scan
-    minimum_travel_heading: 0.0     # Process on ANY rotation
+    minimum_travel_distance: 0.05   # Process when robot moves 5cm (reduces CPU on Pi)
+    minimum_travel_heading: 0.05    # Process on ~3° rotation
     scan_buffer_size: 10
     scan_buffer_maximum_scan_distance: 5.0
     link_match_minimum_response_fine: 0.05   # Lower = more aggressive matching
@@ -69,7 +69,8 @@ slam_toolbox:
 
     # Transform Publishing - CRITICAL for navigation!
     # Without this, SLAM won't publish map→odom TF and coverage will fail
-    transform_publish_period: 0.05
+    # 0.5s = 2Hz is enough for map→odom (low-bandwidth); 0.05 floods Pi TF system
+    transform_publish_period: 0.5
 
     # Probability / Clearing Params
     laserscan_adaptive_vals: false

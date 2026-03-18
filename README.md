@@ -1,230 +1,97 @@
-# Clean Bot - Autonomous Cleaning Robot
+# Clean Bot — Autonomous Cleaning Robot
 
-A ROS 2 Humble autonomous cleaning robot simulation featuring SLAM-based navigation, Gazebo simulation, and mission planning.
-
-> **Note:** All source files, configuration files, and launch files in this project have been documented with headers explaining their purpose, parameters, and underlying assumptions.
+A physical differential-drive cleaning robot built with ROS 2 Humble, controlled via Telegram. The robot autonomously maps a room using SLAM, performs adaptive coverage cleaning, and returns home — all triggered by simple chat commands.
 
 ![ROS 2](https://img.shields.io/badge/ROS%202-Humble-blue)
-![Gazebo](https://img.shields.io/badge/Gazebo-Classic-orange)
 ![Nav2](https://img.shields.io/badge/Nav2-Navigation-green)
 ![SLAM](https://img.shields.io/badge/SLAM-Toolbox-purple)
-
-## Table of Contents
-
-- [Overview](#overview)
-- [Architecture](#architecture)
-- [Packages](#packages)
-  - [clean_bot_description](#clean_bot_description)
-  - [clean_bot_gazebo](#clean_bot_gazebo)
-  - [clean_bot_navigation](#clean_bot_navigation)
-  - [clean_bot_mission](#clean_bot_mission)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Robot Specifications](#robot-specifications)
-- [Configuration](#configuration)
-- [Troubleshooting](#troubleshooting)
-
----
-
-## Overview
-
-Clean Bot is a differential-drive mobile robot designed for autonomous cleaning tasks. The robot uses:
-
-- **SLAM Toolbox** for simultaneous localization and mapping
-- **Nav2** for path planning and obstacle avoidance
-- **Gazebo Classic** for realistic physics simulation
-- **Python-based mission control** for waypoint navigation
-
-The robot autonomously navigates through a room, following a predefined cleaning path, and returns to its starting position (dock).
+![Platform](https://img.shields.io/badge/Platform-Raspberry%20Pi-red)
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        ROS 2 System                              │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────────┐     ┌──────────────┐     ┌──────────────┐     │
-│  │   Gazebo     │────▶│  SLAM        │────▶│   Nav2       │     │
-│  │  Simulation  │     │  Toolbox     │     │  Navigation  │     │
-│  └──────────────┘     └──────────────┘     └──────────────┘     │
-│         │                    │                    │              │
-│         │                    │                    │              │
-│         ▼                    ▼                    ▼              │
-│    /scan, /odom         /map, /tf           /cmd_vel            │
-│    /tf, /imu                                                     │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │                    Mission Node                           │   │
-│  │              (nav2_simple_commander)                      │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+  Telegram (PC)                    Raspberry Pi
+ ┌──────────────┐        ┌─────────────────────────────────────────────┐
+ │  User sends  │  ROS 2 │                                             │
+ │  /scan or    │◄──────►│  full_mission_controller                    │
+ │  /clean      │ topics │       │                                     │
+ │              │        │       ▼                                     │
+ │ telegram_    │        │  ┌──────────┐   ┌──────────┐               │
+ │ bridge.py    │        │  │ Frontier │   │ Coverage  │               │
+ │              │        │  │ Explorer │   │ Planner   │               │
+ └──────────────┘        │  └────┬─────┘   └────┬──────┘               │
+                         │       │               │                     │
+                         │       ▼               ▼                     │
+                         │  ┌──────────┐   ┌──────────┐               │
+                         │  │  SLAM    │   │   Nav2   │               │
+                         │  │ Toolbox  │   │  Stack   │               │
+                         │  └────┬─────┘   └────┬──────┘               │
+                         │       │               │                     │
+                         │       ▼               ▼                     │
+                         │    /map, /tf       /cmd_vel                 │
+                         │                       │                     │
+                         │  ┌────────────────────┼──────────────────┐  │
+                         │  │          Hardware Layer                │  │
+                         │  │                    │                   │  │
+                         │  │  RPLidar ──► /scan │                  │  │
+                         │  │  rf2o ────► /odom  ▼                  │  │
+                         │  │  IMU ────► /imu   Arduino ──► Motors  │  │
+                         │  │                   (L298N + DC motors)  │  │
+                         │  └───────────────────────────────────────┘  │
+                         └─────────────────────────────────────────────┘
 ```
 
 ### TF Tree
 
 ```
-map
- └── odom (published by SLAM Toolbox)
-      └── base_link (published by diff_drive plugin)
-           ├── chassis
-           │    ├── laser_frame
-           │    └── imu_link
-           ├── left_wheel
-           ├── right_wheel
-           └── caster_wheel
+map → odom                       (SLAM Toolbox)
+       → base_link               (rf2o laser odometry)
+            ├── laser             (RPLidar A1M8)
+            ├── imu_link          (Grove IMU 9DOF)
+            ├── ultrasonic_link   (HC-SR04)
+            ├── left_wheel
+            ├── right_wheel
+            └── caster_wheel
 ```
 
 ---
 
-## Packages
+## Hardware
 
-### clean_bot_description
-
-**Purpose**: Defines the robot's physical structure using URDF/Xacro files.
-
-**Key Files**:
-| File | Description |
-|------|-------------|
-| `urdf/robot.urdf.xacro` | Main robot description entry point |
-| `urdf/robot_core.xacro` | Chassis, wheels, and caster definition |
-| `urdf/lidar.xacro` | 2D LiDAR sensor (360° scanning) |
-| `urdf/imu.xacro` | IMU sensor for orientation |
-| `urdf/gazebo_control.xacro` | Differential drive controller plugin |
-| `urdf/inertial_macros.xacro` | Helper macros for inertia calculations |
-| `launch/rsp.launch.py` | Robot State Publisher launch file |
-
-**Robot Structure**:
-- White chassis box (0.3m × 0.3m × 0.15m)
-- Two driven wheels (0.1m diameter)
-- Front caster wheel for stability
-- Top-mounted 2D LiDAR
+| Component | Model | Role |
+|-----------|-------|------|
+| SBC | Raspberry Pi 4 | ROS 2 host |
+| Microcontroller | Arduino | Motor control, sensors, cleaning actuators |
+| Motor Driver | L298N | Drives two DC motors |
+| Motors | GB37-131 DC | Differential drive (wheel ⌀ ~0.068 m, separation ~0.20 m) |
+| LiDAR | RPLidar A1M8 | 2D 360° scanning |
+| IMU | Grove IMU 9DOF (ICM20600 + AK09918) | Orientation |
+| Range Sensor | HC-SR04 Ultrasonic | Close obstacle detection |
+| Cleaning | Relay + Servo (via Arduino) | Cleaning mechanism control |
 
 ---
 
-### clean_bot_gazebo
+## Prerequisites
 
-**Purpose**: Provides Gazebo simulation environment and world files.
+- **On the Raspberry Pi:**
+  - Ubuntu 22.04 + ROS 2 Humble (desktop or base)
+  - System packages:
+    ```bash
+    sudo apt install -y \
+        ros-humble-navigation2 ros-humble-nav2-bringup \
+        ros-humble-slam-toolbox ros-humble-xacro \
+        ros-humble-robot-state-publisher ros-humble-joint-state-publisher
+    ```
+  - Python packages: `python-telegram-bot`, `opencv-python`, `numpy`
 
-**Key Files**:
-| File | Description |
-|------|-------------|
-| `launch/sim.launch.py` | Main simulation launch file |
-| `worlds/room.world` | Indoor room environment (~5m × 5m) |
+- **On your PC (Telegram bridge only):**
+  - ROS 2 Humble sourced
+  - Same `ROS_DOMAIN_ID` as the Pi
+  - Python packages: `python-telegram-bot`
 
-**World Features**:
-- Four walls enclosing the room
-- Dock station (red box) at position (2, 2)
-- Flat ground plane
-- Ambient lighting
-
-**Launch Arguments**:
-```bash
-ros2 launch clean_bot_gazebo sim.launch.py gui:=true  # With Gazebo GUI (default)
-ros2 launch clean_bot_gazebo sim.launch.py gui:=false # Headless mode
-```
-
----
-
-### clean_bot_navigation
-
-**Purpose**: Configures Nav2 navigation stack and SLAM Toolbox.
-
-**Key Files**:
-| File | Description |
-|------|-------------|
-| `launch/navigation.launch.py` | Launches Nav2 + SLAM Toolbox |
-| `config/nav2_params.yaml` | Nav2 configuration (planners, controllers, costmaps) |
-| `config/mapper_params_online_async.yaml` | SLAM Toolbox configuration |
-
-**Navigation Stack Components**:
-
-| Component | Plugin/Type | Description |
-|-----------|-------------|-------------|
-| **Localization** | SLAM Toolbox | Online async mapping mode |
-| **Global Planner** | NavFn | Dijkstra-based path planning |
-| **Local Controller** | DWB | Dynamic Window approach |
-| **Behaviors** | Spin, Backup, Wait | Recovery behaviors |
-| **Costmaps** | Voxel + Inflation | Obstacle and inflation layers |
-
-**Key Parameters**:
-```yaml
-# Velocity limits
-max_vel_x: 0.26 m/s
-max_vel_theta: 1.0 rad/s
-
-# Costmap
-resolution: 0.05 m
-robot_radius: 0.22 m
-inflation_radius: 0.55 m
-```
-
----
-
-### clean_bot_mission
-
-**Purpose**: Python-based autonomous mission execution using Nav2 Simple Commander.
-
-**Key Files**:
-| File | Description |
-|------|-------------|
-| `clean_bot_mission/mission.py` | Main mission logic |
-| `setup.py` | Package setup and entry points |
-
-**Mission Flow**:
-```
-1. Initialize Navigator
-        │
-        ▼
-2. Wait for Nav2 + SLAM active
-        │
-        ▼
-3. Set initial pose at (0, 0)
-        │
-        ▼
-4. Execute cleaning path:
-   (0,0) → (1.5,0) → (1.5,1.5) → (0,1.5) → (0,0)
-        │
-        ▼
-5. Report success/failure
-```
-
-**Entry Point**:
-```bash
-ros2 run clean_bot_mission mission_node
-```
-
----
-
-## Installation
-
-### Prerequisites
-
-- Ubuntu 22.04
-- ROS 2 Humble
-- Gazebo Classic (gazebo11)
-- Nav2
-- SLAM Toolbox
-
-### Install Dependencies
-
-```bash
-# Install ROS 2 packages
-sudo apt update
-sudo apt install -y \
-    ros-humble-gazebo-ros-pkgs \
-    ros-humble-navigation2 \
-    ros-humble-nav2-bringup \
-    ros-humble-slam-toolbox \
-    ros-humble-xacro \
-    ros-humble-robot-state-publisher \
-    ros-humble-joint-state-publisher
-```
-
-### Build Workspace
+### Build
 
 ```bash
 cd ~/robot_ws
@@ -232,219 +99,131 @@ colcon build
 source install/setup.bash
 ```
 
+> **Note:** `rf2o_laser_odometry` is a git submodule. After cloning, run:
+> ```bash
+> git submodule update --init --recursive
+> ```
+
 ---
 
 ## Quick Start
 
-### Option 1: Run All Components Separately (Recommended for Debugging)
+### 1. On the Raspberry Pi — Launch the robot
 
-**Terminal 1 - Simulation**:
 ```bash
-cd ~/robot_ws
-source install/setup.bash
-ros2 launch clean_bot_gazebo sim.launch.py
+source ~/robot_ws/install/setup.bash
+ros2 launch clean_bot_mission cleaning_mission.launch.py
 ```
 
-**Terminal 2 - Navigation**:
+This single command brings up the entire stack:
+- Robot state publisher (URDF)
+- RPLidar driver + rf2o laser odometry
+- SLAM Toolbox (online async)
+- Nav2 navigation stack
+- Full mission controller (exploration + coverage + return home)
+
+### 2. On your PC — Start the Telegram bridge
+
 ```bash
-cd ~/robot_ws
-source install/setup.bash
-ros2 launch clean_bot_navigation navigation.launch.py
+export ROS_DOMAIN_ID=<same as Pi>
+source ~/robot_ws/install/setup.bash
+ros2 run clean_bot_mission telegram_bridge
 ```
 
-**Terminal 3 - Mission**:
-```bash
-cd ~/robot_ws
-source install/setup.bash
-ros2 run clean_bot_mission mission_node
-```
+### 3. In Telegram — Control the robot
 
-### Option 2: Manual Control
-
-Use `teleop_twist_keyboard` to manually control the robot:
-```bash
-ros2 run teleop_twist_keyboard teleop_twist_keyboard
-```
+Send commands to your bot. The robot handles the rest.
 
 ---
 
-## Robot Specifications
+## Telegram Commands
 
-### Physical Properties
+| Command | Description |
+|---------|-------------|
+| `/start` | Show welcome message and available commands |
+| `/scan` | Explore the room — frontier-based exploration builds a SLAM map |
+| `/stopscan` | Stop exploration and wait for cleaning command |
+| `/clean` | Clean the room — adaptive coverage path over the mapped area |
+| `/stopclean` | Stop cleaning |
+| `/home` | Return to starting position |
+| `/reset` | Reset mission to initial state |
+| `/pause` | Pause current operation |
+| `/resume` | Resume paused operation |
+| `/status` | Get the current mission state and sensor info |
+| `/map` | Get the current map as an image with the robot's position marked |
+| `/help` | Show help |
 
-| Property | Value |
-|----------|-------|
-| Chassis Size | 0.3m × 0.3m × 0.15m |
-| Total Mass | ~0.5 kg |
-| Wheel Diameter | 0.1 m |
-| Wheel Separation | 0.35 m |
-| Ground Clearance | 0.05 m |
-
-### Sensors
-
-| Sensor | Type | Topic | Frame | Update Rate |
-|--------|------|-------|-------|-------------|
-| LiDAR | 2D Laser | `/scan` | `laser_frame` | 10 Hz |
-| IMU | 6-DOF | `/imu` | `imu_link` | 100 Hz |
-| Odometry | Wheel Encoders | `/odom` | `odom` | 30 Hz |
-
-### LiDAR Specifications
-
-| Parameter | Value |
-|-----------|-------|
-| Horizontal FOV | 360° |
-| Angular Resolution | 1° (360 samples) |
-| Min Range | 0.3 m |
-| Max Range | 12.0 m |
-| Noise | Gaussian (σ = 0.01) |
-
-### Motion Capabilities
-
-| Parameter | Value |
-|-----------|-------|
-| Max Linear Velocity | 0.26 m/s |
-| Max Angular Velocity | 1.0 rad/s |
-| Max Linear Acceleration | 2.5 m/s² |
-| Max Angular Acceleration | 3.2 rad/s² |
-| Max Wheel Torque | 200 Nm |
+After cleaning completes (or the robot returns home), the bot automatically sends the final map to all users who have interacted with it.
 
 ---
 
-## Configuration
+## Key ROS 2 Topics
 
-### Customizing Navigation Parameters
-
-Edit `clean_bot_navigation/config/nav2_params.yaml`:
-
-```yaml
-# Adjust velocity limits
-controller_server:
-  ros__parameters:
-    FollowPath:
-      max_vel_x: 0.26      # Increase for faster movement
-      max_vel_theta: 1.0   # Increase for faster turning
-
-# Adjust costmap settings
-local_costmap:
-  local_costmap:
-    ros__parameters:
-      robot_radius: 0.22   # Match your robot size
-      inflation_radius: 0.55
-```
-
-### Customizing SLAM Parameters
-
-Edit `clean_bot_navigation/config/mapper_params_online_async.yaml`:
-
-```yaml
-slam_toolbox:
-  ros__parameters:
-    resolution: 0.05           # Map resolution (m/cell)
-    max_laser_range: 12.0      # Match your LiDAR range
-    minimum_travel_distance: 0.5  # Min distance before updating map
-    map_update_interval: 5.0   # Map update frequency (seconds)
-```
-
-### Customizing Mission Waypoints
-
-Edit `clean_bot_mission/clean_bot_mission/mission.py`:
-
-```python
-# Define your custom waypoints (x, y, yaw)
-waypoints = [
-    (1.0, 0.0, 0.0),      # First waypoint
-    (1.0, 1.0, 1.57),     # Second waypoint (facing up)
-    (0.0, 1.0, 3.14),     # Third waypoint (facing left)
-    (0.0, 0.0, -1.57),    # Return to start
-]
-```
+| Topic | Type | Description |
+|-------|------|-------------|
+| `/mission_command` | `std_msgs/String` | Commands from Telegram bridge → mission controller |
+| `/mission_state` | `std_msgs/String` | Current state published by mission controller |
+| `/map` | `nav_msgs/OccupancyGrid` | SLAM Toolbox map |
+| `/cmd_vel_nav` | `geometry_msgs/Twist` | Nav2 velocity commands → emergency stop filter |
+| `/cmd_vel` | `geometry_msgs/Twist` | Filtered velocity commands → Arduino |
+| `/scan` | `sensor_msgs/LaserScan` | RPLidar laser scans (10 Hz) |
+| `/scan_throttled` | `sensor_msgs/LaserScan` | Throttled scans for rf2o (5 Hz) |
+| `/odom` | `nav_msgs/Odometry` | rf2o laser-based odometry |
 
 ---
 
-## Topics Reference
+## Packages
 
-### Published Topics
-
-| Topic | Type | Publisher | Description |
-|-------|------|-----------|-------------|
-| `/scan` | `sensor_msgs/LaserScan` | Gazebo LiDAR | Laser scan data |
-| `/odom` | `nav_msgs/Odometry` | Gazebo diff_drive | Wheel odometry |
-| `/imu` | `sensor_msgs/Imu` | Gazebo IMU | IMU data |
-| `/map` | `nav_msgs/OccupancyGrid` | SLAM Toolbox | Generated map |
-| `/tf` | `tf2_msgs/TFMessage` | Multiple | Transform tree |
-
-### Subscribed Topics
-
-| Topic | Type | Subscriber | Description |
-|-------|------|------------|-------------|
-| `/cmd_vel` | `geometry_msgs/Twist` | Gazebo diff_drive | Velocity commands |
-| `/goal_pose` | `geometry_msgs/PoseStamped` | Nav2 | Navigation goal |
-
-### Services
-
-| Service | Type | Description |
-|---------|------|-------------|
-| `/slam_toolbox/save_map` | `slam_toolbox/srv/SaveMap` | Save current map |
-| `/navigate_to_pose` | `nav2_msgs/action/NavigateToPose` | Navigate to goal |
+| Package | Description |
+|---------|-------------|
+| **clean_bot_description** | Robot URDF/Xacro model — chassis, wheels, sensor frames |
+| **clean_bot_hardware** | Hardware drivers, Nav2/SLAM configs, launch files for bringup |
+| **clean_bot_mission** | Mission control — frontier explorer, coverage planner, full mission controller, Telegram bridge |
+| **sllidar_ros2** | RPLidar A1M8 driver (external package) |
+| **rf2o_laser_odometry** | Laser scan matching odometry (external, git submodule) |
 
 ---
 
 ## Troubleshooting
 
-### Common Issues
+### No `odom → base_link` transform
 
-#### 1. "Failed to compute odom pose" error
-
-**Cause**: SLAM Toolbox can't find the `odom → base_link` transform.
-
-**Solution**: Ensure Gazebo simulation is running and publishing transforms:
+rf2o laser odometry needs valid `/scan` data. Check the lidar:
 ```bash
+ros2 topic hz /scan            # Should be ~5-10 Hz
 ros2 run tf2_ros tf2_echo odom base_link
 ```
+If no data, verify the RPLidar USB connection (`/dev/ttyUSB0`) and permissions (`sudo chmod 666 /dev/ttyUSB0`).
 
-#### 2. "Robot is out of bounds of the costmap"
+### Robot doesn't move
 
-**Cause**: Initial costmap is small; this warning clears once SLAM builds the map.
+Check that Arduino is connected and `/cmd_vel` is being published:
+```bash
+ros2 topic echo /cmd_vel
+```
+Verify the serial port in the hardware launch config.
 
-**Solution**: Wait a few seconds for SLAM to initialize the map.
+### Nav2 nodes not activating
 
-#### 3. Mission node hangs on "Waiting for Nav2"
-
-**Cause**: Navigation stack not fully active.
-
-**Solution**: Ensure navigation launch completed successfully:
+SLAM must publish the `/map` topic before Nav2 starts. Wait for the lidar to produce scans and rf2o to publish odometry:
 ```bash
 ros2 node list | grep -E "bt_navigator|controller_server|planner_server"
 ```
 
-#### 4. Robot doesn't move
+### Telegram bot not receiving commands
 
-**Cause**: No velocity commands being sent or blocked by costmap.
-
-**Solution**: Check `/cmd_vel` topic:
+Ensure `ROS_DOMAIN_ID` matches on both Pi and PC. Verify network connectivity:
 ```bash
-ros2 topic echo /cmd_vel
+ros2 topic list    # Run on PC — should show Pi topics
 ```
 
-### Useful Debug Commands
+### Useful debug commands
 
 ```bash
-# Check all running nodes
-ros2 node list
-
-# Visualize TF tree
-ros2 run tf2_tools view_frames
-
-# Check topic frequencies
-ros2 topic hz /scan
-ros2 topic hz /odom
-
-# Echo sensor data
-ros2 topic echo /scan --once
-ros2 topic echo /odom --once
-
-# Check Nav2 status
-ros2 service call /bt_navigator/get_state lifecycle_msgs/srv/GetState
+ros2 node list                          # All active nodes
+ros2 run tf2_tools view_frames          # Save TF tree as PDF
+ros2 topic hz /scan /odom               # Check sensor rates
+ros2 topic echo /mission_state          # Monitor mission progress
 ```
 
 ---
@@ -452,60 +231,38 @@ ros2 service call /bt_navigator/get_state lifecycle_msgs/srv/GetState
 ## File Structure
 
 ```
-robot_ws/src/
-├── clean_bot_description/      # Robot URDF model
-│   ├── CMakeLists.txt
-│   ├── package.xml
+├── clean_bot_description/       # Robot URDF model
 │   ├── launch/
-│   │   └── rsp.launch.py      # Robot State Publisher
+│   │   └── rsp.launch.py       # Robot State Publisher
 │   └── urdf/
-│       ├── robot.urdf.xacro   # Main entry point
-│       ├── robot_core.xacro   # Chassis and wheels
-│       ├── lidar.xacro        # LiDAR sensor
-│       ├── imu.xacro          # IMU sensor
-│       ├── gazebo_control.xacro # Diff drive plugin
+│       ├── robot.urdf.xacro    # Main entry point
+│       ├── robot_core.xacro    # Chassis, wheels, caster
+│       ├── lidar.xacro         # RPLidar frame
+│       ├── imu.xacro           # IMU frame
+│       ├── ultrasonic.xacro    # Ultrasonic sensor frame
 │       └── inertial_macros.xacro
 │
-├── clean_bot_gazebo/           # Simulation
-│   ├── CMakeLists.txt
-│   ├── package.xml
-│   ├── launch/
-│   │   └── sim.launch.py      # Simulation launcher
-│   └── worlds/
-│       └── room.world         # Indoor environment
+├── clean_bot_hardware/          # Hardware drivers & configs
+│   ├── config/                  # Nav2 params, SLAM params
+│   └── launch/
+│       └── robot_bringup.launch.py
 │
-├── clean_bot_navigation/       # Navigation
-│   ├── CMakeLists.txt
-│   ├── package.xml
+├── clean_bot_mission/           # Mission control & Telegram
+│   ├── clean_bot_mission/
+│   │   ├── frontier_explorer.py     # Autonomous frontier-based exploration
+│   │   ├── adaptive_coverage.py     # Map-based coverage planner
+│   │   ├── simple_coverage.py       # Fallback boustrophedon coverage
+│   │   └── full_mission.py          # Mission state machine (scan→clean→home)
 │   ├── launch/
-│   │   └── navigation.launch.py
-│   └── config/
-│       ├── nav2_params.yaml              # Nav2 configuration
-│       └── mapper_params_online_async.yaml # SLAM config
+│   │   └── cleaning_mission.launch.py
+│   └── scripts/
+│       └── telegram_bridge.py
 │
-└── clean_bot_mission/          # Mission control
-    ├── setup.py
-    ├── package.xml
-    ├── resource/
-    └── clean_bot_mission/
-        ├── __init__.py
-        └── mission.py         # Mission logic
+├── rf2o_laser_odometry/         # Laser odometry (git submodule)
+├── sllidar_ros2/                # RPLidar driver
+├── docs/                        # Additional documentation
+└── README.md
 ```
-
----
-
-## License
-
-This project is provided for educational purposes.
-
----
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
 
 ---
 
@@ -513,4 +270,5 @@ This project is provided for educational purposes.
 
 - [ROS 2 Navigation2](https://navigation.ros.org/)
 - [SLAM Toolbox](https://github.com/SteveMacenski/slam_toolbox)
-- [Gazebo](https://gazebosim.org/)
+- [rf2o_laser_odometry](https://github.com/MAPIRlab/rf2o_laser_odometry)
+- [Slamtec RPLidar](https://github.com/Slamtec/sllidar_ros2)

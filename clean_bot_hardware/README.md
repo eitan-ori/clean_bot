@@ -2,42 +2,46 @@
 
 ROS 2 hardware drivers and main bringup for the Clean Bot robot.
 
-## 🤖 Hardware Components
+## Hardware Components
 
 | Component | Model | Connection | Driver |
 |-----------|-------|------------|--------|
 | **Motors** | GB37-131 DC Motors | Arduino (L298N) | `arduino_driver` |
-| **Encoders** | Hall Effect (11 CPR) | Arduino (GPIO) | `arduino_driver` |
 | **Ultrasonic** | HC-SR04 | Arduino (GPIO) | `arduino_driver` |
 | **Lidar** | RPLIDAR A1M8 Gen6 | USB Serial | `sllidar_ros2` |
 | **IMU** | Grove 9DOF (ICM20600+AK09918) | I2C | `imu_publisher` |
 
-## 📁 Package Structure
+## Package Structure
 
 ```
 clean_bot_hardware/
 ├── clean_bot_hardware/          # Python modules
-│   ├── arduino_driver.py        # ⭐ Motor/encoder/ultrasonic driver
+│   ├── arduino_driver.py        # Motor/ultrasonic/cleaning driver
+│   ├── emergency_stop.py        # Safety velocity filter (cmd_vel_nav → cmd_vel)
+│   ├── low_obstacle_detector.py # Ultrasonic → PointCloud2
 │   ├── imu_publisher_node.py    # IMU ROS publisher
 │   ├── simple_imu_driver.py     # Low-level IMU I2C driver
-│   └── imu_odom_broadcaster.py  # TF broadcaster (legacy)
+│   ├── scan_throttler.py        # Throttles /scan (10Hz → 5Hz) for rf2o
+│   └── rplidar_test.py          # Lidar diagnostic tool
 ├── config/
-│   ├── ekf.yaml                 # Robot Localization EKF config
 │   ├── nav2_params.yaml         # Nav2 parameters
-│   └── mapper_params_online_async.yaml  # SLAM Toolbox config
+│   ├── mapper_params_online_async.yaml  # SLAM Toolbox config
+│   ├── rplidar_a1.yaml          # RPLidar parameters
+│   └── rplidar_rviz.rviz        # RViz config for lidar viewing
 ├── launch/
-│   ├── robot_bringup.launch.py  # ⭐ MAIN LAUNCH FILE
+│   ├── robot_bringup.launch.py  # MAIN LAUNCH FILE
 │   ├── sensors.launch.py        # Sensors only (Lidar+IMU)
-│   └── slam.launch.py           # SLAM + sensors
+│   ├── slam.launch.py           # SLAM + sensors
+│   └── rviz_lidar.launch.py     # Lidar visualization
 └── scripts/
     └── check_lidar.py           # Diagnostic script
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Hardware Setup
 
-1. **Arduino**: Flash the code from `my_robot_slam/arduino_code/arduino_ros_node.ino`
+1. **Arduino**: Flash the motor control firmware
 2. **Connections**:
    - Arduino → USB (e.g., `/dev/ttyUSB0`)
    - RPLIDAR → USB (e.g., `/dev/ttyUSB1`)
@@ -45,9 +49,7 @@ clean_bot_hardware/
 
 3. **Find your ports**:
    ```bash
-   ls /dev/ttyUSB*
-   # or
-   ls /dev/ttyACM*
+   ls /dev/ttyUSB* /dev/ttyACM*
    ```
 
 4. **Set permissions** (one-time):
@@ -60,7 +62,7 @@ clean_bot_hardware/
 
 ```bash
 cd ~/robot_ws
-colcon build --packages-select clean_bot_hardware clean_bot_mission
+colcon build --packages-select clean_bot_hardware
 source install/setup.bash
 ```
 
@@ -83,81 +85,57 @@ ros2 launch clean_bot_hardware robot_bringup.launch.py \
 ros2 launch clean_bot_hardware sensors.launch.py
 ```
 
-## ⚙️ Robot Calibration
+## Robot Calibration
 
-### Physical Parameters (CRITICAL!)
+### Physical Parameters
 
 Edit these in launch or pass as arguments:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `wheel_radius` | 0.034m | Wheel radius (measure your wheels!) |
+| `wheel_radius` | 0.034m | Wheel radius |
 | `wheel_separation` | 0.20m | Distance between wheels |
-| `ticks_per_revolution` | 1320 | Encoder CPR × Gear ratio |
 
-**How to measure:**
-- **wheel_radius**: Measure wheel diameter with calipers, divide by 2
-- **wheel_separation**: Measure center-to-center distance between wheels
-- **ticks_per_revolution**: For GB37-131: 11 (CPR) × 120 (gear ratio) = 1320
-
-## 📡 Topics
+## Topics
 
 ### Published
 
 | Topic | Type | Description |
 |-------|------|-------------|
-| `/wheel_odom` | nav_msgs/Odometry | Wheel odometry from encoders |
+| `/odom` | nav_msgs/Odometry | Laser-based odometry (rf2o) |
 | `/ultrasonic_range` | sensor_msgs/Range | Distance from ultrasonic |
-| `/scan` | sensor_msgs/LaserScan | Lidar scan data |
+| `/scan` | sensor_msgs/LaserScan | Lidar scan data (10 Hz) |
+| `/scan_throttled` | sensor_msgs/LaserScan | Throttled scans for rf2o (5 Hz) |
 | `/imu/data_raw` | sensor_msgs/Imu | Raw IMU (accel+gyro) |
 | `/imu/mag` | sensor_msgs/MagneticField | Magnetometer |
-| `/imu/data` | sensor_msgs/Imu | Filtered IMU (with orientation) |
-| `/odom` | nav_msgs/Odometry | Fused odometry (from EKF) |
 | `/map` | nav_msgs/OccupancyGrid | SLAM map |
 
 ### Subscribed
 
 | Topic | Type | Description |
 |-------|------|-------------|
-| `/cmd_vel` | geometry_msgs/Twist | Velocity commands |
+| `/cmd_vel_nav` | geometry_msgs/Twist | Velocity from Nav2 (→ emergency stop filter) |
+| `/cmd_vel` | geometry_msgs/Twist | Filtered velocity → Arduino motor control |
 
-## 🗺️ Running a Cleaning Mission
+## Velocity Safety Chain
 
-After launching the robot:
+```
+Nav2 → /cmd_vel_nav → emergency_stop → /cmd_vel → arduino_driver → motors
+```
 
-1. **Manual exploration** (to create initial map):
-   ```bash
-   ros2 run teleop_twist_keyboard teleop_twist_keyboard
-   ```
-   Drive around the room edges to let SLAM build the map.
+The `emergency_stop` node filters velocity commands based on ultrasonic readings, stopping the robot if obstacles are detected within the safety threshold.
 
-2. **Start coverage mission** (14cm cleaning width):
-   ```bash
-   ros2 run clean_bot_mission coverage_mission --ros-args -p coverage_width:=0.14
-   ```
-
-3. **Save the map** (optional):
-   ```bash
-   ros2 run nav2_map_server map_saver_cli -f ~/my_map
-   ```
-
-## 🔧 Troubleshooting
+## Troubleshooting
 
 ### Arduino not connecting
 ```bash
-# Check if device exists
 ls -la /dev/ttyUSB*
-
-# Check permissions
 groups  # Should include 'dialout'
-
-# Try with sudo (temporary fix)
-sudo chmod 666 /dev/ttyUSB0
+sudo chmod 666 /dev/ttyUSB0  # Temporary fix
 ```
 
 ### IMU not detected
 ```bash
-# Check I2C devices
 i2cdetect -y 1
 # Should show devices at 0x69 (IMU) and 0x0C (Magnetometer)
 ```
@@ -168,13 +146,11 @@ ros2 run tf2_tools view_frames
 evince frames.pdf
 ```
 
-## 📦 Dependencies
+## Dependencies
 
-Install with:
 ```bash
 sudo apt install ros-humble-slam-toolbox ros-humble-navigation2 \
-    ros-humble-nav2-bringup ros-humble-robot-localization \
-    ros-humble-imu-filter-madgwick ros-humble-teleop-twist-keyboard
+    ros-humble-nav2-bringup ros-humble-teleop-twist-keyboard
 
 pip3 install pyserial smbus2
 ```

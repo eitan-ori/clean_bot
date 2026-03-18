@@ -80,7 +80,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'use_sim_time',
             default_value='false',
-            description='Use simulation/Gazebo clock'),
+            description='Use simulated clock (always false for physical robot)'),
         
         sensors_launch,
         # rsp_launch,

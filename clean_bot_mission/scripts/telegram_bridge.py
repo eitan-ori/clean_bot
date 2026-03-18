@@ -25,8 +25,7 @@ Telegram Commands:
     /start - Show available commands
     /scan - Start exploration/scanning
     /stopscan - Stop scanning
-    /clean - Start cleaning (random)
-    /coverage - Start cleaning (map-based)
+    /clean - Start cleaning (map-based coverage)
     /stopclean - Stop cleaning
     /home - Return to home position
     /reset - Reset mission to initial state
@@ -39,14 +38,14 @@ Telegram Commands:
 Author: Clean Bot Team
 """
 
-import os
 import sys
 import logging
 import asyncio
 import io
+import math
 import threading
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 # --- Telegram Imports ---
 try:
@@ -113,17 +112,24 @@ class RobotBridgeNode(Node):
         
         # State
         self.mission_state = "UNKNOWN"
+        self._prev_mission_state = "UNKNOWN"
         self.exploration_state = "UNKNOWN"
         self.coverage_state = "UNKNOWN"
         self.map_data = None
         self.last_map_time = None
+        self._notify_chat_ids = set()  # Chat IDs to notify on mission complete
+        self._pending_completion = False  # Flag for mission completion notification
         
         self.get_logger().info('🤖 Telegram Bridge Node initialized')
         self.get_logger().info('   Publishing to: /mission_command')
         self.get_logger().info('   Subscribing to: /mission_state, /map, /exploration_state, /coverage_state')
 
     def state_callback(self, msg: String):
+        self._prev_mission_state = self.mission_state
         self.mission_state = msg.data
+        # Flag mission completion for auto-notification
+        if self._prev_mission_state != 'COMPLETE' and msg.data == 'COMPLETE':
+            self._pending_completion = True
 
     def exploration_state_callback(self, msg: String):
         self.exploration_state = msg.data
@@ -164,6 +170,9 @@ class RobotBridgeNode(Node):
         msg = self.map_data
         width = msg.info.width
         height = msg.info.height
+        if width <= 0 or height <= 0 or len(msg.data) != width * height:
+            self.get_logger().warn('⚠️ Malformed map data, cannot generate image')
+            return None, "Malformed map data"
         res = msg.info.resolution
         origin_x = msg.info.origin.position.x
         origin_y = msg.info.origin.position.y
@@ -206,7 +215,6 @@ class RobotBridgeNode(Node):
             )
             
             # Direction indicator (calculate yaw from quaternion)
-            import math
             yaw = math.atan2(2.0 * rw * rz, 1.0 - 2.0 * rz * rz)
             arrow_len = radius * 2
             arrow_x = px + arrow_len * math.cos(yaw)
@@ -270,6 +278,20 @@ async def check_auth(update: Update) -> bool:
     if ALLOWED_USER_IDS and user_id not in ALLOWED_USER_IDS:
         await update.message.reply_text(f"⛔ Access denied. Your ID: {user_id}")
         return False
+    # Track chat ID for auto-notifications (e.g., mission complete map)
+    if ros_node is not None:
+        ros_node._notify_chat_ids.add(update.effective_chat.id)
+    return True
+
+
+async def check_ros(update: Update) -> bool:
+    """Check if ROS bridge is initialized."""
+    if ros_node is None:
+        await update.message.reply_text(
+            '❌ ROS bridge not initialized.\n'
+            'Start this script from a terminal where ROS2 is sourced.'
+        )
+        return False
     return True
 
 
@@ -288,8 +310,7 @@ Available commands:
 /stopscan - Stop scanning
 
 *Cleaning (Coverage):*
-/clean - Start cleaning (random)
-/coverage - Start cleaning (map-based)
+/clean - Start cleaning (map-based coverage)
 /stopclean - Stop cleaning
 
 *Control:*
@@ -309,13 +330,7 @@ Available commands:
 
 async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start scanning/exploration."""
-    if not await check_auth(update):
-        return
-    if ros_node is None:
-        await update.message.reply_text(
-            '❌ ROS bridge not initialized.\n'
-            'Start this script from a terminal where ROS2 is sourced, then try again.'
-        )
+    if not await check_auth(update) or not await check_ros(update):
         return
 
     ros_node.send_command('start_scan')
@@ -337,31 +352,23 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_stopscan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Stop scanning."""
-    if not await check_auth(update):
+    if not await check_auth(update) or not await check_ros(update):
         return
     ros_node.send_command('stop_scan')
     await update.message.reply_text('🛑 Stopping scan...\nWaiting for clean command.')
 
 
 async def cmd_clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start cleaning (Plan B random)."""
-    if not await check_auth(update):
+    """Start cleaning (map-based coverage)."""
+    if not await check_auth(update) or not await check_ros(update):
         return
     ros_node.send_command('start_clean')
-    await update.message.reply_text('🧹 Starting cleaning (random)...\nRobot will random-walk: turn + drive repeatedly.')
-
-
-async def cmd_coverage(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start original map-based coverage cleaning."""
-    if not await check_auth(update):
-        return
-    ros_node.send_command('start_clean_coverage')
-    await update.message.reply_text('🧹 Starting cleaning (map-based)...\nRobot will try to cover all free space from the map.')
+    await update.message.reply_text('🧹 Starting cleaning (map-based coverage)...\nRobot will cover all free space from the map.')
 
 
 async def cmd_stopclean(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Stop cleaning."""
-    if not await check_auth(update):
+    if not await check_auth(update) or not await check_ros(update):
         return
     ros_node.send_command('stop_clean')
     await update.message.reply_text('🛑 Stopping cleaning...')
@@ -369,7 +376,7 @@ async def cmd_stopclean(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Return to home position."""
-    if not await check_auth(update):
+    if not await check_auth(update) or not await check_ros(update):
         return
     ros_node.send_command('go_home')
     await update.message.reply_text('🏠 Returning home...')
@@ -377,7 +384,7 @@ async def cmd_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Reset mission: Stop robot and return to initial state."""
-    if not await check_auth(update):
+    if not await check_auth(update) or not await check_ros(update):
         return
     ros_node.send_command('reset')
     await update.message.reply_text('🛑 Stopping robot...\n🔄 Mission reset to initial state.\nReady for commands.')
@@ -385,7 +392,7 @@ async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Pause current operation."""
-    if not await check_auth(update):
+    if not await check_auth(update) or not await check_ros(update):
         return
     ros_node.send_command('pause')
     await update.message.reply_text('⏸️ Paused.')
@@ -393,7 +400,7 @@ async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Resume from pause."""
-    if not await check_auth(update):
+    if not await check_auth(update) or not await check_ros(update):
         return
     ros_node.send_command('resume')
     await update.message.reply_text('▶️ Resuming...')
@@ -401,7 +408,7 @@ async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Get current mission state."""
-    if not await check_auth(update):
+    if not await check_auth(update) or not await check_ros(update):
         return
     
     # State emoji mapping
@@ -456,7 +463,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_map(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Get map image with robot position."""
-    if not await check_auth(update):
+    if not await check_auth(update) or not await check_ros(update):
         return
     
     await update.message.reply_text('🗺️ Generating map...')
@@ -492,13 +499,12 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def post_init(application):
-    """Set up bot commands menu."""
+    """Set up bot commands menu and periodic tasks."""
     commands = [
         BotCommand("start", "Show welcome and commands"),
         BotCommand("scan", "Start exploration"),
         BotCommand("stopscan", "Stop exploration"),
-        BotCommand("clean", "Start cleaning (random)"),
-        BotCommand("coverage", "Start cleaning (map-based)"),
+        BotCommand("clean", "Start cleaning (coverage)"),
         BotCommand("stopclean", "Stop cleaning"),
         BotCommand("home", "Return to home"),
         BotCommand("reset", "Reset mission"),
@@ -509,6 +515,37 @@ async def post_init(application):
         BotCommand("help", "Show help"),
     ]
     await application.bot.set_my_commands(commands)
+    
+    # Schedule periodic check for mission completion auto-notifications
+    application.job_queue.run_repeating(
+        _check_mission_complete, interval=3.0, first=5.0)
+
+
+async def _check_mission_complete(context: ContextTypes.DEFAULT_TYPE):
+    """Auto-send map to all tracked chats when mission completes."""
+    if ros_node is None or not ros_node._pending_completion:
+        return
+    ros_node._pending_completion = False
+    
+    for chat_id in list(ros_node._notify_chat_ids):
+        try:
+            image, info = ros_node.create_map_image()
+            if image is not None:
+                bio = io.BytesIO()
+                bio.name = 'final_map.png'
+                image.save(bio, 'PNG')
+                bio.seek(0)
+                caption = f"🎉 *Mission Complete!*\n🗺️ Final map:\n{info}"
+                await context.bot.send_photo(
+                    chat_id=chat_id, photo=bio,
+                    caption=caption, parse_mode='Markdown')
+            else:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"🎉 *Mission Complete!*\n⚠️ Could not generate map: {info}",
+                    parse_mode='Markdown')
+        except Exception as e:
+            logger.warning(f"Failed to send completion notification to {chat_id}: {e}")
 
 
 def main():
@@ -543,7 +580,6 @@ def main():
     application.add_handler(CommandHandler('scan', cmd_scan))
     application.add_handler(CommandHandler('stopscan', cmd_stopscan))
     application.add_handler(CommandHandler('clean', cmd_clean))
-    application.add_handler(CommandHandler('coverage', cmd_coverage))
     application.add_handler(CommandHandler('stopclean', cmd_stopclean))
     application.add_handler(CommandHandler('home', cmd_home))
     application.add_handler(CommandHandler('reset', cmd_reset))

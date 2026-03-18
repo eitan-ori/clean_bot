@@ -39,6 +39,8 @@
 #include "math.h"
 
 #include <signal.h>
+#include <thread>
+#include <chrono>
 
 #ifndef _countof
 #define _countof(_Array) (int)(sizeof(_Array) / sizeof(_Array[0]))
@@ -78,6 +80,7 @@ class SLlidarNode : public rclcpp::Node
         this->declare_parameter<bool>("angle_compensate", false);
         this->declare_parameter<std::string>("scan_mode",std::string());
         this->declare_parameter<float>("scan_frequency",10);
+        this->declare_parameter<bool>("force_scan", false);
         
         this->get_parameter_or<std::string>("channel_type", channel_type, "serial");
         this->get_parameter_or<std::string>("tcp_ip", tcp_ip, "192.168.0.7"); 
@@ -94,6 +97,7 @@ class SLlidarNode : public rclcpp::Node
             this->get_parameter_or<float>("scan_frequency", scan_frequency, 20.0);
         else
             this->get_parameter_or<float>("scan_frequency", scan_frequency, 10.0);
+        this->get_parameter_or<bool>("force_scan", force_scan, false);
     }
 
     bool getSLLIDARDeviceInfo(ILidarDriver * drv)
@@ -290,6 +294,10 @@ public:
             return -1;
         }
         
+        // Stop any ongoing scan from a previous session
+        drv->stop();
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        
         // get sllidar device info
         if (!getSLLIDARDeviceInfo(drv)) {
             return -1;
@@ -309,7 +317,7 @@ public:
 
         LidarScanMode current_scan_mode;
         if (scan_mode.empty()) {
-            op_result = drv->startScan(false /* not force scan */, true /* use typical scan mode */, 0, &current_scan_mode);
+            op_result = drv->startScan(force_scan /* force scan */, true /* use typical scan mode */, 0, &current_scan_mode);
         } else {
             std::vector<LidarScanMode> allSupportedScanModes;
             op_result = drv->getAllSupportedScanModes(allSupportedScanModes);
@@ -331,7 +339,7 @@ public:
                     }
                     op_result = SL_RESULT_OPERATION_FAIL;
                 } else {
-                    op_result = drv->startScanExpress(false /* not force scan */, selectedScanMode, 0, &current_scan_mode);
+                    op_result = drv->startScanExpress(force_scan /* force scan */, selectedScanMode, 0, &current_scan_mode);
                 }
             }
         }
@@ -460,6 +468,7 @@ public:
     size_t angle_compensate_multiple = 1;//it stand of angle compensate at per 1 degree
     std::string scan_mode;
     float scan_frequency;
+    bool force_scan = false;
 
     ILidarDriver * drv;    
 };

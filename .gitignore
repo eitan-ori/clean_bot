@@ -36,13 +36,11 @@ Thumbs.db
 *.log
 *.pyc
 
-# Gazebo
-*.world.bak
+# Runtime data (created by webapp)
+**/schedules.json
+**/saved_rooms/*.json
+!**/saved_rooms/.gitkeep
 
-# Maps (uncomment if you want to track maps)
+# Maps (uncomment to track maps)
 # *.pgm
 # *.yaml
-
-# Ignore external packages (add your own)
-# sllidar_ros2/
-# jsk_visualization/

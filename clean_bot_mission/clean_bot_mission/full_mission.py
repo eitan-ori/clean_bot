@@ -28,11 +28,12 @@ Phase 5: RETURN HOME
 Commands (via /mission_command topic, std_msgs/String):
 - "start_scan"   : Start exploration phase
 - "stop_scan"    : Stop exploration and wait for clean command
-- "start_clean"  : Start cleaning (Plan B random walk; no scan required)
-- "start_clean_coverage" : Start original map-based coverage cleaning
+- "start_clean"  : Start cleaning (map-based coverage)
 - "stop_clean"   : Stop cleaning
 - "go_home"      : Return to home position
 - "reset"        : Reset to initial WAITING_FOR_SCAN state
+- "pause"        : Pause current operation
+- "resume"       : Resume paused operation
 
 Usage:
     ros2 run clean_bot_mission full_mission
@@ -51,19 +52,16 @@ Usage:
 Author: Clean Bot Team
 """
 
-import math
 import time
 import rclpy
-import subprocess
-import threading
-import random
 from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.action import ActionClient
 
 from std_msgs.msg import Bool, String, Empty
-from geometry_msgs.msg import PoseStamped, Twist
-from nav_msgs.msg import OccupancyGrid
+from geometry_msgs.msg import Twist
+from nav2_msgs.action import NavigateToPose
 
 # Import our mission modules
 from clean_bot_mission.frontier_explorer import FrontierExplorer
@@ -93,64 +91,19 @@ class FullMissionController(Node):
         self.declare_parameter('home_x', 0.0)
         self.declare_parameter('home_y', 0.0)
 
-        # Predefined square cleaning (open-loop cmd_vel; no scan/map required)
-        self.declare_parameter('square_side', 4.0)            # meters
-        self.declare_parameter('square_laps', 1)              # number of loops around the square
-        self.declare_parameter('square_linear_speed', 0.12)   # m/s
-        self.declare_parameter('square_angular_speed', 0.45)  # rad/s
-        self.declare_parameter('square_turn_left', True)
-
-        # Plan B random cleaning (random turn + straight drive; open-loop)
-        self.declare_parameter('random_drive_time', 10.0)       # seconds
-        self.declare_parameter('random_turn_max_angle', 1.57)   # radians (<= pi)
-        self.declare_parameter('random_linear_speed', 0.12)     # m/s
-        self.declare_parameter('random_angular_speed', 0.6)     # rad/s
-        
         self.coverage_width = self.get_parameter('coverage_width').value
         self.auto_start = self.get_parameter('auto_start').value
         self.return_home = self.get_parameter('return_home_after').value
         self.home_x = self.get_parameter('home_x').value
         self.home_y = self.get_parameter('home_y').value
 
-        # Square params
-        self.square_side = float(self.get_parameter('square_side').value)
-        self.square_laps = int(self.get_parameter('square_laps').value)
-        self.square_linear_speed = float(self.get_parameter('square_linear_speed').value)
-        self.square_angular_speed = float(self.get_parameter('square_angular_speed').value)
-        self.square_turn_left = bool(self.get_parameter('square_turn_left').value)
-
-        # Random cleaning params
-        self.random_drive_time = float(self.get_parameter('random_drive_time').value)
-        self.random_turn_max_angle = float(self.get_parameter('random_turn_max_angle').value)
-        self.random_linear_speed = float(self.get_parameter('random_linear_speed').value)
-        self.random_angular_speed = float(self.get_parameter('random_angular_speed').value)
-
         # ===================== State =====================
         self.state = MissionState.WAITING_FOR_SCAN
         self.previous_state = None  # For pause/resume
         self.start_time = None
+        self._auto_start_timer = None
         self.exploration_complete = False
         self.coverage_complete = False
-
-        # ===================== Square cleaning loop state =====================
-        self._square_active = False
-        self._square_paused = False
-        self._square_phase = None  # 'drive' | 'turn'
-        self._square_edges_remaining = 0
-        self._square_laps_remaining = 0
-        self._square_phase_end_monotonic = 0.0
-        self._square_phase_remaining = 0.0
-        self._square_timer = None
-        self._square_lock = threading.Lock()
-
-        # ===================== Random cleaning loop state (Plan B) =====================
-        self._random_active = False
-        self._random_paused = False
-        self._random_phase = None  # 'drive' | 'turn'
-        self._random_phase_end_monotonic = 0.0
-        self._random_phase_remaining = 0.0
-        self._random_timer = None
-        self._random_turn_direction = 1.0
 
         # ===================== Publishers =====================
         self.state_pub = self.create_publisher(String, 'mission_state', 10)
@@ -181,45 +134,56 @@ class FullMissionController(Node):
 
         # ===================== Timer =====================
         self.create_timer(1.0, self.publish_state)
+
+        # ===================== Nav2 action client =====================
+        self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
         
         # Print startup banner
         self.print_banner()
         
         # Auto-start if configured
         if self.auto_start:
-            self.create_timer(3.0, self._auto_start_once, callback_group=ReentrantCallbackGroup())
+            self._auto_start_timer = self.create_timer(
+                3.0, self._auto_start_once, callback_group=ReentrantCallbackGroup())
 
     def _auto_start_once(self):
-        """Auto-start exploration once."""
+        """Auto-start exploration once, then cancel the timer."""
         if self.state == MissionState.WAITING_FOR_SCAN:
             self.get_logger().info('🚀 Auto-starting exploration...')
             self.start_exploration()
-        # This timer fires once, we don't need to track it
+        if self._auto_start_timer is not None:
+            self._auto_start_timer.cancel()
+            self._auto_start_timer = None
 
     def print_banner(self):
         """Print startup banner."""
+        W = 58  # inner width between ║ borders
+        def pad(s):
+            # ljust won't handle emojis perfectly but close enough for logs
+            return '║' + s.ljust(W)[:W] + '║'
         self.get_logger().info('')
-        self.get_logger().info('╔' + '═' * 58 + '╗')
-        self.get_logger().info('║' + ' ' * 15 + '🤖 CLEAN BOT MISSION' + ' ' * 23 + '║')
-        self.get_logger().info('╠' + '═' * 58 + '╣')
-        self.get_logger().info('║  Phase 1: Wait for scan command' + ' ' * 25 + '║')
-        self.get_logger().info('║  Phase 2: Explore unknown environment' + ' ' * 19 + '║')
-        self.get_logger().info('║  Phase 3: Wait for clean command' + ' ' * 24 + '║')
-        self.get_logger().info('║  Phase 4: Cover all free space (clean)' + ' ' * 18 + '║')
-        self.get_logger().info('║  Phase 5: Return home' + ' ' * 36 + '║')
-        self.get_logger().info('╠' + '═' * 58 + '╣')
-        self.get_logger().info(f'║  Coverage width: {self.coverage_width * 100:.0f}cm' + ' ' * 37 + '║')
-        self.get_logger().info(f'║  Auto-start: {self.auto_start}' + ' ' * 39 + '║')
-        self.get_logger().info('╠' + '═' * 58 + '╣')
-        self.get_logger().info('║  Commands (publish to /mission_command):' + ' ' * 16 + '║')
-        self.get_logger().info('║    start_scan  - Begin exploration' + ' ' * 22 + '║')
-        self.get_logger().info('║    stop_scan   - Stop exploration' + ' ' * 23 + '║')
-        self.get_logger().info('║    start_clean - Begin cleaning (random)' + ' ' * 16 + '║')
-        self.get_logger().info('║    start_clean_coverage - Begin cleaning (map)' + ' ' * 8 + '║')
-        self.get_logger().info('║    stop_clean  - Stop cleaning' + ' ' * 26 + '║')
-        self.get_logger().info('║    go_home     - Return to home' + ' ' * 25 + '║')
-        self.get_logger().info('║    reset       - Reset to initial state' + ' ' * 17 + '║')
-        self.get_logger().info('╚' + '═' * 58 + '╝')
+        self.get_logger().info('╔' + '═' * W + '╗')
+        self.get_logger().info(pad('         🤖 CLEAN BOT MISSION'))
+        self.get_logger().info('╠' + '═' * W + '╣')
+        self.get_logger().info(pad('  Phase 1: Wait for scan command'))
+        self.get_logger().info(pad('  Phase 2: Explore unknown environment'))
+        self.get_logger().info(pad('  Phase 3: Wait for clean command'))
+        self.get_logger().info(pad('  Phase 4: Cover all free space (clean)'))
+        self.get_logger().info(pad('  Phase 5: Return home'))
+        self.get_logger().info('╠' + '═' * W + '╣')
+        self.get_logger().info(pad(f'  Coverage width: {self.coverage_width * 100:.0f}cm'))
+        self.get_logger().info(pad(f'  Auto-start: {self.auto_start}'))
+        self.get_logger().info('╠' + '═' * W + '╣')
+        self.get_logger().info(pad('  Commands (publish to /mission_command):'))
+        self.get_logger().info(pad('    start_scan  - Begin exploration'))
+        self.get_logger().info(pad('    stop_scan   - Stop exploration'))
+        self.get_logger().info(pad('    start_clean - Begin cleaning (coverage)'))
+        self.get_logger().info(pad('    stop_clean  - Stop cleaning'))
+        self.get_logger().info(pad('    go_home     - Return to home'))
+        self.get_logger().info(pad('    reset       - Reset to initial state'))
+        self.get_logger().info(pad('    pause       - Pause current operation'))
+        self.get_logger().info(pad('    resume      - Resume paused operation'))
+        self.get_logger().info('╚' + '═' * W + '╝')
         self.get_logger().info('')
         self.get_logger().info('⏳ Waiting for "start_scan" command...')
         self.get_logger().info('   Send: ros2 topic pub --once /mission_command std_msgs/msg/String "data: \'start_scan\'"')
@@ -236,12 +200,6 @@ class FullMissionController(Node):
             self.handle_stop_scan()
         elif command == 'start_clean':
             self.handle_start_clean()
-        elif command == 'start_clean_coverage':
-            self.handle_start_clean_coverage()
-        elif command == 'start_clean_square':
-            self.handle_start_clean_square()
-        elif command == 'start_clean_random':
-            self.handle_start_clean_random()
         elif command == 'stop_clean':
             self.handle_stop_clean()
         elif command == 'go_home':
@@ -254,7 +212,7 @@ class FullMissionController(Node):
             self.handle_resume()
         else:
             self.get_logger().warn(f'❓ Unknown command: "{command}"')
-            self.get_logger().info('   Valid commands: start_scan, stop_scan, start_clean, start_clean_coverage, start_clean_square, start_clean_random, stop_clean, go_home, reset, pause, resume')
+            self.get_logger().info('   Valid commands: start_scan, stop_scan, start_clean, stop_clean, go_home, reset, pause, resume')
 
     def handle_start_scan(self):
         """Handle start_scan command."""
@@ -270,9 +228,11 @@ class FullMissionController(Node):
 
     def handle_stop_scan(self):
         """Handle stop_scan command."""
-        if self.state == MissionState.EXPLORING:
+        if self.state == MissionState.EXPLORING or \
+           (self.state == MissionState.PAUSED and self.previous_state == MissionState.EXPLORING):
             self.get_logger().info('🛑 Stopping exploration...')
             self.stop_robot()
+            self.previous_state = None
             
             # Tell explorer to stop
             ctrl_msg = String()
@@ -289,64 +249,22 @@ class FullMissionController(Node):
             self.get_logger().warn(f'⚠️ Not currently scanning (state: {self.state})')
 
     def handle_start_clean(self):
-        """Handle start_clean command (Plan B random)."""
+        """Handle start_clean command (map-based coverage)."""
         if self.state in [MissionState.WAITING_FOR_CLEAN, MissionState.WAITING_FOR_SCAN]:
             if self.state == MissionState.WAITING_FOR_SCAN:
                 self.get_logger().info('⚠️ Starting cleaning without completing scan first')
-            # Default cleaning is random loop (no scan/map required)
-            self.start_random_cleaning_loop()
+            self.start_coverage()
         else:
             self.get_logger().warn(f'⚠️ Cannot start clean in state: {self.state}')
 
-    def handle_start_clean_coverage(self):
-        """Handle start_clean_coverage command (original map-based adaptive coverage)."""
-        if self.state in [MissionState.WAITING_FOR_CLEAN, MissionState.WAITING_FOR_SCAN]:
-            if self.state == MissionState.WAITING_FOR_SCAN:
-                self.get_logger().info('⚠️ Starting map-based coverage without completing scan first')
-            self.start_coverage()
-        else:
-            self.get_logger().warn(f'⚠️ Cannot start coverage clean in state: {self.state}')
-
-    def handle_start_clean_square(self):
-        """Handle start_clean_square command (predefined square-room path)."""
-        if self.state in [MissionState.WAITING_FOR_CLEAN, MissionState.WAITING_FOR_SCAN]:
-            if self.state == MissionState.WAITING_FOR_SCAN:
-                self.get_logger().info('⚠️ Starting square cleaning without completing scan first')
-            self.start_square_cleaning_loop()
-        else:
-            self.get_logger().warn(f'⚠️ Cannot start square clean in state: {self.state}')
-
-    def handle_start_clean_random(self):
-        """Handle start_clean_random command (Plan B random walk)."""
-        if self.state in [MissionState.WAITING_FOR_CLEAN, MissionState.WAITING_FOR_SCAN]:
-            if self.state == MissionState.WAITING_FOR_SCAN:
-                self.get_logger().info('⚠️ Starting random cleaning without completing scan first')
-            self.start_random_cleaning_loop()
-        else:
-            self.get_logger().warn(f'⚠️ Cannot start random clean in state: {self.state}')
-
     def handle_stop_clean(self):
         """Handle stop_clean command."""
-        if self.state == MissionState.COVERAGE:
+        if self.state == MissionState.COVERAGE or \
+           (self.state == MissionState.PAUSED and self.previous_state == MissionState.COVERAGE):
             self.get_logger().info('🛑 Stopping cleaning...')
             self.stop_robot()
-
-            # Stop square loop if active
-            with self._square_lock:
-                if self._square_active:
-                    self.get_logger().info('🧩 Stopping square cleaning loop...')
-                    self._square_stop_internal(deactivate_cleaning=False)
-                if self._random_active:
-                    self.get_logger().info('🎲 Stopping random cleaning loop...')
-                    self._random_stop_internal(deactivate_cleaning=False)
-            
-            # DEACTIVATE CLEANING VIA ARDUINO
-            self.get_logger().info('🔌 Deactivating cleaning switch...')
-            self.stop_clean_trigger_pub.publish(Empty())  # Legacy topic
-            # Send to arduino_driver via arduino_command topic
-            arduino_msg = String()
-            arduino_msg.data = 'stop_clean'
-            self.arduino_clean_pub.publish(arduino_msg)
+            self._deactivate_cleaning_hardware()
+            self.previous_state = None
 
             # Tell coverage planner to stop
             ctrl_msg = String()
@@ -366,12 +284,11 @@ class FullMissionController(Node):
         """Handle go_home command."""
         self.get_logger().info('🏠 Going home...')
         self.stop_robot()
-
-        with self._square_lock:
-            if self._square_active:
-                self._square_stop_internal(deactivate_cleaning=False)
-            if self._random_active:
-                self._random_stop_internal(deactivate_cleaning=False)
+        
+        # Deactivate cleaning if it was active (or paused from coverage)
+        if self.state == MissionState.COVERAGE or \
+           (self.state == MissionState.PAUSED and self.previous_state == MissionState.COVERAGE):
+            self._deactivate_cleaning_hardware()
         
         # Stop any running operations
         ctrl_msg = String()
@@ -379,6 +296,7 @@ class FullMissionController(Node):
         self.exploration_control_pub.publish(ctrl_msg)
         self.coverage_control_pub.publish(ctrl_msg)
         
+        self.previous_state = None
         self.state = MissionState.RETURNING
         self.return_home_sequence()
 
@@ -386,12 +304,11 @@ class FullMissionController(Node):
         """Handle reset command - go back to initial waiting state."""
         self.get_logger().info('🔄 Resetting mission...')
         self.stop_robot()
-
-        with self._square_lock:
-            if self._square_active:
-                self._square_stop_internal(deactivate_cleaning=False)
-            if self._random_active:
-                self._random_stop_internal(deactivate_cleaning=False)
+        
+        # Deactivate cleaning if it was active (or paused from coverage)
+        if self.state == MissionState.COVERAGE or \
+           (self.state == MissionState.PAUSED and self.previous_state == MissionState.COVERAGE):
+            self._deactivate_cleaning_hardware()
         
         # Stop any running operations
         ctrl_msg = String()
@@ -401,6 +318,7 @@ class FullMissionController(Node):
         
         # Reset state
         self.state = MissionState.WAITING_FOR_SCAN
+        self.previous_state = None
         self.exploration_complete = False
         self.coverage_complete = False
         self.start_time = None
@@ -420,14 +338,10 @@ class FullMissionController(Node):
             self.get_logger().info('⏸️ Pausing mission...')
             self.previous_state = self.state
             self.stop_robot()
-
-            with self._square_lock:
-                if self._square_active and not self._square_paused:
-                    self._square_paused = True
-                    self._square_phase_remaining = max(0.0, self._square_phase_end_monotonic - time.monotonic())
-                if self._random_active and not self._random_paused:
-                    self._random_paused = True
-                    self._random_phase_remaining = max(0.0, self._random_phase_end_monotonic - time.monotonic())
+            
+            # Deactivate cleaning hardware while paused to save battery and reduce noise
+            if self.state == MissionState.COVERAGE:
+                self._deactivate_cleaning_hardware()
             
             # Tell sub-nodes to pause
             ctrl_msg = String()
@@ -443,18 +357,10 @@ class FullMissionController(Node):
         """Handle resume command."""
         if self.state == MissionState.PAUSED and self.previous_state:
             self.get_logger().info('▶️ Resuming mission...')
-
-            with self._square_lock:
-                if self._square_active and self._square_paused:
-                    self._square_paused = False
-                    if self._square_phase_remaining > 0.0:
-                        self._square_phase_end_monotonic = time.monotonic() + self._square_phase_remaining
-                        self._square_phase_remaining = 0.0
-                if self._random_active and self._random_paused:
-                    self._random_paused = False
-                    if self._random_phase_remaining > 0.0:
-                        self._random_phase_end_monotonic = time.monotonic() + self._random_phase_remaining
-                        self._random_phase_remaining = 0.0
+            
+            # Reactivate cleaning hardware if resuming coverage
+            if self.previous_state == MissionState.COVERAGE:
+                self._activate_cleaning_hardware()
             
             # Tell sub-nodes to resume
             ctrl_msg = String()
@@ -471,6 +377,22 @@ class FullMissionController(Node):
         """Stop robot movement."""
         stop_cmd = Twist()
         self.cmd_vel_pub.publish(stop_cmd)
+
+    def _activate_cleaning_hardware(self):
+        """Send cleaning start signals to Arduino (relay + servo)."""
+        self.clean_trigger_pub.publish(Empty())
+        arduino_msg = String()
+        arduino_msg.data = 'start_clean'
+        self.arduino_clean_pub.publish(arduino_msg)
+        self.get_logger().info('🔌 Cleaning hardware activated')
+
+    def _deactivate_cleaning_hardware(self):
+        """Send cleaning stop signals to Arduino (relay + servo)."""
+        self.stop_clean_trigger_pub.publish(Empty())
+        arduino_msg = String()
+        arduino_msg.data = 'stop_clean'
+        self.arduino_clean_pub.publish(arduino_msg)
+        self.get_logger().info('🔌 Cleaning hardware deactivated')
 
     def start_exploration(self):
         """Start the exploration phase."""
@@ -492,6 +414,7 @@ class FullMissionController(Node):
         """Called when exploration finishes automatically."""
         if msg.data and self.state == MissionState.EXPLORING:
             self.exploration_complete = True
+            self.stop_robot()
             self.get_logger().info('')
             self.get_logger().info('✅ Exploration phase complete!')
             self.get_logger().info('')
@@ -505,16 +428,11 @@ class FullMissionController(Node):
 
     def start_coverage(self):
         """Trigger coverage phase."""
+        if self.start_time is None:
+            self.start_time = time.time()
         self.get_logger().info('')
         self.get_logger().info('🧹 Starting coverage/cleaning phase...')
-        
-        # ACTIVATE CLEANING VIA ARDUINO
-        self.get_logger().info('🔌 Activating cleaning switch...')
-        self.clean_trigger_pub.publish(Empty())  # Legacy topic
-        # Send to arduino_driver via arduino_command topic
-        arduino_msg = String()
-        arduino_msg.data = 'start_clean'
-        self.arduino_clean_pub.publish(arduino_msg)
+        self._activate_cleaning_hardware()
 
         self.get_logger().info('   Robot will clean all free space')
         self.get_logger().info('   Send "stop_clean" to stop')
@@ -532,276 +450,13 @@ class FullMissionController(Node):
         ctrl_msg.data = 'start'
         self.coverage_control_pub.publish(ctrl_msg)
 
-    def start_square_cleaning_loop(self):
-        """Run an open-loop square pattern by publishing cmd_vel in a timer."""
-        with self._square_lock:
-            if self._square_active:
-                self.get_logger().warn('⚠️ Square cleaning already active')
-                return
-
-            side = float(self.square_side)
-            if side <= 0.0:
-                self.get_logger().error('❌ square_side must be > 0')
-                return
-            if self.square_laps <= 0:
-                self.get_logger().error('❌ square_laps must be >= 1')
-                return
-            if self.square_linear_speed <= 0.01:
-                self.get_logger().error('❌ square_linear_speed too low')
-                return
-            if self.square_angular_speed <= 0.05:
-                self.get_logger().error('❌ square_angular_speed too low')
-                return
-
-            self.get_logger().info('')
-            self.get_logger().info('🧹 Starting SQUARE cleaning loop (open-loop, no scan required)...')
-
-            # ACTIVATE CLEANING VIA ARDUINO
-            self.get_logger().info('🔌 Activating cleaning switch...')
-            self.clean_trigger_pub.publish(Empty())  # Legacy topic
-            arduino_msg = String()
-            arduino_msg.data = 'start_clean'
-            self.arduino_clean_pub.publish(arduino_msg)
-
-            self.state = MissionState.COVERAGE
-
-            self._square_active = True
-            self._square_paused = False
-            self._square_laps_remaining = int(self.square_laps)
-            self._square_edges_remaining = 4
-
-            # Start with driving one edge
-            drive_duration = side / self.square_linear_speed
-            self._square_set_phase('drive', drive_duration)
-
-            # Timer tick (20 Hz)
-            self._square_timer = self.create_timer(0.05, self._square_tick)
-
-            self.get_logger().info(
-                f'   Side: {side:.2f}m, Laps: {self.square_laps}, '
-                f'V: {self.square_linear_speed:.2f}m/s, W: {self.square_angular_speed:.2f}rad/s')
-            self.get_logger().info('   Send "stop_clean" to stop')
-            self.get_logger().info('')
-
-    def _square_set_phase(self, phase: str, duration_s: float):
-        self._square_phase = phase
-        self._square_phase_end_monotonic = time.monotonic() + max(0.0, float(duration_s))
-        self._square_phase_remaining = 0.0
-
-    def _square_stop_internal(self, deactivate_cleaning: bool):
-        """Stop square loop; caller must hold _square_lock."""
-        self._square_active = False
-        self._square_paused = False
-        self._square_phase = None
-        self._square_edges_remaining = 0
-        self._square_laps_remaining = 0
-        self._square_phase_end_monotonic = 0.0
-        self._square_phase_remaining = 0.0
-
-        if self._square_timer is not None:
-            try:
-                self._square_timer.cancel()
-            except Exception:
-                pass
-            self._square_timer = None
-
-        self.stop_robot()
-
-        if deactivate_cleaning:
-            self.get_logger().info('🔌 Deactivating cleaning switch...')
-            self.stop_clean_trigger_pub.publish(Empty())
-            arduino_msg = String()
-            arduino_msg.data = 'stop_clean'
-            self.arduino_clean_pub.publish(arduino_msg)
-
-    def start_random_cleaning_loop(self):
-        """Plan B: random turn, then drive straight, repeat (open-loop)."""
-        with self._square_lock:
-            if self._random_active:
-                self.get_logger().warn('⚠️ Random cleaning already active')
-                return
-
-            if self.random_drive_time <= 0.1:
-                self.get_logger().error('❌ random_drive_time must be > 0.1s')
-                return
-            if self.random_linear_speed <= 0.01:
-                self.get_logger().error('❌ random_linear_speed too low')
-                return
-            if self.random_angular_speed <= 0.05:
-                self.get_logger().error('❌ random_angular_speed too low')
-                return
-            max_angle = min(math.pi, max(0.0, self.random_turn_max_angle))
-            if max_angle <= 0.01:
-                self.get_logger().error('❌ random_turn_max_angle too small')
-                return
-
-            self.get_logger().info('')
-            self.get_logger().info('🧹 Starting RANDOM cleaning loop (Plan B, open-loop)...')
-
-            # ACTIVATE CLEANING VIA ARDUINO
-            self.get_logger().info('🔌 Activating cleaning switch...')
-            self.clean_trigger_pub.publish(Empty())
-            arduino_msg = String()
-            arduino_msg.data = 'start_clean'
-            self.arduino_clean_pub.publish(arduino_msg)
-
-            self.state = MissionState.COVERAGE
-
-            self._random_active = True
-            self._random_paused = False
-            self._random_phase = None
-            self._random_phase_end_monotonic = 0.0
-            self._random_phase_remaining = 0.0
-
-            # Start with a random turn, then drive
-            self._random_start_new_turn()
-
-            self._random_timer = self.create_timer(0.05, self._random_tick)
-
-            self.get_logger().info(
-                f'   Drive time: {self.random_drive_time:.1f}s, Turn max: {max_angle:.2f}rad, '
-                f'V: {self.random_linear_speed:.2f}m/s, W: {self.random_angular_speed:.2f}rad/s')
-            self.get_logger().info('   Send "stop_clean" to stop')
-            self.get_logger().info('')
-
-    def _random_start_new_turn(self):
-        max_angle = min(math.pi, max(0.0, self.random_turn_max_angle))
-        angle = random.uniform(-max_angle, max_angle)
-        self._random_turn_direction = 1.0 if angle >= 0.0 else -1.0
-        turn_duration = abs(angle) / abs(self.random_angular_speed)
-        self._random_phase = 'turn'
-        self._random_phase_end_monotonic = time.monotonic() + max(0.0, turn_duration)
-        self._random_phase_remaining = 0.0
-
-    def _random_start_drive(self):
-        self._random_phase = 'drive'
-        self._random_phase_end_monotonic = time.monotonic() + max(0.0, float(self.random_drive_time))
-        self._random_phase_remaining = 0.0
-
-    def _random_stop_internal(self, deactivate_cleaning: bool):
-        self._random_active = False
-        self._random_paused = False
-        self._random_phase = None
-        self._random_phase_end_monotonic = 0.0
-        self._random_phase_remaining = 0.0
-
-        if self._random_timer is not None:
-            try:
-                self._random_timer.cancel()
-            except Exception:
-                pass
-            self._random_timer = None
-
-        self.stop_robot()
-
-        if deactivate_cleaning:
-            self.get_logger().info('🔌 Deactivating cleaning switch...')
-            self.stop_clean_trigger_pub.publish(Empty())
-            arduino_msg = String()
-            arduino_msg.data = 'stop_clean'
-            self.arduino_clean_pub.publish(arduino_msg)
-
-    def _random_tick(self):
-        with self._square_lock:
-            if not self._random_active:
-                return
-            if self.state != MissionState.COVERAGE:
-                self._random_stop_internal(deactivate_cleaning=False)
-                return
-            if self._random_paused:
-                self.stop_robot()
-                return
-
-            now = time.monotonic()
-            if now >= self._random_phase_end_monotonic:
-                if self._random_phase == 'turn':
-                    self._random_start_drive()
-                elif self._random_phase == 'drive':
-                    self._random_start_new_turn()
-                else:
-                    self.get_logger().warn('⚠️ Random loop in unknown phase; stopping')
-                    self._random_stop_internal(deactivate_cleaning=False)
-                    return
-
-            cmd = Twist()
-            if self._random_phase == 'turn':
-                cmd.linear.x = 0.0
-                cmd.angular.z = float(self._random_turn_direction) * float(self.random_angular_speed)
-            elif self._random_phase == 'drive':
-                cmd.linear.x = float(self.random_linear_speed)
-                cmd.angular.z = 0.0
-            self.cmd_vel_pub.publish(cmd)
-
-    def _square_tick(self):
-        """Timer callback that drives/turns for the square pattern."""
-        with self._square_lock:
-            if not self._square_active:
-                return
-            if self.state != MissionState.COVERAGE:
-                # Safety: if state changed (reset/home), stop loop
-                self._square_stop_internal(deactivate_cleaning=False)
-                return
-            if self._square_paused:
-                self.stop_robot()
-                return
-
-            now = time.monotonic()
-            if now >= self._square_phase_end_monotonic:
-                if self._square_phase == 'drive':
-                    # Move to turn
-                    turn_duration = (math.pi / 2.0) / abs(self.square_angular_speed)
-                    self._square_set_phase('turn', turn_duration)
-                elif self._square_phase == 'turn':
-                    # Finished a corner
-                    self._square_edges_remaining -= 1
-                    if self._square_edges_remaining <= 0:
-                        self._square_laps_remaining -= 1
-                        if self._square_laps_remaining <= 0:
-                            self.get_logger().info('✅ Square cleaning loop complete')
-                            self._square_stop_internal(deactivate_cleaning=True)
-                            self.state = MissionState.WAITING_FOR_CLEAN
-                            return
-                        self._square_edges_remaining = 4
-
-                    # Next edge drive
-                    drive_duration = float(self.square_side) / float(self.square_linear_speed)
-                    self._square_set_phase('drive', drive_duration)
-                else:
-                    # Unknown phase -> stop
-                    self.get_logger().warn('⚠️ Square loop in unknown phase; stopping')
-                    self._square_stop_internal(deactivate_cleaning=False)
-                    return
-
-            # Publish cmd_vel for current phase
-            cmd = Twist()
-            if self._square_phase == 'drive':
-                cmd.linear.x = float(self.square_linear_speed)
-                cmd.angular.z = 0.0
-            elif self._square_phase == 'turn':
-                cmd.linear.x = 0.0
-                turn_dir = 1.0 if self.square_turn_left else -1.0
-                cmd.angular.z = turn_dir * float(self.square_angular_speed)
-            else:
-                cmd.linear.x = 0.0
-                cmd.angular.z = 0.0
-
-            self.cmd_vel_pub.publish(cmd)
-
     def coverage_complete_callback(self, msg: Bool):
         """Called when coverage finishes."""
         if msg.data and self.state == MissionState.COVERAGE:
             self.coverage_complete = True
             self.get_logger().info('')
             self.get_logger().info('✅ Coverage phase complete!')
-            
-            # DEACTIVATE CLEANING VIA ARDUINO
-            self.get_logger().info('🔌 Deactivating cleaning switch...')
-            self.stop_clean_trigger_pub.publish(Empty())  # Legacy topic
-            # Send to arduino_driver via arduino_command topic
-            arduino_msg = String()
-            arduino_msg.data = 'stop_clean'
-            self.arduino_clean_pub.publish(arduino_msg)
-
+            self._deactivate_cleaning_hardware()
             self.get_logger().info('')
             
             if self.return_home:
@@ -811,14 +466,47 @@ class FullMissionController(Node):
                 self.finish_mission()
 
     def return_home_sequence(self):
-        """Navigate back to home position."""
+        """Navigate back to home position using Nav2."""
         self.get_logger().info(f'🏠 Returning to home position ({self.home_x}, {self.home_y})...')
-        
-        # This would use Nav2 to navigate home
-        # For simplicity, we just mark as complete
-        # In real implementation, use NavigateToPose action
-        
-        time.sleep(1.0)
+
+        goal_msg = NavigateToPose.Goal()
+        goal_msg.pose.header.frame_id = 'map'
+        goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
+        goal_msg.pose.pose.position.x = float(self.home_x)
+        goal_msg.pose.pose.position.y = float(self.home_y)
+        goal_msg.pose.pose.orientation.w = 1.0
+
+        if not self.nav_client.wait_for_server(timeout_sec=5.0):
+            self.get_logger().warn('⚠️ Nav2 action server not available, finishing mission anyway')
+            self.finish_mission()
+            return
+
+        future = self.nav_client.send_goal_async(goal_msg)
+        future.add_done_callback(self._nav_goal_response_callback)
+
+    def _nav_goal_response_callback(self, future):
+        """Handle Nav2 goal acceptance/rejection."""
+        try:
+            goal_handle = future.result()
+        except Exception as e:
+            self.get_logger().warn(f'⚠️ Nav2 goal send failed: {e}')
+            self.finish_mission()
+            return
+        if not goal_handle.accepted:
+            self.get_logger().warn('⚠️ Nav2 rejected go-home goal, finishing mission anyway')
+            self.finish_mission()
+            return
+        self.get_logger().info('🏠 Nav2 accepted go-home goal...')
+        result_future = goal_handle.get_result_async()
+        result_future.add_done_callback(self._nav_result_callback)
+
+    def _nav_result_callback(self, future):
+        """Handle Nav2 navigation result."""
+        try:
+            result = future.result()
+            self.get_logger().info('🏠 Navigation to home complete')
+        except Exception as e:
+            self.get_logger().warn(f'⚠️ Navigation to home failed: {e}')
         self.finish_mission()
 
     def finish_mission(self):
@@ -831,12 +519,15 @@ class FullMissionController(Node):
         stop_cmd = Twist()
         self.cmd_vel_pub.publish(stop_cmd)
         
+        W = 58
+        def pad(s):
+            return '║' + s.ljust(W)[:W] + '║'
         self.get_logger().info('')
-        self.get_logger().info('╔' + '═' * 58 + '╗')
-        self.get_logger().info('║' + ' ' * 18 + '🎉 MISSION COMPLETE!' + ' ' * 20 + '║')
-        self.get_logger().info('╠' + '═' * 58 + '╣')
-        self.get_logger().info(f'║  Total time: {elapsed / 60:.1f} minutes' + ' ' * 35 + '║')
-        self.get_logger().info('╚' + '═' * 58 + '╝')
+        self.get_logger().info('╔' + '═' * W + '╗')
+        self.get_logger().info(pad('            🎉 MISSION COMPLETE!'))
+        self.get_logger().info('╠' + '═' * W + '╣')
+        self.get_logger().info(pad(f'  Total time: {elapsed / 60:.1f} minutes'))
+        self.get_logger().info('╚' + '═' * W + '╝')
         self.get_logger().info('')
 
     def publish_state(self):
@@ -864,6 +555,8 @@ def main(args=None):
         executor.spin()
     except KeyboardInterrupt:
         mission_controller.get_logger().info('Mission interrupted by user')
+        mission_controller.stop_robot()
+        mission_controller._deactivate_cleaning_hardware()
     finally:
         executor.shutdown()
         mission_controller.destroy_node()

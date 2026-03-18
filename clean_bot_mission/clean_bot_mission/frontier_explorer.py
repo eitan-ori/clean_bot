@@ -31,6 +31,7 @@ Topics Published:
 Author: Clean Bot Team
 """
 
+import json
 import math
 import time
 import numpy as np
@@ -44,12 +45,10 @@ from tf2_ros import Buffer, TransformListener
 
 from nav2_msgs.action import NavigateToPose
 from nav_msgs.msg import OccupancyGrid
-from geometry_msgs.msg import PoseStamped, Point
 from std_msgs.msg import Bool, String
 from visualization_msgs.msg import Marker, MarkerArray
 
 from scipy import ndimage
-from collections import deque
 
 
 # Occupancy grid values
@@ -73,11 +72,11 @@ class FrontierExplorer(Node):
         super().__init__('frontier_explorer')
 
         # ===================== Parameters =====================
-        self.declare_parameter('min_frontier_size', 5)       # Min cells for valid frontier
+        self.declare_parameter('min_frontier_size', 20)      # Min cells for valid frontier (filter wall-edge noise)
         self.declare_parameter('robot_radius', 0.18)         # For safety margin
         self.declare_parameter('exploration_timeout', 600.0) # 10 minutes max
         self.declare_parameter('goal_tolerance', 0.3)        # How close to get to frontier
-        self.declare_parameter('min_goal_distance', 0.5)     # Don't go to very close frontiers
+        self.declare_parameter('min_goal_distance', 0.3)     # Reduced — don't skip nearby frontiers
         self.declare_parameter('navigation_timeout', 60.0)   # Single goal timeout
         self.declare_parameter('auto_start', False)          # Wait for explicit start command
         
@@ -105,6 +104,9 @@ class FrontierExplorer(Node):
         self.control_sub = self.create_subscription(
             String, 'exploration_control', self.control_callback, 10)
 
+        # No-go zones subscriber
+        self.create_subscription(String, 'no_go_zones', self._on_no_go_zones, 10)
+
         # ===================== Publishers =====================
         self.exploration_complete_pub = self.create_publisher(
             Bool, 'exploration_complete', 10)
@@ -118,6 +120,7 @@ class FrontierExplorer(Node):
         self.map_data = None
         self.map_info = None
         self.map_array = None
+        self._no_go_zones = []
         
         self.robot_pose = None  # Best-effort (x, y) in map frame
         self.current_goal = None
@@ -134,7 +137,10 @@ class FrontierExplorer(Node):
         self.goals_attempted = 0
         self.goals_reached = 0
         self.consecutive_failures = 0      # Track consecutive navigation failures
-        self.max_consecutive_failures = 3  # Finish if too many failures in a row
+        self.max_consecutive_failures = 8  # More attempts before giving up
+        self._retry_after_clear = False
+        self._last_no_map_warn = 0.0
+        self._no_map_warn_period_s = 5.0
 
         # ===================== Timer =====================
         # Main exploration loop
@@ -241,18 +247,39 @@ class FrontierExplorer(Node):
 
     def map_callback(self, msg: OccupancyGrid):
         """Process incoming map and convert to numpy array."""
+        w, h = msg.info.width, msg.info.height
+        if w <= 0 or h <= 0 or len(msg.data) != w * h or msg.info.resolution <= 0:
+            return
         self.map_info = msg.info
         self.map_data = msg.data
         
         # Convert to numpy array for easier processing
-        self.map_array = np.array(msg.data, dtype=np.int8).reshape(
-            (msg.info.height, msg.info.width))
+        self.map_array = np.array(msg.data, dtype=np.int8).reshape((h, w))
         
         if self.start_time is None and self.auto_start:
             self.start_time = self.get_clock().now()
             self.exploration_state = ExplorationState.EXPLORING
             self.get_logger().info(f'📍 First map received: {msg.info.width}x{msg.info.height}')
             self.get_logger().info('   Auto-starting exploration...')
+
+    def _on_no_go_zones(self, msg: String):
+        """Receive no-go zones from the web app."""
+        try:
+            self._no_go_zones = json.loads(msg.data)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    def _point_in_no_go_zone(self, x, y):
+        """Check if a world coordinate falls inside any no-go zone."""
+        for zone in self._no_go_zones:
+            try:
+                zx1, zx2 = sorted([float(zone["x1"]), float(zone["x2"])])
+                zy1, zy2 = sorted([float(zone["y1"]), float(zone["y2"])])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if zx1 <= x <= zx2 and zy1 <= y <= zy2:
+                return True
+        return False
 
     def exploration_loop(self):
         """Main exploration state machine."""
@@ -305,7 +332,7 @@ class FrontierExplorer(Node):
         if best_frontier is None:
             self.get_logger().warn('⚠️ Could not find reachable frontier')
             # Check if we've tried clearing failed goals already
-            if not hasattr(self, '_retry_after_clear') or not self._retry_after_clear:
+            if not self._retry_after_clear:
                 self.get_logger().info('🔄 Clearing failed goals and retrying once...')
                 self.failed_goals.clear()
                 self._retry_after_clear = True
@@ -368,52 +395,58 @@ class FrontierExplorer(Node):
                 'x': x,
                 'y': y,
                 'size': size,
-                'cells': list(zip(cells[0], cells[1]))
             })
 
-        self.get_logger().debug(f'Found {len(frontiers)} frontiers')
+        self.get_logger().info(f'🔍 Found {len(frontiers)} frontiers (filtered {num_features - len(frontiers)} too small)')
         return frontiers
 
     def select_best_frontier(self):
         """
         Select the best frontier to explore.
         Strategy: Balance between distance and frontier size.
+        When struggling (consecutive failures), prefer larger frontiers over closer ones.
         """
         if not self.frontiers:
             return None
 
-        # Get current robot position (approximate from map center if unknown)
         robot_x, robot_y = self.get_robot_position()
         
         best_frontier = None
         best_score = float('-inf')
         skipped_failed = 0
         skipped_too_close = 0
+        skipped_nogo = 0
+
+        # When struggling, shift preference toward bigger frontiers farther away
+        if self.consecutive_failures >= 3:
+            size_weight = 0.7
+            dist_weight = 0.3
+        else:
+            size_weight = 0.3
+            dist_weight = 0.7
         
         for frontier in self.frontiers:
-            # Skip if we've failed to reach this area before
+            if self._point_in_no_go_zone(frontier['x'], frontier['y']):
+                skipped_nogo += 1
+                continue
+
             key = (round(frontier['x'], 1), round(frontier['y'], 1))
             if key in self.failed_goals:
                 skipped_failed += 1
                 continue
             
-            # Calculate distance
             dx = frontier['x'] - robot_x
             dy = frontier['y'] - robot_y
             distance = math.sqrt(dx * dx + dy * dy)
             
-            # Skip very close frontiers (likely unreachable due to obstacles)
             if distance < self.min_goal_distance:
                 skipped_too_close += 1
                 continue
             
-            # Score: prefer larger frontiers that are closer
-            # Normalize size and distance
-            size_score = frontier['size'] / 100.0  # Normalize
-            distance_score = 1.0 / (distance + 0.1)  # Inverse distance
+            size_score = frontier['size'] / 100.0
+            distance_score = 1.0 / (distance + 0.1)
             
-            # Combined score (tune weights as needed)
-            score = size_score * 0.3 + distance_score * 0.7
+            score = size_score * size_weight + distance_score * dist_weight
             
             if score > best_score:
                 best_score = score
@@ -421,10 +454,15 @@ class FrontierExplorer(Node):
 
         if best_frontier is None:
             self.get_logger().warn(
-                f'⚠️ No suitable frontier selected (frontiers={len(self.frontiers)}, '
-                f'skipped_failed={skipped_failed}, skipped_too_close={skipped_too_close}). '
-                'This can happen if TF map->base_link is missing/wrong or Nav2 keeps failing goals.'
-            )
+                f'⚠️ No suitable frontier (total={len(self.frontiers)}, '
+                f'failed={skipped_failed}, close={skipped_too_close}, nogo={skipped_nogo})')
+        else:
+            dx = best_frontier['x'] - robot_x
+            dy = best_frontier['y'] - robot_y
+            dist = math.sqrt(dx*dx + dy*dy)
+            self.get_logger().info(
+                f'🎯 Selected frontier: size={best_frontier["size"]} dist={dist:.1f}m '
+                f'(weights: size={size_weight}, dist={dist_weight})')
 
         return best_frontier
 
@@ -487,14 +525,16 @@ class FrontierExplorer(Node):
 
     def cancel_current_goal(self):
         """Cancel the current navigation goal."""
+        # Immediately mark as not navigating to prevent repeated cancel calls (Bug 62)
+        self.is_navigating = False
+        self.navigation_start_time = None
         if self.current_goal_handle is not None:
             self.get_logger().info('   🛑 Canceling current goal...')
-            cancel_future = self.current_goal_handle.cancel_goal_async()
+            handle = self.current_goal_handle
+            self.current_goal_handle = None
+            cancel_future = handle.cancel_goal_async()
             cancel_future.add_done_callback(self.cancel_done_callback)
         else:
-            # No handle, just reset state
-            self.is_navigating = False
-            self.navigation_start_time = None
             if self.current_goal:
                 key = (round(self.current_goal['x'], 1), round(self.current_goal['y'], 1))
                 self.failed_goals.add(key)
@@ -502,9 +542,7 @@ class FrontierExplorer(Node):
     def cancel_done_callback(self, future):
         """Called when goal cancellation completes."""
         self.get_logger().info('   🛑 Goal canceled')
-        self.is_navigating = False
-        self.navigation_start_time = None
-        self.current_goal_handle = None
+        # State already cleared in cancel_current_goal; just add to failed_goals
         if self.current_goal:
             key = (round(self.current_goal['x'], 1), round(self.current_goal['y'], 1))
             self.failed_goals.add(key)
@@ -512,36 +550,62 @@ class FrontierExplorer(Node):
     def find_safe_goal_near_frontier(self, frontier: dict) -> tuple:
         """
         Find a safe (free) cell near the frontier centroid.
-        The goal should be in free space, not on the frontier itself.
+        Checks centroid first, then expands outward checking only the
+        perimeter of each square to avoid redundant interior re-checks.
+        Among cells at the same radius, picks the one closest to centroid.
         """
         target_x = frontier['x']
         target_y = frontier['y']
-        
-        # Convert to grid coordinates
+
         col = int((target_x - self.map_info.origin.position.x) / self.map_info.resolution)
         row = int((target_y - self.map_info.origin.position.y) / self.map_info.resolution)
-        
-        # Search in expanding circles for a free cell
-        robot_x, robot_y = self.get_robot_position()
-        
-        for radius in range(1, 20):  # Search up to 20 cells away
+
+        h, w = self.map_info.height, self.map_info.width
+
+        # Check centroid first
+        if 0 <= row < h and 0 <= col < w:
+            if 0 <= self.map_array[row, col] < FREE_THRESHOLD:
+                x = self.map_info.origin.position.x + (col + 0.5) * self.map_info.resolution
+                y = self.map_info.origin.position.y + (row + 0.5) * self.map_info.resolution
+                return (x, y)
+
+        # Expand outward, checking only the perimeter at each radius
+        for radius in range(1, 20):
+            best = None
+            best_dist_sq = float('inf')
             for dr in range(-radius, radius + 1):
                 for dc in range(-radius, radius + 1):
+                    if abs(dr) != radius and abs(dc) != radius:
+                        continue  # skip interior (already checked)
                     r, c = row + dr, col + dc
-                    
-                    if 0 <= r < self.map_info.height and 0 <= c < self.map_info.width:
+                    if 0 <= r < h and 0 <= c < w:
                         if 0 <= self.map_array[r, c] < FREE_THRESHOLD:
-                            # Found free cell - convert back to world coords
-                            x = self.map_info.origin.position.x + (c + 0.5) * self.map_info.resolution
-                            y = self.map_info.origin.position.y + (r + 0.5) * self.map_info.resolution
-                            return (x, y)
-        
+                            dist_sq = dr * dr + dc * dc
+                            if dist_sq < best_dist_sq:
+                                best_dist_sq = dist_sq
+                                best = (c, r)
+            if best is not None:
+                c, r = best
+                x = self.map_info.origin.position.x + (c + 0.5) * self.map_info.resolution
+                y = self.map_info.origin.position.y + (r + 0.5) * self.map_info.resolution
+                return (x, y)
+
         # Fallback: return original point
         return (target_x, target_y)
 
     def goal_response_callback(self, future):
         """Handle goal acceptance/rejection."""
-        goal_handle = future.result()
+        try:
+            goal_handle = future.result()
+        except Exception as e:
+            self.get_logger().warn(f'   ⚠️ Goal send failed: {e}')
+            self.is_navigating = False
+            self.navigation_start_time = None
+            self.consecutive_failures += 1
+            if self.current_goal:
+                key = (round(self.current_goal['x'], 1), round(self.current_goal['y'], 1))
+                self.failed_goals.add(key)
+            return
         
         if not goal_handle.accepted:
             self.get_logger().warn('   ⚠️ Goal rejected by Nav2')
@@ -559,8 +623,19 @@ class FrontierExplorer(Node):
 
     def get_result_callback(self, future):
         """Handle navigation result."""
-        result = future.result()
-        status = result.status
+        try:
+            result = future.result()
+            status = result.status
+        except Exception as e:
+            self.get_logger().warn(f'   ⚠️ Navigation result error: {e}')
+            self.is_navigating = False
+            self.navigation_start_time = None
+            self.current_goal_handle = None
+            self.consecutive_failures += 1
+            if self.current_goal:
+                key = (round(self.current_goal['x'], 1), round(self.current_goal['y'], 1))
+                self.failed_goals.add(key)
+            return
         
         self.is_navigating = False
         self.navigation_start_time = None
@@ -578,8 +653,14 @@ class FrontierExplorer(Node):
                 self.failed_goals.add(key)
             # Check if too many consecutive failures
             if self.consecutive_failures >= self.max_consecutive_failures:
-                self.get_logger().warn(f'⚠️ {self.consecutive_failures} consecutive failures - finishing exploration')
-                self.finish_exploration()
+                if not self._retry_after_clear:
+                    self.get_logger().warn(f'⚠️ {self.consecutive_failures} consecutive failures - clearing failed goals and retrying')
+                    self.failed_goals.clear()
+                    self.consecutive_failures = 0
+                    self._retry_after_clear = True
+                else:
+                    self.get_logger().warn(f'⚠️ {self.consecutive_failures} consecutive failures after retry - finishing exploration')
+                    self.finish_exploration()
         elif status == 5:  # CANCELED
             self.get_logger().info('   🛑 Navigation was canceled')
             self.consecutive_failures += 1
@@ -661,6 +742,7 @@ def main(args=None):
         rclpy.spin(node)
     except KeyboardInterrupt:
         node.get_logger().info('Exploration interrupted by user')
+        node.cancel_current_goal()
     finally:
         node.destroy_node()
         if rclpy.ok():

@@ -64,6 +64,7 @@
 ###############################################################################
 """
 
+import json
 import math
 import numpy as np
 import rclpy
@@ -81,8 +82,6 @@ from std_msgs.msg import Bool, String
 from visualization_msgs.msg import Marker, MarkerArray
 
 from scipy import ndimage
-from collections import deque
-import heapq
 
 
 # Occupancy grid values
@@ -105,7 +104,7 @@ class AdaptiveCoveragePlanner(Node):
 
         # ===================== Parameters =====================
         self.declare_parameter('coverage_width', 0.14)           # 14cm cleaning width (main suction)
-        self.declare_parameter('overlap_ratio', 0.1)            # 15% overlap for safety
+        self.declare_parameter('overlap_ratio', 0.1)            # 10% overlap for safety
         self.declare_parameter('robot_radius', 0.20)             # 20cm Main body radius
         # NOTE: Robot has a side brush (4cm radius) at front-left that extends reach.
         # This allows cleaning edges even with 20cm radius body.
@@ -167,6 +166,13 @@ class AdaptiveCoveragePlanner(Node):
         self.control_sub = self.create_subscription(
             String, 'coverage_control', self.control_callback, 10)
 
+        # No-go zones subscriber
+        self.create_subscription(String, 'no_go_zones', self._on_no_go_zones, 10)
+
+        # Localization: initial pose from scan matching (for saved room cleaning)
+        self.create_subscription(PoseStamped, 'robot_map_pose',
+                                 self._on_robot_map_pose, 10)
+
         # ===================== Publishers =====================
         self.coverage_complete_pub = self.create_publisher(Bool, 'coverage_complete', 10)
         
@@ -192,6 +198,7 @@ class AdaptiveCoveragePlanner(Node):
         self.map_array = None
         self.map_info = None
         self.inflated_map = None
+        self._no_go_zones = []
         
         self.waypoints = []
         self.current_waypoint_idx = 0
@@ -214,6 +221,9 @@ class AdaptiveCoveragePlanner(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self._tf_pose_warned = False
+
+        # Map↔odom offset from scan-matching localization (saved rooms)
+        self._map_odom_offset = None  # (dx, dy, dyaw) or None
         
         # Movement state for direct drive
         self.movement_phase = 'idle'  # 'idle', 'turning', 'driving'
@@ -228,10 +238,13 @@ class AdaptiveCoveragePlanner(Node):
         self.last_cmd_time = 0.0
         self.drive_start_time = 0.0
         self.min_drive_time = 0.8  # seconds (drive straight a bit before re-aligning)
+        self._last_debug_time = 0.0
+        self._waypoint_start_time = 0.0  # For timeout detection
         
         # Statistics
         self.successful_waypoints = 0
         self.failed_waypoints = 0
+        self._initial_waypoint_count = 0
         self.start_time = None
         self.total_distance = 0.0
 
@@ -339,9 +352,11 @@ class AdaptiveCoveragePlanner(Node):
         self.missed_waypoints = []
         self.successful_waypoints = 0
         self.failed_waypoints = 0
+        self._initial_waypoint_count = 0
         self.start_time = None
         self.movement_phase = 'idle'
         self.last_turn_direction = 1  # Reset to default (counter-clockwise)
+        self._map_odom_offset = None  # Clear localization offset
 
     def cancel_current_goal(self):
         """Cancel the current navigation goal and stop robot."""
@@ -398,7 +413,8 @@ class AdaptiveCoveragePlanner(Node):
     def _get_robot_pose_map(self):
         """Return (x, y, yaw) in map frame when TF is available.
 
-        Falls back to the latest odom-based pose if TF lookup fails.
+        Falls back to the latest odom-based pose (with localization offset
+        correction if scan-to-map matching was performed).
         """
 
         
@@ -422,14 +438,21 @@ class AdaptiveCoveragePlanner(Node):
                 self.get_logger().warn(
                     f'⚠️ TF pose lookup failed ({self.global_frame} <- {self.base_frame}); '
                     f'falling back to odom pose. Error: {e}')
-            yaw = self.normalize_angle(self.robot_yaw)
-            return self.robot_x, self.robot_y, yaw
+            ox, oy = self.robot_x, self.robot_y
+            oyaw = self.normalize_angle(self.robot_yaw)
+            if self._map_odom_offset is not None:
+                dx, dy, dyaw = self._map_odom_offset
+                return ox + dx, oy + dy, self.normalize_angle(oyaw + dyaw)
+            return ox, oy, oyaw
 
     def normalize_angle(self, angle):
         """Normalize angle to [-pi, pi]."""
-        while angle > math.pi:
+        if not math.isfinite(angle):
+            return 0.0
+        angle = math.fmod(angle, 2.0 * math.pi)
+        if angle > math.pi:
             angle -= 2.0 * math.pi
-        while angle < -math.pi:
+        elif angle < -math.pi:
             angle += 2.0 * math.pi
         return angle
 
@@ -484,8 +507,6 @@ class AdaptiveCoveragePlanner(Node):
         angle_error = self.normalize_angle(target_angle - ryaw)
         
         # Debug log every 2 seconds
-        if not hasattr(self, '_last_debug_time'):
-            self._last_debug_time = 0.0
         if now - self._last_debug_time > 2.0:
             self._last_debug_time = now
             self.get_logger().info(
@@ -500,8 +521,24 @@ class AdaptiveCoveragePlanner(Node):
             
             # ADVANCE TO NEXT WAYPOINT
             self.current_waypoint_idx += 1
+            self._waypoint_start_time = now
             
             # Check if we finished all waypoints
+            if self.current_waypoint_idx >= len(self.waypoints):
+                self.finish_mission()
+            return
+
+        # Timeout: skip waypoint if stuck too long
+        if self._waypoint_start_time > 0 and (now - self._waypoint_start_time) > self.timeout:
+            self.stop_robot()
+            self.get_logger().warn(
+                f'⏰ Timeout on waypoint {self.current_waypoint_idx + 1}/{len(self.waypoints)} '
+                f'(>{self.timeout}s) — skipping')
+            self.failed_waypoints += 1
+            if self.current_waypoint_idx < len(self.waypoints):
+                self.missed_waypoints.append(self.waypoints[self.current_waypoint_idx])
+            self.current_waypoint_idx += 1
+            self._waypoint_start_time = now
             if self.current_waypoint_idx >= len(self.waypoints):
                 self.finish_mission()
             return
@@ -513,14 +550,18 @@ class AdaptiveCoveragePlanner(Node):
         turn_threshold = self.angle_tolerance * 2.5  # ~45 degrees
         if abs(angle_error) > turn_threshold:
             cmd.linear.x = 0.0
-            turn_speed = min(0.8, max(0.3, abs(angle_error) * 0.8))
+            turn_speed = min(self.angular_speed, max(self.angular_speed * 0.4, abs(angle_error) * 0.8))
             cmd.angular.z = turn_speed if angle_error > 0 else -turn_speed
         else:
             # Drive forward with steering correction
             alignment_scale = max(0.25, 1.0 - abs(angle_error) / turn_threshold)
             cmd.linear.x = self.linear_speed * alignment_scale
-            ang = min(0.8, max(0.15, abs(angle_error) * 1.5))
-            cmd.angular.z = ang if angle_error > 0 else -ang
+            # Dead zone: no correction when well-aligned
+            if abs(angle_error) < self.angle_tolerance:
+                cmd.angular.z = 0.0
+            else:
+                ang = min(self.angular_speed, abs(angle_error) * 1.5)
+                cmd.angular.z = ang if angle_error > 0 else -ang
 
         self.cmd_vel_pub.publish(cmd)
 
@@ -552,9 +593,38 @@ class AdaptiveCoveragePlanner(Node):
 
     def map_callback(self, msg: OccupancyGrid):
         """Store latest map."""
+        w, h = msg.info.width, msg.info.height
+        if w <= 0 or h <= 0 or len(msg.data) != w * h or msg.info.resolution <= 0:
+            return
         self.map_info = msg.info
-        self.map_array = np.array(msg.data, dtype=np.int8).reshape(
-            (msg.info.height, msg.info.width))
+        self.map_array = np.array(msg.data, dtype=np.int8).reshape((h, w))
+
+    def _on_no_go_zones(self, msg: String):
+        """Receive no-go zones from the web app."""
+        try:
+            self._no_go_zones = json.loads(msg.data)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    def _on_robot_map_pose(self, msg: PoseStamped):
+        """Receive localized robot pose from scan-to-map matching.
+
+        Computes the offset between the localized map-frame pose and the
+        current odom-frame pose so that ``_get_robot_pose_map`` can correct
+        the odom fallback when TF is unavailable (saved-room cleaning).
+        """
+        q = msg.pose.orientation
+        siny = 2.0 * (q.w * q.z + q.x * q.y)
+        cosy = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+        map_yaw = math.atan2(siny, cosy)
+
+        dx = msg.pose.position.x - self.robot_x
+        dy = msg.pose.position.y - self.robot_y
+        dyaw = self.normalize_angle(map_yaw - self.robot_yaw)
+        self._map_odom_offset = (dx, dy, dyaw)
+        self.get_logger().info(
+            f"📍 Localization offset set: dx={dx:.2f}, dy={dy:.2f}, "
+            f"dyaw={math.degrees(dyaw):.1f}°")
 
     def exploration_complete_callback(self, msg: Bool):
         """Triggered when exploration finishes."""
@@ -564,21 +634,16 @@ class AdaptiveCoveragePlanner(Node):
 
     def start_coverage_mission(self):
         """Generate coverage path and start executing it."""
-        # Wait for map with timeout and retry
-        max_wait_time = 10.0  # seconds
-        wait_interval = 0.5
-        waited = 0.0
-        
-        while self.map_array is None and waited < max_wait_time:
-            self.get_logger().info(f'⏳ Waiting for map... ({waited:.1f}s)')
-            import time
-            time.sleep(wait_interval)
-            waited += wait_interval
-            # Spin to process callbacks
-            rclpy.spin_once(self, timeout_sec=0.1)
-        
+        # Wait for map with retries (TRANSIENT_LOCAL may take a moment)
         if self.map_array is None:
-            self.get_logger().error('❌ No map available after waiting! Make sure SLAM is running.')
+            self.get_logger().warn('⏳ Map not received yet, waiting for SLAM map...')
+            for i in range(10):
+                rclpy.spin_once(self, timeout_sec=1.0)
+                if self.map_array is not None:
+                    self.get_logger().info('✅ Map received after %d second(s)' % (i + 1))
+                    break
+        if self.map_array is None:
+            self.get_logger().error('❌ No map available after 10s! Make sure SLAM is running.')
             self.get_logger().error('   Try running /scan first to build a map.')
             return
         
@@ -632,8 +697,13 @@ class AdaptiveCoveragePlanner(Node):
         self.coverage_state = CoverageState.RUNNING
         self.start_time = self.get_clock().now()
         
-        # Start from nearest waypoint to robot's current position
-        self.current_waypoint_idx = self.find_nearest_waypoint_index()
+        # Rotate waypoints so the nearest one is first — ensures full coverage
+        nearest = self.find_nearest_waypoint_index()
+        if nearest > 0:
+            self.waypoints = self.waypoints[nearest:] + self.waypoints[:nearest]
+        self.current_waypoint_idx = 0
+        self._initial_waypoint_count = len(self.waypoints)
+        self._waypoint_start_time = self.get_clock().now().nanoseconds / 1e9
         
         self.get_logger().info('')
         self.get_logger().info('=' * 50)
@@ -733,14 +803,11 @@ class AdaptiveCoveragePlanner(Node):
         # Get robot's current position in map frame
         rx, ry, ryaw = self._get_robot_pose_map()
         
-        min_dist = float('inf')
-        nearest_idx = 0
-        
-        for i, (wx, wy, wyaw) in enumerate(self.waypoints):
-            dist = math.sqrt((wx - rx)**2 + (wy - ry)**2)
-            if dist < min_dist:
-                min_dist = dist
-                nearest_idx = i
+        # Vectorized distance calculation
+        wp_arr = np.array([(wx, wy) for wx, wy, _ in self.waypoints])
+        dists = np.sqrt((wp_arr[:, 0] - rx) ** 2 + (wp_arr[:, 1] - ry) ** 2)
+        nearest_idx = int(np.argmin(dists))
+        min_dist = float(dists[nearest_idx])
         
         self.get_logger().info(f'🎯 Robot at ({rx:.2f}, {ry:.2f}), nearest waypoint {nearest_idx + 1} at ({self.waypoints[nearest_idx][0]:.2f}, {self.waypoints[nearest_idx][1]:.2f}), distance: {min_dist:.2f}m')
         
@@ -748,11 +815,36 @@ class AdaptiveCoveragePlanner(Node):
 
     def inflate_obstacles(self):
         """Inflate obstacles by robot radius for safe navigation."""
+        if self.map_info is None:
+            return
         # Create obstacle mask
         obstacle_mask = self.map_array >= OCCUPIED_THRESHOLD
         
-        # Calculate inflation in cells
-        inflation_cells = int(self.robot_radius / self.map_info.resolution) + 3
+        # Apply no-go zones as obstacles before inflation
+        if self._no_go_zones and self.map_info:
+            res = self.map_info.resolution
+            if res <= 0:
+                res = 0.05
+            ox = self.map_info.origin.position.x
+            oy = self.map_info.origin.position.y
+            h, w = self.map_array.shape
+            for zone in self._no_go_zones:
+                try:
+                    zx1, zy1 = float(zone["x1"]), float(zone["y1"])
+                    zx2, zy2 = float(zone["x2"]), float(zone["y2"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                c1 = math.floor((min(zx1, zx2) - ox) / res)
+                c2 = math.ceil((max(zx1, zx2) - ox) / res)
+                r1 = math.floor((min(zy1, zy2) - oy) / res)
+                r2 = math.ceil((max(zy1, zy2) - oy) / res)
+                r1, r2 = max(0, r1), min(h, r2 + 1)
+                c1, c2 = max(0, c1), min(w, c2 + 1)
+                obstacle_mask[r1:r2, c1:c2] = True
+            self.get_logger().info(f'Applied {len(self._no_go_zones)} no-go zone(s) to obstacle mask')
+        
+        # Calculate inflation in cells (Using +0 carefully to get closer to the walls)
+        inflation_cells = int(self.robot_radius / self.map_info.resolution)
         
         # Create circular kernel
         kernel_size = 2 * inflation_cells + 1
@@ -943,10 +1035,14 @@ class AdaptiveCoveragePlanner(Node):
         for cid, data in cells.items():
             xs = [s[0] for s in data['segments']]
             ys = [s[1] for s in data['segments']] # use starty approx
+            if not xs:
+                data['centroid'] = (0.0, 0.0)
+                continue
             data['centroid'] = (sum(xs)/len(xs), sum(ys)/len(ys))
         
-        # Start with closest to robot (assumed 0,0 for now or first waypoints)
-        curr_pos = (0.0, 0.0)
+        # Start with closest cell to robot's actual position
+        rx, ry, _ = self._get_robot_pose_map()
+        curr_pos = (rx, ry)
         
         remaining_ids = set(cells.keys())
         
@@ -1059,37 +1155,28 @@ class AdaptiveCoveragePlanner(Node):
         Find continuous free segments in a column.
         Returns list of (start_row, end_row) tuples.
         """
-        segments = []
         height = self.inflated_map.shape[0]
-        
-        in_segment = False
-        seg_start = 0
-        
-        for row in range(height):
-            cell_value = self.inflated_map[row, col]
-            is_free = 0 <= cell_value < FREE_THRESHOLD
-            
-            if is_free and not in_segment:
-                # Start new segment
-                in_segment = True
-                seg_start = row
-            elif not is_free and in_segment:
-                # End segment
-                in_segment = False
-                seg_end = row - 1
-                
-                # Only add if segment is long enough (at least 10cm)
-                segment_length = (seg_end - seg_start) * self.map_info.resolution
-                if segment_length >= 0.10:  # At least 10cm
-                    segments.append((seg_start, seg_end))
-        
-        # Handle segment that goes to end of column
-        if in_segment:
-            seg_end = height - 1
-            segment_length = (seg_end - seg_start) * self.map_info.resolution
-            if segment_length >= 0.10:  # At least 10cm
-                segments.append((seg_start, seg_end))
-        
+        column = self.inflated_map[:, col]
+        is_free = (column >= 0) & (column < FREE_THRESHOLD)
+
+        if not np.any(is_free):
+            return []
+
+        # Pad with False to detect transitions at boundaries
+        padded = np.empty(height + 2, dtype=bool)
+        padded[0] = False
+        padded[1:-1] = is_free
+        padded[-1] = False
+
+        diff = np.diff(padded.astype(np.int8))
+        starts = np.where(diff == 1)[0]   # transition from not-free to free
+        ends = np.where(diff == -1)[0] - 1  # transition from free to not-free
+
+        min_cells = max(1, int(0.10 / self.map_info.resolution))
+        segments = []
+        for s, e in zip(starts, ends):
+            if e - s >= min_cells:
+                segments.append((int(s), int(e)))
         return segments
 
     def generate_simple_zigzag_path(self) -> list:
@@ -1143,6 +1230,29 @@ class AdaptiveCoveragePlanner(Node):
         self.get_logger().info(f'Simple zigzag generated {len(waypoints)} waypoints')
         return waypoints
 
+    def _nearest_neighbor_order(self, waypoints: list) -> list:
+        """Reorder individual waypoints using nearest-neighbor heuristic."""
+        if len(waypoints) <= 2:
+            return waypoints
+        rx, ry, _ = self._get_robot_pose_map()
+        ordered = []
+        remaining = list(range(len(waypoints)))
+        curr = (rx, ry)
+        while remaining:
+            best_i = 0
+            best_d = float('inf')
+            for idx, ri in enumerate(remaining):
+                dx = waypoints[ri][0] - curr[0]
+                dy = waypoints[ri][1] - curr[1]
+                d = dx * dx + dy * dy
+                if d < best_d:
+                    best_d = d
+                    best_i = idx
+            chosen = remaining.pop(best_i)
+            ordered.append(waypoints[chosen])
+            curr = (waypoints[chosen][0], waypoints[chosen][1])
+        return ordered
+
     def optimize_path_order(self, waypoints: list) -> list:
         """
         Reorder waypoint pairs to minimize travel distance.
@@ -1162,36 +1272,31 @@ class AdaptiveCoveragePlanner(Node):
         remaining_pairs = list(pairs[1:])
         
         while remaining_pairs:
-            last_pair = ordered_pairs[-1]
-            last_point = last_pair[1]  # End of last pair
+            last_point = ordered_pairs[-1][1]  # End of last pair
+            lx, ly = last_point[0], last_point[1]
             
-            # Find nearest remaining pair
-            min_dist = float('inf')
+            min_dist_sq = float('inf')
             nearest_idx = 0
+            nearest_reverse = False
             
             for i, pair in enumerate(remaining_pairs):
-                # Distance to start of pair
-                dist_to_start = math.sqrt((pair[0][0] - last_point[0])**2 + (pair[0][1] - last_point[1])**2)
-                # Distance to end of pair (in case we reverse)
-                dist_to_end = math.sqrt((pair[1][0] - last_point[0])**2 + (pair[1][1] - last_point[1])**2)
+                d_start = (pair[0][0] - lx)**2 + (pair[0][1] - ly)**2
+                d_end = (pair[1][0] - lx)**2 + (pair[1][1] - ly)**2
                 
-                dist = min(dist_to_start, dist_to_end)
-                if dist < min_dist:
-                    min_dist = dist
+                if d_end < d_start:
+                    d, rev = d_end, True
+                else:
+                    d, rev = d_start, False
+                if d < min_dist_sq:
+                    min_dist_sq = d
                     nearest_idx = i
+                    nearest_reverse = rev
             
-            # Add the nearest pair, possibly reversed if closer to end
-            nearest_pair = remaining_pairs[nearest_idx]
-            dist_to_start = math.sqrt((nearest_pair[0][0] - last_point[0])**2 + (nearest_pair[0][1] - last_point[1])**2)
-            dist_to_end = math.sqrt((nearest_pair[1][0] - last_point[0])**2 + (nearest_pair[1][1] - last_point[1])**2)
-            
-            if dist_to_end < dist_to_start:
-                # Reverse the pair
+            nearest_pair = remaining_pairs.pop(nearest_idx)
+            if nearest_reverse:
                 ordered_pairs.append((nearest_pair[1], nearest_pair[0]))
             else:
                 ordered_pairs.append(nearest_pair)
-            
-            remaining_pairs.pop(nearest_idx)
         
         # Flatten back to list of waypoints
         ordered_waypoints = []
@@ -1262,7 +1367,16 @@ class AdaptiveCoveragePlanner(Node):
 
     def goal_response_callback(self, future):
         """Handle goal acceptance/rejection."""
-        goal_handle = future.result()
+        try:
+            goal_handle = future.result()
+        except Exception as e:
+            self.get_logger().warn(f'   ⚠️ Goal send failed: {e}')
+            self.failed_waypoints += 1
+            self.is_navigating = False
+            self.current_goal_handle = None
+            self.current_waypoint_idx += 1
+            self.send_next_goal()
+            return
         
         if not goal_handle.accepted:
             self.get_logger().warn('   ⚠️ Goal rejected - skipping')
@@ -1272,6 +1386,7 @@ class AdaptiveCoveragePlanner(Node):
                 self.missed_waypoints.append(self.waypoints[self.current_waypoint_idx])
             
             self.is_navigating = False
+            self.current_goal_handle = None
             self.current_waypoint_idx += 1
             self.send_next_goal()
             return
@@ -1283,8 +1398,18 @@ class AdaptiveCoveragePlanner(Node):
 
     def get_result_callback(self, future):
         """Handle navigation result."""
-        result = future.result()
-        status = result.status
+        try:
+            result = future.result()
+            status = result.status
+        except Exception as e:
+            self.get_logger().warn(f'   ⚠️ Navigation result error: {e}')
+            self.is_navigating = False
+            self.current_goal_handle = None
+            self.failed_waypoints += 1
+            if self.coverage_state == CoverageState.RUNNING:
+                self.current_waypoint_idx += 1
+                self.send_next_goal()
+            return
         
         self.is_navigating = False
         self.current_goal_handle = None
@@ -1375,12 +1500,17 @@ class AdaptiveCoveragePlanner(Node):
             self.waypoints = self.missed_waypoints
             self.missed_waypoints = []
             
-            # Optimize the visit order to minimize travel
+            # Optimize the visit order (nearest-neighbor on individual waypoints)
             if len(self.waypoints) > 2:
-                self.waypoints = self.optimize_path_order(self.waypoints)
+                self.waypoints = self._nearest_neighbor_order(self.waypoints)
+            
+            # Densify and orient (same as initial path generation)
+            self.waypoints = self.densify_waypoints(self.waypoints, max_segment_length=self.max_segment_length)
+            self.waypoints = self.orient_waypoints(self.waypoints)
             
             # Reset state for retry
             self.current_waypoint_idx = 0
+            self._waypoint_start_time = self.get_clock().now().nanoseconds / 1e9
             
             # Update visualization
             self.publish_coverage_path()
@@ -1397,7 +1527,7 @@ class AdaptiveCoveragePlanner(Node):
         if self.start_time:
             elapsed = (self.get_clock().now() - self.start_time).nanoseconds / 1e9
         
-        total = self.successful_waypoints + self.failed_waypoints
+        total = self._initial_waypoint_count if self._initial_waypoint_count > 0 else (self.successful_waypoints + self.failed_waypoints)
         coverage_pct = (self.successful_waypoints / total * 100) if total > 0 else 0
         
         self.get_logger().info('')
@@ -1424,6 +1554,7 @@ def main(args=None):
         rclpy.spin(node)
     except KeyboardInterrupt:
         node.get_logger().info('Coverage interrupted by user')
+        node.stop_robot()
     finally:
         node.destroy_node()
         if rclpy.ok():

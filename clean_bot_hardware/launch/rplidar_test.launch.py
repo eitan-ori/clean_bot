@@ -18,7 +18,7 @@ def generate_launch_description():
     
     frame_id_arg = DeclareLaunchArgument(
         'frame_id',
-        default_value='laser_frame',
+        default_value='laser',
         description='Frame ID for laser scans'
     )
     

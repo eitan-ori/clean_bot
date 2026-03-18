@@ -12,7 +12,7 @@ export CYCLONEDDS_URI=file:///root/cyclonedds.xml
 
 # הפקודה המלאה לפיי: מגדירים את ה-RMW וה-ID לפני הרצת ה-Node
 # --- שינוי: הוספת CYCLONEDDS_URI גם בפאי ---
-PI_LIDAR_CMD="export CYCLONEDDS_URI=file:///home/pi_moobot/cyclonedds.xml && export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp && export ROS_DOMAIN_ID=$MY_DOMAIN_ID && source /opt/ros/humble/setup.bash && source ~/robot_ws/install/setup.bash && ros2 run rplidar_ros rplidar_node --ros-args -p serial_port:=/dev/ttyUSB0 -p serial_baudrate:=115200 -p frame_id:=laser_frame"
+PI_LIDAR_CMD="export CYCLONEDDS_URI=file:///home/pi_moobot/cyclonedds.xml && export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp && export ROS_DOMAIN_ID=$MY_DOMAIN_ID && source /opt/ros/humble/setup.bash && source ~/robot_ws/install/setup.bash && ros2 run rplidar_ros rplidar_node --ros-args -p serial_port:=/dev/ttyUSB0 -p serial_baudrate:=115200 -p frame_id:=laser"
 
 echo "🚀 Starting RPLidar system..."
 # אנחנו משתמשים ב-bash -c כדי להבטיח שכל משתני הסביבה נתפסים

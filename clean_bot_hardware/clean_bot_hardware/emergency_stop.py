@@ -7,13 +7,13 @@
 # modifies incoming velocity commands from navigation to prevent collisions.
 #
 # MAIN FUNCTIONS:
-# 1. Subscribes to /cmd_vel_nav (input from the navigation stack).
+# 1. Subscribes to /cmd_vel (input from velocity_smoother, which gets Nav2 output).
 # 2. Subscribes to /ultrasonic_range (real-time distance to obstacles).
 # 3. Filters forward velocity:
 #    - Obstacle < distance_stop: Linear velocity set to 0 (Full Stop).
 #    - Obstacle < distance_slow: Linear velocity scaled down (Caution).
 #    - Obstacle > distance_slow: Velocity passes through unchanged.
-# 4. Publishes final vetted commands to /cmd_vel.
+# 4. Publishes final vetted commands to /cmd_vel_safe.
 #
 # PARAMETERS & VALUES:
 # - emergency_stop_distance: 0.10 m (Triggers immediate halt).
@@ -23,12 +23,13 @@
 # - timeout_sec: 0.5 s (Safety fallback if sensor data stops arriving).
 #
 # ASSUMPTIONS:
-# - The navigation stack outputs to /cmd_vel_nav instead of /cmd_vel.
+# - The velocity_smoother outputs smoothed commands to /cmd_vel.
 # - The ultrasonic sensor is facing forward and providing accurate range data.
 # - Rotation is always allowed even in stop state (to let the robot turn away).
 ###############################################################################
 """
 
+import math
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
@@ -41,12 +42,14 @@ class EmergencyStopController(Node):
         super().__init__('emergency_stop_controller')
 
         # ===================== Parameters =====================
+        self.declare_parameter('enabled', True)                  # Enable/disable safety filter
         self.declare_parameter('emergency_stop_distance', 0.10)  # 10cm - full stop
         self.declare_parameter('slow_down_distance', 0.30)       # 30cm - reduce speed
         self.declare_parameter('slow_down_factor', 0.3)          # 30% of original speed
         self.declare_parameter('reverse_allowed', True)          # Allow backing up
         self.declare_parameter('timeout_sec', 0.5)               # Sensor timeout
         
+        self.enabled = self.get_parameter('enabled').value
         self.stop_dist = self.get_parameter('emergency_stop_distance').value
         self.slow_dist = self.get_parameter('slow_down_distance').value
         self.slow_factor = self.get_parameter('slow_down_factor').value
@@ -54,19 +57,27 @@ class EmergencyStopController(Node):
         self.timeout = self.get_parameter('timeout_sec').value
 
         # ===================== Publishers =====================
-        self.cmd_vel_pub = self.create_publisher(Twist, 'cmd_vel', 10)
+        # Output to cmd_vel_safe — arduino_driver subscribes to this
+        self.cmd_vel_pub = self.create_publisher(Twist, 'cmd_vel_safe', 10)
         self.obstacle_pub = self.create_publisher(Bool, 'obstacle_detected', 10)
 
         # ===================== Subscribers =====================
         self.range_sub = self.create_subscription(
             Range, 'ultrasonic_range', self.range_callback, 10)
+        # Subscribe to cmd_vel_nav (Nav2 controller output, before velocity_smoother)
+        # Also subscribe to cmd_vel (velocity_smoother output, manual joystick, etc.)
+        # Whichever fires last wins — both feed through safety filter to cmd_vel_safe.
         self.cmd_vel_sub = self.create_subscription(
             Twist, 'cmd_vel_nav', self.cmd_vel_callback, 10)
+        self.cmd_vel_sub2 = self.create_subscription(
+            Twist, 'cmd_vel', self.cmd_vel_callback, 10)
 
         # ===================== State =====================
         self.current_distance = 100
         self.last_range_time = None
         self.obstacle_state = False  # False = clear, True = blocked
+        self._start_time = self.get_clock().now()
+        self._sensor_grace_sec = 5.0  # Allow sensor this long to start publishing
 
         self.get_logger().info('🛑 Emergency Stop Controller started')
         self.get_logger().info(f'   Stop distance: {self.stop_dist*100:.0f}cm')
@@ -76,8 +87,8 @@ class EmergencyStopController(Node):
         """Update current obstacle distance."""
         # Ignore 0 readings - HC-SR04 returns 0 when no echo received
         # Also ignore readings below min_range (typically 2cm for HC-SR04)
-        if msg.range <= 0.02:  # 2cm minimum valid reading
-            # Invalid reading - don't update distance (keep previous valid value)
+        # Reject NaN/Infinity from sensor noise
+        if not math.isfinite(msg.range) or msg.range <= 0.02:
             return
         
         self.current_distance = msg.range
@@ -88,12 +99,10 @@ class EmergencyStopController(Node):
         Filter velocity commands based on obstacle proximity.
         Passes through commands but limits forward motion when obstacle detected.
         """
-        # TEMPORARILY DISABLED EMERGENCY STOP
-        # Just pass through the command
-        self.cmd_vel_pub.publish(msg)
-        return
+        if not self.enabled:
+            self.cmd_vel_pub.publish(msg)
+            return
 
-        # Original Logic (Disabled)
         output = Twist()
         output.angular.z = msg.angular.z  # Always allow rotation
         
@@ -103,6 +112,16 @@ class EmergencyStopController(Node):
             if elapsed > self.timeout:
                 # Sensor timeout - be cautious, reduce forward speed
                 self.get_logger().warn_once('⚠️ Ultrasonic sensor timeout - reducing speed')
+                output.linear.x = msg.linear.x * 0.5 if msg.linear.x > 0 else msg.linear.x
+                self.cmd_vel_pub.publish(output)
+                return
+        else:
+            # No sensor data ever received — after grace period, reduce speed
+            uptime = (self.get_clock().now() - self._start_time).nanoseconds / 1e9
+            if uptime > self._sensor_grace_sec:
+                self.get_logger().warn_once(
+                    '⚠️ Ultrasonic sensor never published — reducing forward speed. '
+                    'Check sensor wiring and /ultrasonic_range topic.')
                 output.linear.x = msg.linear.x * 0.5 if msg.linear.x > 0 else msg.linear.x
                 self.cmd_vel_pub.publish(output)
                 return
@@ -131,8 +150,12 @@ class EmergencyStopController(Node):
             if msg.linear.x > 0:
                 # Scale speed based on distance
                 # At slow_dist: full speed, at stop_dist: slow_factor
-                scale = self.slow_factor + (1 - self.slow_factor) * \
-                        (distance - self.stop_dist) / (self.slow_dist - self.stop_dist)
+                dist_range = self.slow_dist - self.stop_dist
+                if dist_range > 0:
+                    scale = self.slow_factor + (1 - self.slow_factor) * \
+                            (distance - self.stop_dist) / dist_range
+                else:
+                    scale = self.slow_factor
                 output.linear.x = msg.linear.x * scale
                 
                 self.get_logger().debug(

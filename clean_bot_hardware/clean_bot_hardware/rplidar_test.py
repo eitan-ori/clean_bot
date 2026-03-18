@@ -129,7 +129,7 @@ class RPLidarTest(Node):
         print(f'   Total scans received: {self.scan_count}')
         print(f'   Scan frequency: {freq:.1f} Hz')
         print(f'   Points per scan: {len(msg.ranges)}')
-        print(f'   Valid readings: {valid_count} ({100*valid_count/len(msg.ranges):.1f}%)')
+        print(f'   Valid readings: {valid_count} ({100*valid_count/max(len(msg.ranges),1):.1f}%)')
         print(f'   Invalid readings: {invalid_count}')
         print(f'')
         print(f'📐 Angular Info:')
@@ -215,7 +215,8 @@ def main(args=None):
         print('✅ RPLidar test completed')
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

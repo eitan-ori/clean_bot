@@ -1,0 +1,1801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#1a1b2e">
+<title>Clean Bot Control Panel</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#1a1b2e;--card:#252640;--card-hover:#2d2e4a;
+  --accent:#4a9eff;--text:#e0e0f0;--text-dim:#8888aa;
+  --green:#34d399;--orange:#f59e0b;--red:#ef4444;--purple:#a78bfa;
+  --yellow:#fbbf24;--gray:#6b7280;--blue:#3b82f6;
+  --radius:10px;--shadow:0 2px 12px rgba(0,0,0,.35);
+  --header-bg:#16172a;--header-border:#2a2b44;
+  --input-bg:#1e1f36;--input-border:#444;
+  --btn-bg:#353660;--btn-hover:#3d3f70;
+  --log-bg:#1a1b30;--log-border:rgba(34,34,136,.03);
+  --map-bg:#101020;--map-border:#333;
+  --bar-bg:#1a1b30;
+  --legend-border:#444;
+  --swatch-unknown:#282830;
+}
+html{font-size:14px}
+body{
+  font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  background:var(--bg);color:var(--text);
+  min-height:100vh;display:flex;flex-direction:column;
+}
+/* ── Header ──────────────────────────────────────── */
+header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:.75rem 1.5rem;background:var(--header-bg);border-bottom:1px solid var(--header-border);
+}
+header h1{font-size:1.25rem;font-weight:700;letter-spacing:.02em}
+.conn-indicator{display:flex;align-items:center;gap:.4rem;font-size:.85rem;color:var(--text-dim)}
+.conn-dot{width:10px;height:10px;border-radius:50%;background:var(--red);transition:background .3s}
+.conn-dot.connected{background:var(--green)}
+
+/* ── Main Grid ───────────────────────────────────── */
+main{
+  display:grid;grid-template-columns:65% 35%;gap:1rem;
+  padding:1rem;flex:1;overflow:hidden;
+}
+@media(max-width:960px){main{grid-template-columns:1fr;overflow:auto}}
+@media(min-width:961px){.estop-btn{position:static}}
+
+/* ── Cards ───────────────────────────────────────── */
+.card{
+  background:var(--card);border-radius:var(--radius);
+  padding:1rem;box-shadow:var(--shadow);
+}
+.card h2{font-size:1rem;margin-bottom:.65rem;display:flex;align-items:center;gap:.4rem;color:var(--accent)}
+
+/* ── Map Area ────────────────────────────────────── */
+.map-wrap{display:flex;flex-direction:column;gap:.75rem;overflow:hidden}
+.map-container{
+  position:relative;flex:1;min-height:300px;
+  border:1px solid var(--map-border);border-radius:var(--radius);overflow:hidden;
+  background:var(--map-bg);display:flex;align-items:center;justify-content:center;
+}
+#mapCanvas{max-width:100%;max-height:100%;display:block}
+.map-placeholder{color:var(--text-dim);font-size:.95rem}
+.map-info{display:flex;gap:1.5rem;font-size:.8rem;color:var(--text-dim);flex-wrap:wrap}
+.map-info span{display:flex;align-items:center;gap:.3rem}
+
+/* ── Right Panels ────────────────────────────────── */
+.panels{display:flex;flex-direction:column;gap:.75rem;overflow-y:auto;padding-right:.25rem}
+.panels::-webkit-scrollbar{width:5px}
+.panels::-webkit-scrollbar-thumb{background:var(--input-border);border-radius:4px}
+
+/* ── Status Panel ────────────────────────────────── */
+.status-grid{display:grid;grid-template-columns:1fr 1fr;gap:.4rem .8rem;font-size:.85rem}
+.status-grid .label{color:var(--text-dim)}
+.badge{
+  display:inline-block;padding:.15rem .5rem;border-radius:20px;
+  font-size:.75rem;font-weight:600;text-transform:uppercase;
+}
+.badge-green{background:rgba(52,211,153,.18);color:var(--green)}
+.badge-blue{background:rgba(59,130,246,.18);color:var(--blue)}
+.badge-orange{background:rgba(245,158,11,.18);color:var(--orange)}
+.badge-red{background:rgba(239,68,68,.18);color:var(--red)}
+.badge-gray{background:rgba(107,114,128,.18);color:var(--gray)}
+
+/* ── Buttons ─────────────────────────────────────── */
+.btn{
+  border:none;border-radius:8px;padding:.55rem .75rem;cursor:pointer;
+  font-size:.85rem;font-weight:600;color:#fff;
+  transition:transform .1s,filter .15s;display:flex;align-items:center;justify-content:center;gap:.3rem;
+}
+.btn:hover{filter:brightness(1.15)}
+.btn:active{transform:scale(.96)}
+.btn-green{background:var(--green);color:#000}
+.btn-orange{background:var(--orange);color:#000}
+.btn-blue{background:var(--blue)}
+.btn-purple{background:var(--purple)}
+.btn-gray{background:var(--gray)}
+.btn-yellow{background:var(--yellow);color:#000}
+.btn-red{background:var(--red)}
+.btn-sm{padding:.35rem .55rem;font-size:.78rem}
+
+/* ── Mission Control Grid ────────────────────────── */
+.cmd-grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
+
+/* ── D-Pad ───────────────────────────────────────── */
+.dpad{display:grid;grid-template-columns:repeat(3,1fr);gap:.35rem;max-width:200px;margin:0 auto;touch-action:none}
+.dpad .btn{aspect-ratio:1;font-size:1.2rem;border-radius:10px;background:var(--btn-bg)}
+.dpad .btn:hover{background:var(--btn-hover)}
+.dpad .btn.stop-btn{background:var(--red);font-size:.7rem;font-weight:700}
+.dpad .empty{visibility:hidden}
+.speed-row{display:flex;align-items:center;gap:.5rem;margin-top:.5rem;font-size:.82rem}
+.speed-row input[type=range]{flex:1;accent-color:var(--accent)}
+
+/* ── Room Manager ────────────────────────────────── */
+.room-save-row{display:flex;gap:.4rem;margin-bottom:.6rem}
+.room-save-row input{
+  flex:1;padding:.4rem .6rem;border-radius:6px;border:1px solid var(--input-border);
+  background:var(--input-bg);color:var(--text);font-size:.85rem;outline:none;
+}
+.room-save-row input:focus{border-color:var(--accent)}
+.room-list{max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:.4rem}
+.room-item{
+  display:flex;align-items:center;justify-content:space-between;
+  background:var(--input-bg);border-radius:8px;padding:.45rem .65rem;font-size:.82rem;
+}
+.room-item .room-name{font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.room-item .room-date{color:var(--text-dim);font-size:.72rem;margin-left:.5rem;white-space:nowrap}
+.room-actions{display:flex;gap:.3rem;margin-left:.5rem;flex-shrink:0}
+
+/* ── Mission Log ─────────────────────────────────── */
+.log-box{
+  max-height:160px;overflow-y:auto;background:var(--log-bg);
+  border-radius:8px;padding:.5rem;font-size:.78rem;font-family:monospace;
+}
+.log-box::-webkit-scrollbar{width:4px}
+.log-box::-webkit-scrollbar-thumb{background:var(--input-border);border-radius:3px}
+.log-entry{padding:.15rem 0;border-bottom:1px solid var(--log-border);display:flex;gap:.5rem}
+.log-time{color:var(--accent);flex-shrink:0}
+.log-event{color:var(--text-dim)}
+
+/* ── Modal ───────────────────────────────────────── */
+.modal-overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;
+  align-items:center;justify-content:center;z-index:1000;
+}
+.modal-overlay.active{display:flex}
+.modal{
+  background:var(--card);border-radius:var(--radius);padding:1.25rem;
+  max-width:90vw;max-height:90vh;overflow:auto;position:relative;min-width:320px;
+}
+.modal h3{margin-bottom:.75rem;color:var(--accent)}
+.modal img{max-width:100%;border-radius:8px}
+.modal-close{
+  position:absolute;top:.6rem;right:.75rem;background:none;border:none;
+  color:var(--text-dim);font-size:1.3rem;cursor:pointer;
+}
+.modal-close:hover{color:var(--text)}
+.modal-meta{margin-top:.6rem;font-size:.8rem;color:var(--text-dim)}
+
+/* ── Toast ───────────────────────────────────────── */
+.toast-container{position:fixed;top:1rem;right:1rem;z-index:2000;display:flex;flex-direction:column;gap:.4rem}
+.toast{
+  background:var(--btn-bg);color:var(--text);padding:.55rem 1rem;border-radius:8px;
+  font-size:.82rem;box-shadow:var(--shadow);opacity:0;transform:translateX(30px);
+  transition:all .3s;pointer-events:none;
+}
+.toast.show{opacity:1;transform:translateX(0)}
+
+/* ── Emergency Stop ─────────────────────────────── */
+.estop-btn{
+  width:100%;padding:.85rem;font-size:1.1rem;font-weight:800;
+  background:var(--red);color:#fff;border:3px solid #ff6666;
+  border-radius:var(--radius);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:.5rem;
+  text-transform:uppercase;letter-spacing:.05em;
+  transition:filter .15s,transform .1s;
+}
+.estop-btn:hover{filter:brightness(1.2)}
+.estop-btn:active{transform:scale(.97)}
+@keyframes estop-pulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.5)}50%{box-shadow:0 0 18px 6px rgba(239,68,68,.45)}}
+.estop-btn.pulsing{animation:estop-pulse 1.2s infinite}
+
+/* ── Progress Bar ───────────────────────────────── */
+.progress-wrap{margin-top:.4rem}
+.progress-label{font-size:.8rem;color:var(--text-dim);margin-bottom:.2rem}
+.progress-bar{height:10px;background:var(--bar-bg);border-radius:5px;overflow:hidden}
+.progress-fill{height:100%;border-radius:5px;background:var(--blue);transition:width .3s}
+@keyframes progress-animate{0%{background-position:0 0}100%{background-position:30px 0}}
+.progress-fill.animated{
+  background:repeating-linear-gradient(45deg,var(--blue),var(--blue) 10px,#5b9cff 10px,#5b9cff 20px);
+  background-size:30px 30px;animation:progress-animate .8s linear infinite;width:100%!important;
+}
+
+/* ── Map Legend ──────────────────────────────────── */
+.map-legend{display:flex;gap:1rem;font-size:.75rem;color:var(--text-dim);flex-wrap:wrap;margin-top:.3rem}
+.map-legend-item{display:flex;align-items:center;gap:.3rem}
+.legend-swatch{width:14px;height:14px;border-radius:3px;border:1px solid var(--legend-border)}
+
+/* ── Map Zoom ───────────────────────────────────── */
+.zoom-controls{display:flex;gap:.4rem;align-items:center;margin-top:.4rem}
+.zoom-controls .btn{font-size:1rem;padding:.3rem .65rem;min-width:34px}
+.zoom-level{font-size:.8rem;color:var(--text-dim)}
+
+/* ── Keyboard Hint ──────────────────────────────── */
+.keyboard-hint{text-align:center;font-size:.72rem;color:var(--text-dim);margin-top:.4rem}
+
+/* ── Scan Timer ─────────────────────────────────── */
+.scan-timer{font-size:.85rem;color:var(--accent);font-weight:600;font-family:monospace}
+
+/* ── Round 12: State History Timeline ──────────── */
+.timeline-wrap{margin-top:.5rem}
+.timeline-wrap h3{font-size:.8rem;color:var(--text-dim);margin-bottom:.25rem}
+#stateTimeline{width:100%;height:22px;border-radius:4px;background:var(--bar-bg);display:block}
+
+/* ── Round 13: Disabled buttons ────────────────── */
+.btn:disabled,.btn.disabled{opacity:.35;cursor:not-allowed;pointer-events:none;filter:none;transform:none}
+
+/* ── Round 14: Navigate marker & popup ─────────── */
+.nav-popup{
+  position:absolute;background:var(--card);border:1px solid var(--accent);border-radius:8px;
+  padding:.4rem .6rem;display:none;z-index:50;box-shadow:var(--shadow);font-size:.78rem;
+  white-space:nowrap;
+}
+.nav-popup button{margin-left:.4rem}
+
+/* ── Round 15: Theme Toggle ────────────────────── */
+.theme-toggle{
+  background:none;border:1px solid var(--input-border);border-radius:6px;padding:.25rem .5rem;
+  cursor:pointer;font-size:1.1rem;color:var(--text);transition:background .2s;
+}
+.theme-toggle:hover{background:var(--card-hover)}
+
+/* ── No-Go Zones ──────────────────────────────── */
+.nogo-active{outline:3px solid var(--red);outline-offset:-3px;cursor:crosshair!important}
+.nogo-toolbar{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin-top:.4rem}
+.nogo-toolbar .btn.active{background:var(--red);color:#fff}
+.nogo-zone-list{max-height:120px;overflow-y:auto;font-size:.78rem;margin-top:.3rem}
+.nogo-zone-item{display:flex;align-items:center;gap:.4rem;padding:.2rem .4rem;border-radius:4px;background:var(--input-bg)}
+.nogo-zone-item+.nogo-zone-item{margin-top:.2rem}
+.nogo-zone-item .nogo-del{background:none;border:none;color:var(--red);cursor:pointer;font-size:.9rem;padding:0 .2rem}
+.nogo-zone-item .nogo-label{flex:1;color:var(--text-dim)}
+
+/* ── Light theme ── */
+html.light{
+  --bg:#f0f2f5;--card:#ffffff;--card-hover:#f8f9fa;
+  --accent:#2563eb;--text:#1a1b2e;--text-dim:#64748b;
+  --shadow:0 2px 12px rgba(0,0,0,.1);
+  --header-bg:#fff;--header-border:#e0e0e0;
+  --input-bg:#f8f9fa;--input-border:#ccc;
+  --btn-bg:#e0e3ea;--btn-hover:#d0d3da;
+  --log-bg:#f1f3f6;--log-border:rgba(0,0,0,.06);
+  --map-bg:#e8eaed;--map-border:#ccc;
+  --bar-bg:#e5e7eb;
+  --legend-border:#ccc;
+  --swatch-unknown:#d0d0d8;
+}
+html.light .toast{background:#fff;color:var(--text)}
+
+/* ── Round 16: Fullscreen Map ──────────────────── */
+.fullscreen-btn{
+  background:none;border:1px solid var(--input-border);border-radius:6px;padding:.25rem .5rem;
+  cursor:pointer;font-size:1rem;color:var(--text);transition:background .2s;
+}
+.fullscreen-btn:hover{background:var(--card-hover)}
+.map-wrap.fullscreen{
+  position:fixed;inset:0;z-index:900;background:var(--bg);
+  padding:1rem;display:flex;flex-direction:column;overflow:auto;
+}
+.map-wrap.fullscreen .map-container{flex:1;min-height:0}
+.map-wrap.fullscreen #mapCanvas{max-width:100%;max-height:100%}
+
+/* ── Round 18: Latency Indicator ───────────────── */
+.latency-indicator{font-size:.78rem;color:var(--text-dim);display:flex;align-items:center;gap:.3rem}
+.latency-dot{width:8px;height:8px;border-radius:50%;background:var(--gray);transition:background .3s}
+.latency-dot.good{background:var(--green)}
+.latency-dot.warn{background:var(--yellow)}
+.latency-dot.bad{background:var(--red)}
+
+/* ── Round 19: Mute Toggle ─────────────────────── */
+.mute-toggle{
+  background:none;border:1px solid var(--input-border);border-radius:6px;padding:.25rem .5rem;
+  cursor:pointer;font-size:1.1rem;color:var(--text);transition:background .2s;
+}
+.mute-toggle:hover{background:var(--card-hover)}
+
+/* ── Round 20: Mobile Responsive ───────────────── */
+@media(max-width:960px){
+  main{grid-template-columns:1fr;overflow:auto;padding:.5rem}
+  .map-wrap{order:1}
+  .panels{order:2}
+  .map-container{min-height:250px}
+  #mapCanvas{max-width:100%;width:100%}
+  .dpad{max-width:260px}
+  .dpad .btn{min-width:44px;min-height:44px;font-size:1.5rem}
+  .btn{min-height:44px;min-width:44px;padding:.6rem .85rem}
+  .btn-sm{min-height:38px;min-width:38px}
+  .room-item{flex-wrap:wrap;gap:.3rem}
+  .room-actions{margin-left:0;width:100%;justify-content:flex-end}
+  .cmd-grid{gap:.4rem}
+  .estop-btn{position:sticky;bottom:0;z-index:100;margin-top:.5rem}
+  .card{padding:.75rem;overflow:hidden}
+  .status-grid{font-size:.82rem}
+  header{padding:.5rem .75rem;flex-wrap:wrap;gap:.4rem}
+  header h1{font-size:1.05rem;width:100%;text-align:center}
+  .header-controls{width:100%;justify-content:center;gap:.3rem;flex-wrap:wrap}
+  body{overflow-x:hidden}
+  .map-info{font-size:.72rem;gap:.75rem}
+  .zoom-controls{flex-wrap:wrap;gap:.3rem}
+  .map-legend{font-size:.7rem;gap:.5rem}
+  .map-toggles{font-size:.75rem;gap:.5rem}
+  .stats-grid{font-size:.78rem}
+  .sched-form{flex-direction:column;align-items:stretch}
+  .sched-days{justify-content:center}
+  .modal{min-width:auto;width:92vw}
+}
+@media(max-width:480px){
+  html{font-size:13px}
+  .dpad .btn{font-size:1.6rem;min-width:56px;min-height:56px}
+  .cmd-grid{grid-template-columns:1fr}
+  .speed-row{flex-wrap:wrap;justify-content:center}
+  .status-grid{grid-template-columns:1fr;gap:.3rem}
+  header h1{font-size:1rem}
+  .card h2{font-size:.9rem}
+  .estop-btn{font-size:1rem;padding:.75rem}
+  .room-item{font-size:.78rem}
+  .log-box{max-height:120px;font-size:.72rem}
+}
+
+/* ── Header controls row ──────────────────────── */
+.header-controls{display:flex;align-items:center;gap:.6rem}
+
+/* ── Round 31: Stats Panel ─────────────────────── */
+.stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:.3rem .8rem;font-size:.82rem}
+.stats-grid .stat-val{font-weight:700;color:var(--accent)}
+
+/* ── Round 32: Heatmap Toggle ──────────────────── */
+.map-toggles{display:flex;gap:1rem;font-size:.8rem;color:var(--text-dim);align-items:center;margin-top:.3rem;flex-wrap:wrap}
+.map-toggles label{display:flex;align-items:center;gap:.3rem;cursor:pointer}
+.map-toggles input[type=checkbox]{accent-color:var(--accent)}
+
+/* ── Round 33: Schedule Panel ──────────────────── */
+.sched-form{display:flex;gap:.4rem;margin-bottom:.6rem;flex-wrap:wrap;align-items:center}
+.sched-form input[type=time]{
+  padding:.35rem .5rem;border-radius:6px;border:1px solid var(--input-border);
+  background:var(--input-bg);color:var(--text);font-size:.82rem;outline:none;
+}
+.sched-form input[type=time]:focus{border-color:var(--accent)}
+.sched-days{display:flex;gap:.25rem;flex-wrap:wrap}
+.sched-days label{font-size:.72rem;display:flex;align-items:center;gap:.15rem;cursor:pointer;
+  background:var(--input-bg);padding:.2rem .35rem;border-radius:4px}
+.sched-days input[type=checkbox]{width:14px;height:14px;accent-color:var(--accent)}
+.sched-list{max-height:140px;overflow-y:auto;display:flex;flex-direction:column;gap:.35rem}
+.sched-item{display:flex;align-items:center;justify-content:space-between;
+  background:var(--input-bg);border-radius:6px;padding:.35rem .55rem;font-size:.8rem}
+.sched-item .sched-time{font-weight:700;color:var(--accent);margin-right:.5rem}
+.sched-item .sched-days-label{color:var(--text-dim);flex:1}
+
+/* ── Round 34: Battery Indicator ───────────────── */
+.battery-wrap{display:flex;align-items:center;gap:.3rem;font-size:.78rem;color:var(--text-dim)}
+.battery-icon{position:relative;width:28px;height:14px;border:2px solid var(--text-dim);border-radius:3px;overflow:hidden}
+.battery-icon::after{content:'';position:absolute;right:-5px;top:3px;width:3px;height:6px;background:var(--text-dim);border-radius:0 2px 2px 0}
+.battery-fill{height:100%;transition:width .5s,background .5s}
+.battery-fill.high{background:var(--green)}
+.battery-fill.medium{background:var(--yellow)}
+.battery-fill.low{background:var(--red)}
+
+/* ── Round 36: Language Selector ───────────────── */
+.lang-selector{
+  background:none;border:1px solid var(--input-border);border-radius:6px;padding:.2rem .45rem;
+  cursor:pointer;font-size:.8rem;color:var(--text);font-weight:600;transition:background .2s;
+}
+.lang-selector:hover{background:var(--card-hover)}
+
+/* ── Round 37: Accessibility ───────────────────── */
+*:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+/* ── Round 39: Settings Modal ──────────────────── */
+.settings-btn{
+  background:none;border:1px solid var(--input-border);border-radius:6px;padding:.25rem .5rem;
+  cursor:pointer;font-size:1.1rem;color:var(--text);transition:background .2s;
+}
+.settings-btn:hover{background:var(--card-hover)}
+.settings-group{margin-bottom:.8rem}
+.settings-group label{display:block;font-size:.85rem;color:var(--text-dim);margin-bottom:.3rem}
+.settings-group input[type=range]{width:100%;accent-color:var(--accent)}
+.settings-group select,.settings-group input[type=number]{
+  padding:.3rem .5rem;border-radius:6px;border:1px solid var(--input-border);
+  background:var(--input-bg);color:var(--text);font-size:.82rem;outline:none;width:100%;
+}
+.settings-group select:focus,.settings-group input[type=number]:focus{border-color:var(--accent)}
+
+/* ── Round 40: Diagnostics Panel ───────────────── */
+.diag-section{cursor:pointer;user-select:none}
+.diag-content{display:none;margin-top:.4rem}
+.diag-content.open{display:block}
+.diag-grid{display:grid;grid-template-columns:auto 1fr;gap:.2rem .6rem;font-size:.78rem}
+.diag-grid .diag-label{color:var(--text-dim)}
+.diag-grid .diag-val{font-family:monospace;color:var(--text)}
+.diag-grid .diag-ok{color:var(--green)}
+.diag-grid .diag-warn{color:var(--orange)}
+.diag-grid .diag-err{color:var(--red)}
+</style>
+</head>
+<body>
+
+<!-- ═══ Header ═══ -->
+<header>
+  <h1>🤖 Clean Bot Control Panel</h1>
+  <div class="header-controls">
+    <div class="battery-wrap" id="batteryWrap" aria-label="Battery level">
+      <div class="battery-icon"><div class="battery-fill high" id="batteryFill" style="width:100%"></div></div>
+      <span id="batteryLabel">100%</span>
+    </div>
+    <div class="latency-indicator" id="latencyIndicator" aria-label="Connection latency">
+      <span class="latency-dot" id="latencyDot"></span>
+      <span id="latencyLabel">— ms</span>
+    </div>
+    <button class="mute-toggle" id="muteToggle" title="Toggle notification sound" aria-label="Toggle notification sound">🔔</button>
+    <button class="lang-selector" id="langToggle" title="Toggle language" aria-label="Toggle language">EN</button>
+    <button class="settings-btn" id="settingsBtn" title="Settings" aria-label="Open settings">⚙️</button>
+    <button class="theme-toggle" id="themeToggle" title="Toggle dark/light theme" aria-label="Toggle theme">🌙</button>
+    <div class="conn-indicator" role="status" aria-live="polite">
+      <div class="conn-dot" id="connDot"></div>
+      <span id="connLabel">Disconnected</span>
+    </div>
+  </div>
+</header>
+
+<!-- ═══ Main ═══ -->
+<main>
+  <!-- Left: Map -->
+  <div class="map-wrap">
+    <div class="card" style="flex:1;display:flex;flex-direction:column">
+      <h2>🗺️ <span data-i18n="live_map">Live Map</span>
+        <span style="margin-left:auto;display:flex;gap:.3rem">
+          <button class="fullscreen-btn" id="fullscreenBtn" title="Fullscreen map">⛶</button>
+        </span>
+      </h2>
+      <div class="map-container" id="mapContainer">
+        <canvas id="mapCanvas" width="500" height="500"></canvas>
+        <div class="map-placeholder" id="mapPlaceholder" data-i18n="waiting_for_map">Waiting for map data…</div>
+        <div class="nav-popup" id="navPopup">
+          <span id="navCoords"></span>
+          <button class="btn btn-blue btn-sm" id="navHereBtn"><span data-i18n="navigate_here">Navigate Here</span></button>
+        </div>
+      </div>
+    </div>
+    <div class="map-info" id="mapInfo">
+      <span><span data-i18n="resolution">Resolution</span>: <b id="mapRes">—</b> m/px</span>
+      <span><span data-i18n="size">Size</span>: <b id="mapDims">—</b></span>
+      <span><span data-i18n="updates">Updates</span>: <b id="mapCount">0</b></span>
+    </div>
+    <div class="zoom-controls">
+      <button class="btn btn-gray" id="zoomIn">＋</button>
+      <button class="btn btn-gray" id="zoomOut">−</button>
+      <span class="zoom-level"><span data-i18n="zoom">Zoom</span>: <span id="zoomVal">1.0</span>×</span>
+      <button class="btn btn-gray btn-sm" id="exportMapBtn" style="margin-left:auto">📥 <span data-i18n="export_map">Export Map</span></button>
+    </div>
+    <div class="map-legend">
+      <span class="map-legend-item"><span class="legend-swatch" style="background:#e6ebf0"></span> <span data-i18n="free">Free</span></span>
+      <span class="map-legend-item"><span class="legend-swatch" style="background:#dc3232"></span> <span data-i18n="obstacle">Obstacle</span></span>
+      <span class="map-legend-item"><span class="legend-swatch" style="background:var(--swatch-unknown)"></span> <span data-i18n="unknown">Unknown</span></span>
+      <span class="map-legend-item"><span class="legend-swatch" style="background:#4a9eff"></span> <span data-i18n="robot">Robot</span></span>
+      <span class="map-legend-item"><span class="legend-swatch" style="background:rgba(239,68,68,0.35);border:1px dashed #ef4444"></span> <span data-i18n="no_go">No-Go</span></span>
+    </div>
+    <div class="map-toggles">
+      <label><input type="checkbox" id="heatmapToggle"> <span data-i18n="heatmap_overlay">Heatmap Overlay</span></label>
+      <label><input type="checkbox" id="trailToggle" checked> <span data-i18n="path_trail">Path Trail</span></label>
+    </div>
+    <div class="nogo-toolbar">
+      <button class="btn btn-sm" id="nogoDrawBtn" title="Draw no-go zone">🚫 <span data-i18n="draw_no_go_zone">Draw No-Go Zone</span></button>
+      <button class="btn btn-sm btn-gray" id="nogoClearBtn" title="Clear all no-go zones"><span data-i18n="clear_all">Clear All</span></button>
+      <span id="nogoCount" style="font-size:.78rem;color:var(--text-dim)"></span>
+    </div>
+    <div class="nogo-zone-list" id="nogoZoneList"></div>
+  </div>
+
+  <!-- Right: Panels -->
+  <div class="panels">
+    <!-- Emergency Stop -->
+    <button class="estop-btn" id="estopBtn" onclick="emergencyStop()" aria-label="Emergency Stop" role="button">⚠️ <span data-i18n="emergency_stop">EMERGENCY STOP</span></button>
+
+    <!-- Status -->
+    <div class="card" role="status" aria-live="polite" aria-label="Robot status">
+      <h2>📊 <span data-i18n="status">Status</span></h2>
+      <div class="status-grid">
+        <span class="label" data-i18n="mission">Mission</span><span id="sMission"><span class="badge badge-gray">UNKNOWN</span></span>
+        <span class="label" data-i18n="exploration">Exploration</span><span id="sExplore">UNKNOWN</span>
+        <span class="label" data-i18n="coverage">Coverage</span><span id="sCoverage">UNKNOWN</span>
+        <span class="label" data-i18n="position">Position</span><span id="sPos">0, 0</span>
+        <span class="label" data-i18n="velocity">Velocity</span><span id="sVel">0 m/s</span>
+        <span class="label" data-i18n="scan_time">Scan Time</span><span id="sScanTimer" class="scan-timer">—</span>
+      </div>
+      <div class="progress-wrap" id="coverageProgressWrap" style="display:none">
+        <div class="progress-label" data-i18n="coverage">Coverage</div>
+        <div class="progress-bar"><div class="progress-fill" id="coverageFill" style="width:0%"></div></div>
+      </div>
+      <div class="timeline-wrap">
+        <h3 data-i18n="state_history">State History</h3>
+        <canvas id="stateTimeline" width="400" height="22"></canvas>
+      </div>
+    </div>
+
+    <!-- Mission Control -->
+    <div class="card">
+      <h2>🎮 <span data-i18n="mission_control">Mission Control</span></h2>
+      <div class="cmd-grid" role="group" aria-label="Mission commands">
+        <button class="btn btn-green" id="btnScan" onclick="sendCommand('start_scan')" aria-label="Scan Room">🔍 <span data-i18n="scan_room">Scan Room</span></button>
+        <button class="btn btn-orange" id="btnStopScan" onclick="sendCommand('stop_scan')" aria-label="Stop Scan">⏹ <span data-i18n="stop_scan">Stop Scan</span></button>
+        <button class="btn btn-blue" id="btnClean" onclick="sendCommand('start_clean')" aria-label="Clean Room">🧹 <span data-i18n="clean_room">Clean Room</span></button>
+        <button class="btn btn-orange" id="btnStopClean" onclick="sendCommand('stop_clean')" aria-label="Stop Clean">⏹ <span data-i18n="stop_clean">Stop Clean</span></button>
+        <button class="btn btn-purple" id="btnHome" onclick="sendCommand('go_home')" aria-label="Go Home">🏠 <span data-i18n="go_home">Go Home</span></button>
+        <button class="btn btn-gray" onclick="sendCommand('reset')" aria-label="Reset">🔄 <span data-i18n="reset">Reset</span></button>
+        <button class="btn btn-yellow" id="btnPause" onclick="sendCommand('pause')" aria-label="Pause">⏸ <span data-i18n="pause">Pause</span></button>
+        <button class="btn btn-green" id="btnResume" onclick="sendCommand('resume')" aria-label="Resume">▶ <span data-i18n="resume">Resume</span></button>
+      </div>
+    </div>
+
+    <!-- Manual Drive -->
+    <div class="card">
+      <h2>🕹️ <span data-i18n="manual_drive">Manual Drive</span></h2>
+      <div class="dpad" id="dpad" role="group" aria-label="Direction controls">
+        <div class="empty"></div>
+        <button class="btn" data-lin="1" data-ang="0" aria-label="Forward">↑</button>
+        <div class="empty"></div>
+        <button class="btn" data-lin="0" data-ang="1" aria-label="Turn left">←</button>
+        <button class="btn stop-btn" data-lin="0" data-ang="0" aria-label="Stop">STOP</button>
+        <button class="btn" data-lin="0" data-ang="-1" aria-label="Turn right">→</button>
+        <div class="empty"></div>
+        <button class="btn" data-lin="-1" data-ang="0" aria-label="Backward">↓</button>
+        <div class="empty"></div>
+      </div>
+      <div class="speed-row">
+        <span data-i18n="speed">Speed</span>
+        <input type="range" id="speedSlider" min="0.05" max="0.3" step="0.01" value="0.15" aria-label="Drive speed">
+        <span id="speedVal">0.15</span> m/s
+      </div>
+      <div class="keyboard-hint" data-i18n="keyboard_hint">Keyboard: W/A/S/D or arrows, Space=stop</div>
+    </div>
+
+    <!-- Room Manager -->
+    <div class="card">
+      <h2>🏠 <span data-i18n="room_manager">Room Manager</span></h2>
+      <div class="room-save-row">
+        <input type="text" id="roomName" placeholder="Room name…" data-i18n-placeholder="room_name_placeholder" aria-label="Room name">
+        <button class="btn btn-blue btn-sm" onclick="saveRoom()" aria-label="Save room"><span data-i18n="save_room">Save Room</span></button>
+      </div>
+      <div class="room-list" id="roomList" role="list" aria-label="Saved rooms"></div>
+    </div>
+
+    <!-- Mission Log -->
+    <div class="card">
+      <h2>📜 <span data-i18n="mission_log">Mission Log</span></h2>
+      <div class="log-box" id="logBox" role="log" aria-live="polite" aria-label="Mission log"></div>
+    </div>
+
+    <!-- Round 31: Statistics -->
+    <div class="card">
+      <h2>📈 <span data-i18n="statistics">Statistics</span></h2>
+      <div class="stats-grid">
+        <span class="label" data-i18n="total_scan_time">Total Scan Time</span><span class="stat-val" id="statScanTime">0s</span>
+        <span class="label" data-i18n="total_clean_time">Total Clean Time</span><span class="stat-val" id="statCleanTime">0s</span>
+        <span class="label" data-i18n="rooms_scanned">Rooms Scanned</span><span class="stat-val" id="statRoomsScanned">0</span>
+        <span class="label" data-i18n="rooms_cleaned">Rooms Cleaned</span><span class="stat-val" id="statRoomsCleaned">0</span>
+        <span class="label" data-i18n="distance_traveled">Distance Traveled</span><span class="stat-val" id="statDistance">0 m</span>
+      </div>
+    </div>
+
+    <!-- Round 33: Schedule -->
+    <div class="card">
+      <h2>⏰ <span data-i18n="schedule">Schedule</span></h2>
+      <div class="sched-form">
+        <input type="time" id="schedTime" aria-label="Schedule time">
+        <div class="sched-days" id="schedDays">
+          <label><input type="checkbox" value="mon"> <span data-i18n="mon">Mo</span></label>
+          <label><input type="checkbox" value="tue"> <span data-i18n="tue">Tu</span></label>
+          <label><input type="checkbox" value="wed"> <span data-i18n="wed">We</span></label>
+          <label><input type="checkbox" value="thu"> <span data-i18n="thu">Th</span></label>
+          <label><input type="checkbox" value="fri"> <span data-i18n="fri">Fr</span></label>
+          <label><input type="checkbox" value="sat"> <span data-i18n="sat">Sa</span></label>
+          <label><input type="checkbox" value="sun"> <span data-i18n="sun">Su</span></label>
+        </div>
+        <button class="btn btn-blue btn-sm" onclick="addSchedule()" aria-label="Add schedule">+ <span data-i18n="add">Add</span></button>
+      </div>
+      <div class="sched-list" id="schedList"></div>
+    </div>
+
+    <!-- Round 40: Diagnostics -->
+    <div class="card">
+      <h2 class="diag-section" id="diagToggle" tabindex="0" role="button" aria-expanded="false" aria-controls="diagContent">🔧 <span data-i18n="diagnostics">Diagnostics</span> ▸</h2>
+      <div class="diag-content" id="diagContent" role="region">
+        <div class="diag-grid">
+          <span class="diag-label" data-i18n="lidar_hz">LiDAR Hz</span><span class="diag-val" id="diagScanHz">—</span>
+          <span class="diag-label" data-i18n="valid_readings">Valid Readings</span><span class="diag-val" id="diagValidReadings">—</span>
+          <span class="diag-label" data-i18n="linear_vel">Linear Vel</span><span class="diag-val" id="diagLinVel">—</span>
+          <span class="diag-label" data-i18n="angular_vel">Angular Vel</span><span class="diag-val" id="diagAngVel">—</span>
+          <span class="diag-label" data-i18n="cumulative_dist">Cumulative Dist</span><span class="diag-val" id="diagDistance">—</span>
+          <span class="diag-label" data-i18n="tf_chain">TF Chain</span><span class="diag-val" id="diagTF">—</span>
+          <span class="diag-label" data-i18n="socket_status">Socket Status</span><span class="diag-val" id="diagSocket">—</span>
+          <span class="diag-label" data-i18n="latency">Latency</span><span class="diag-val" id="diagLatency">—</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
+  <div class="modal" id="modal">
+    <button class="modal-close" onclick="closeModal()" aria-label="Close modal">&times;</button>
+    <h3 id="modalTitle">Room Preview</h3>
+    <img id="modalImg" src="" alt="Room map">
+    <div class="modal-meta" id="modalMeta"></div>
+  </div>
+</div>
+
+<!-- Round 39: Settings Modal -->
+<div class="modal-overlay" id="settingsOverlay" onclick="closeSettings(event)">
+  <div class="modal" id="settingsModal" style="min-width:340px;max-width:420px">
+    <button class="modal-close" onclick="closeSettings()" aria-label="Close settings">&times;</button>
+    <h3 data-i18n="settings">⚙️ Settings</h3>
+    <div class="settings-group">
+      <label data-i18n="map_update_rate">Map Update Rate</label>
+      <input type="range" id="setMapRate" min="0.5" max="5" step="0.5" value="0.5">
+      <span id="setMapRateVal" style="font-size:.8rem;color:var(--text-dim)">0.5s</span>
+    </div>
+    <div class="settings-group">
+      <label data-i18n="default_drive_speed">Default Drive Speed (m/s)</label>
+      <input type="number" id="setDriveSpeed" min="0.05" max="0.5" step="0.01" value="0.15">
+    </div>
+    <div class="settings-group">
+      <label><input type="checkbox" id="setNotifSound" checked> <span data-i18n="notification_sound">Notification Sound</span></label>
+    </div>
+    <div class="settings-group">
+      <label data-i18n="theme">Theme</label>
+      <select id="setTheme">
+        <option value="dark">Dark</option>
+        <option value="light">Light</option>
+      </select>
+    </div>
+    <div class="settings-group">
+      <label data-i18n="language">Language</label>
+      <select id="setLang">
+        <option value="en">English</option>
+        <option value="he">עברית</option>
+      </select>
+    </div>
+    <button class="btn btn-blue" onclick="saveSettings()" style="width:100%;margin-top:.5rem" data-i18n="save_settings">Save Settings</button>
+  </div>
+</div>
+
+<!-- Toasts -->
+<div class="toast-container" id="toasts"></div>
+
+<!-- ═══ Scripts ═══ -->
+<script src="/socket.io/socket.io.js" onerror="window._sioFail=true"></script>
+<script>if(window._sioFail){document.write('<scr'+'ipt src="https://cdn.socket.io/4.7.5/socket.io.min.js"><\/scr'+'ipt>')}</script>
+<script>
+(function(){
+"use strict";
+
+/* ── Socket.IO ─────────────────────────────────── */
+let socket;
+try {
+  socket = io();
+} catch(e) {
+  // socket.io.js failed to load — create a stub so the page still works
+  const _noop = function(){};
+  const _stubOn = {};
+  socket = {
+    on: function(ev, fn){ if(!_stubOn[ev]) _stubOn[ev]=[]; _stubOn[ev].push(fn); },
+    off: _noop, emit: _noop, connected: false,
+    _callbacks: {}
+  };
+  console.warn('Socket.IO unavailable — running in offline mode', e);
+}
+const connDot = document.getElementById('connDot');
+const connLabel = document.getElementById('connLabel');
+
+socket.on('connect', () => {
+  connDot.classList.add('connected');
+  connLabel.textContent = t('connected');
+  socket.emit('request_map');
+  fetchLog();
+  fetchRooms();
+  fetchSchedules();
+  fetchStats();
+  fetchTrail();
+  fetchNoGoZones();
+  const savedRate = localStorage.getItem('cb_mapRate');
+  if (savedRate) socket.emit('set_map_rate', {rate: parseFloat(savedRate)});
+});
+socket.on('disconnect', () => {
+  connDot.classList.remove('connected');
+  connLabel.textContent = t('disconnected');
+});
+
+/* ── Map Rendering ─────────────────────────────── */
+const canvas = document.getElementById('mapCanvas');
+const ctx = canvas.getContext('2d');
+const placeholder = document.getElementById('mapPlaceholder');
+let mapImg = new Image();
+let lastMapData = null;
+
+/* ── Zoom state ────────────────────────────────── */
+let zoomLevel = 1.0;
+const ZOOM_MIN = 0.5, ZOOM_MAX = 4.0, ZOOM_STEP = 0.25;
+function applyZoom() {
+  canvas.style.transform = 'scale(' + zoomLevel + ')';
+  canvas.style.transformOrigin = 'center center';
+  document.getElementById('zoomVal').textContent = zoomLevel.toFixed(1);
+}
+document.getElementById('zoomIn').addEventListener('click', () => {
+  zoomLevel = Math.min(ZOOM_MAX, zoomLevel + ZOOM_STEP);
+  applyZoom();
+});
+document.getElementById('zoomOut').addEventListener('click', () => {
+  zoomLevel = Math.max(ZOOM_MIN, zoomLevel - ZOOM_STEP);
+  applyZoom();
+});
+document.getElementById('mapContainer').addEventListener('wheel', e => {
+  e.preventDefault();
+  zoomLevel = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoomLevel + (e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP)));
+  applyZoom();
+}, {passive: false});
+
+/* ── Velocity tracking for estop pulse & vector ── */
+let currentLinVel = 0, currentAngVel = 0;
+
+/* ── Round 14: Click-to-navigate state ─────────── */
+let navClickTarget = null;
+const navPopup = document.getElementById('navPopup');
+const navCoordsEl = document.getElementById('navCoords');
+const navHereBtn = document.getElementById('navHereBtn');
+
+socket.on('map_update', data => {
+  lastMapData = data;
+  placeholder.style.display = 'none';
+  // Only create new Image if the base64 data changed
+  if (!mapImg._b64key || mapImg._b64key !== data.image_b64) {
+    mapImg = new Image();
+    mapImg._b64key = data.image_b64;
+    mapImg.onload = () => drawMap(data);
+    mapImg.src = 'data:image/png;base64,' + data.image_b64;
+  } else {
+    drawMap(data);
+  }
+  document.getElementById('mapRes').textContent = data.resolution.toFixed(3);
+  document.getElementById('mapDims').textContent = data.width + ' × ' + data.height;
+  document.getElementById('mapCount').textContent = data.map_updates;
+  if (data.no_go_zones) { noGoZones = data.no_go_zones; renderNoGoZones(); }
+});
+
+function drawMap(data) {
+  canvas.width = mapImg.naturalWidth;
+  canvas.height = mapImg.naturalHeight;
+  ctx.drawImage(mapImg, 0, 0);
+
+  // Round 32: Heatmap overlay
+  if (showHeatmap && data.heatmap_b64) {
+    if (!heatmapImg.src || heatmapImg._b64 !== data.heatmap_b64) {
+      heatmapImg._b64 = data.heatmap_b64;
+      heatmapImg.src = 'data:image/png;base64,' + data.heatmap_b64;
+    }
+    if (heatmapImg.complete && heatmapImg.naturalWidth > 0) {
+      ctx.globalAlpha = 0.6;
+      ctx.drawImage(heatmapImg, 0, 0, canvas.width, canvas.height);
+      ctx.globalAlpha = 1.0;
+    }
+  }
+
+  if (!data.width || !data.height) return;
+  const sx = canvas.width / data.width;
+  const sy = canvas.height / data.height;
+  const rpx = data.robot_px * sx;
+  const rpy = data.robot_py * sy;
+  const r = Math.max(6, Math.min(sx, sy) * 3);
+
+  // Round 35: Path trail
+  if (showTrail && pathTrail.length > 1 && data.resolution > 0) {
+    ctx.beginPath();
+    for (let i = 0; i < pathTrail.length; i++) {
+      const p = pathTrail[i];
+      const px = ((p[0] - data.origin_x) / data.resolution) * sx;
+      const py = (data.height - 1 - (p[1] - data.origin_y) / data.resolution) * sy;
+      const alpha = 0.1 + 0.9 * (i / pathTrail.length);
+      if (i === 0) {
+        ctx.moveTo(px, py);
+      } else {
+        ctx.strokeStyle = 'rgba(167,139,250,' + alpha.toFixed(2) + ')';
+        ctx.lineWidth = 2;
+        ctx.lineTo(px, py);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(px, py);
+      }
+    }
+  }
+
+  // No-go zones
+  const zones = data.no_go_zones || noGoZones;
+  if (zones.length > 0 && data.resolution > 0) {
+    for (const z of zones) {
+      const cx1 = ((z.x1 - data.origin_x) / data.resolution) * sx;
+      const cy1 = (data.height - 1 - (z.y1 - data.origin_y) / data.resolution) * sy;
+      const cx2 = ((z.x2 - data.origin_x) / data.resolution) * sx;
+      const cy2 = (data.height - 1 - (z.y2 - data.origin_y) / data.resolution) * sy;
+      const rx = Math.min(cx1, cx2), ry = Math.min(cy1, cy2);
+      const rw = Math.abs(cx2 - cx1), rh = Math.abs(cy2 - cy1);
+      ctx.fillStyle = 'rgba(239,68,68,0.25)';
+      ctx.fillRect(rx, ry, rw, rh);
+      ctx.strokeStyle = 'rgba(239,68,68,0.8)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 3]);
+      ctx.strokeRect(rx, ry, rw, rh);
+      ctx.setLineDash([]);
+    }
+  }
+
+  // Active drawing rectangle
+  if (nogoStart && nogoCurrent) {
+    const rx = Math.min(nogoStart.cx, nogoCurrent.cx);
+    const ry = Math.min(nogoStart.cy, nogoCurrent.cy);
+    const rw = Math.abs(nogoCurrent.cx - nogoStart.cx);
+    const rh = Math.abs(nogoCurrent.cy - nogoStart.cy);
+    ctx.fillStyle = 'rgba(239,68,68,0.15)';
+    ctx.fillRect(rx, ry, rw, rh);
+    ctx.strokeStyle = 'rgba(239,68,68,0.9)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeRect(rx, ry, rw, rh);
+    ctx.setLineDash([]);
+  }
+
+  // Robot circle
+  ctx.beginPath();
+  ctx.arc(rpx, rpy, r, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(74,158,255,0.85)';
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#fff';
+  ctx.stroke();
+
+  // Direction arrow
+  const yaw = -data.robot_yaw;
+  const len = r * 2.2;
+  ctx.beginPath();
+  ctx.moveTo(rpx, rpy);
+  ctx.lineTo(rpx + Math.cos(yaw) * len, rpy + Math.sin(yaw) * len);
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = '#fff';
+  ctx.stroke();
+
+  // Velocity vector
+  if (currentLinVel !== 0 || currentAngVel !== 0) {
+    const vLen = Math.abs(currentLinVel) * r * 8;
+    const vYaw = -data.robot_yaw;
+    const ex = rpx + Math.cos(vYaw) * vLen * Math.sign(currentLinVel || 1);
+    const ey = rpy + Math.sin(vYaw) * vLen * Math.sign(currentLinVel || 1);
+    ctx.beginPath();
+    ctx.moveTo(rpx, rpy);
+    ctx.lineTo(ex, ey);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#34d399';
+    ctx.stroke();
+    const aLen = 8;
+    const angle = Math.atan2(ey - rpy, ex - rpx);
+    ctx.beginPath();
+    ctx.moveTo(ex, ey);
+    ctx.lineTo(ex - aLen * Math.cos(angle - 0.4), ey - aLen * Math.sin(angle - 0.4));
+    ctx.moveTo(ex, ey);
+    ctx.lineTo(ex - aLen * Math.cos(angle + 0.4), ey - aLen * Math.sin(angle + 0.4));
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#34d399';
+    ctx.stroke();
+  }
+
+  // Round 14: Nav target marker
+  if (navClickTarget && data) {
+    const tx = navClickTarget.canvasX;
+    const ty = navClickTarget.canvasY;
+    ctx.beginPath();
+    ctx.arc(tx, ty, 6, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(239,68,68,0.8)';
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#fff';
+    ctx.stroke();
+    // crosshair
+    ctx.beginPath();
+    ctx.moveTo(tx - 10, ty); ctx.lineTo(tx + 10, ty);
+    ctx.moveTo(tx, ty - 10); ctx.lineTo(tx, ty + 10);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.stroke();
+  }
+}
+
+/* ── Round 14: Map click-to-navigate ───────────── */
+canvas.addEventListener('click', e => {
+  if (!lastMapData || nogoDrawing) return;
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const cx = (e.clientX - rect.left) * scaleX;
+  const cy = (e.clientY - rect.top) * scaleY;
+  const data = lastMapData;
+  if (!data.width || !data.height) return;
+  const sx = canvas.width / data.width;
+  const sy = canvas.height / data.height;
+  // Convert pixel to map grid coords, then to world coords
+  const gridX = cx / sx;
+  const gridY = (data.height - 1) - (cy / sy);  // flip Y
+  const worldX = data.origin_x + gridX * data.resolution;
+  const worldY = data.origin_y + gridY * data.resolution;
+  navClickTarget = {canvasX: cx, canvasY: cy, worldX, worldY};
+  navCoordsEl.textContent = '(' + worldX.toFixed(2) + ', ' + worldY.toFixed(2) + ')';
+  // Position popup near click
+  const popX = Math.min(e.offsetX + 10, rect.width - 180);
+  const popY = Math.max(e.offsetY - 35, 5);
+  navPopup.style.left = popX + 'px';
+  navPopup.style.top = popY + 'px';
+  navPopup.style.display = 'block';
+  if (lastMapData && mapImg.complete) drawMap(lastMapData);
+});
+
+navHereBtn.addEventListener('click', () => {
+  if (!navClickTarget) return;
+  fetch('/api/navigate', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({x: navClickTarget.worldX, y: navClickTarget.worldY})
+  }).then(r => r.json()).then(d => {
+    if (d.ok) toast(t('navigating_to') + ' (' + navClickTarget.worldX.toFixed(2) + ', ' + navClickTarget.worldY.toFixed(2) + ')');
+    else toast(d.error || t('nav_failed'));
+  }).catch(() => toast(t('nav_failed')));
+  navPopup.style.display = 'none';
+  navClickTarget = null;
+});
+
+/* ── Status ────────────────────────────────────── */
+let prevMissionState = 'UNKNOWN';
+
+/* ── Round 12: State history timeline ──────────── */
+const stateHistory = [];
+const STATE_COLORS = {
+  EXPLORING: '#34d399', COVERAGE: '#3b82f6', PAUSED: '#f59e0b',
+  WAITING: '#6b7280', ERROR: '#ef4444', RETURNING: '#a78bfa',
+  COMPLETE: '#22c55e', UNKNOWN: '#6b7280'
+};
+function getStateColor(state) {
+  const s = (state || '').toUpperCase();
+  for (const key in STATE_COLORS) {
+    if (s.indexOf(key) !== -1) return STATE_COLORS[key];
+  }
+  return STATE_COLORS.UNKNOWN;
+}
+function addStateHistory(state) {
+  const now = Date.now();
+  if (stateHistory.length > 0 && stateHistory[stateHistory.length - 1].state === state) return;
+  stateHistory.push({state, time: now});
+  if (stateHistory.length > 30) stateHistory.shift();
+  drawStateTimeline();
+}
+function drawStateTimeline() {
+  const tc = document.getElementById('stateTimeline');
+  const tctx = tc.getContext('2d');
+  const W = tc.width, H = tc.height;
+  tctx.clearRect(0, 0, W, H);
+  if (stateHistory.length < 1) return;
+  const tStart = stateHistory[0].time;
+  const tEnd = Date.now();
+  const duration = Math.max(tEnd - tStart, 1);
+  for (let i = 0; i < stateHistory.length; i++) {
+    const s = stateHistory[i];
+    const nextTime = (i + 1 < stateHistory.length) ? stateHistory[i + 1].time : tEnd;
+    const x = ((s.time - tStart) / duration) * W;
+    const w = Math.max(((nextTime - s.time) / duration) * W, 2);
+    tctx.fillStyle = getStateColor(s.state);
+    tctx.fillRect(x, 0, w, H);
+  }
+  tctx.strokeStyle = 'rgba(255,255,255,0.1)';
+  tctx.lineWidth = 1;
+  tctx.strokeRect(0, 0, W, H);
+}
+
+/* ── Round 13: Smart button states ─────────────── */
+function updateButtonStates(missionState) {
+  const s = (missionState || 'UNKNOWN').toUpperCase();
+  const btn = id => document.getElementById(id);
+  const setD = (id, disabled) => { const b = btn(id); if (b) b.disabled = disabled; };
+  setD('btnScan', !(s.indexOf('WAIT') !== -1));
+  setD('btnStopScan', s.indexOf('EXPLOR') === -1 && s.indexOf('PAUSE') === -1);
+  setD('btnClean', !(s.indexOf('WAIT') !== -1));
+  setD('btnStopClean', s.indexOf('COVERAGE') === -1 && s.indexOf('CLEAN') === -1 && s.indexOf('PAUSE') === -1);
+  setD('btnPause', s.indexOf('EXPLOR') === -1 && s.indexOf('COVERAGE') === -1 && s.indexOf('CLEAN') === -1);
+  setD('btnResume', s.indexOf('PAUSE') === -1);
+  setD('btnHome', s.indexOf('RETURNING') !== -1 || s.indexOf('COMPLETE') !== -1);
+}
+
+/* ── Scan Timer (Round 5) ─────────────────────── */
+let scanTimerInterval = null;
+let scanStartTime = null;
+
+function startScanTimer() {
+  if (scanTimerInterval) return;
+  scanStartTime = Date.now();
+  scanTimerInterval = setInterval(updateScanTimer, 1000);
+  updateScanTimer();
+}
+function stopScanTimer() {
+  if (scanTimerInterval) { clearInterval(scanTimerInterval); scanTimerInterval = null; }
+}
+function updateScanTimer() {
+  if (!scanStartTime) return;
+  const elapsed = Math.floor((Date.now() - scanStartTime) / 1000);
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+  const ss = String(elapsed % 60).padStart(2, '0');
+  document.getElementById('sScanTimer').textContent = mm + ':' + ss;
+}
+
+/* ── Status handler registered below after all feature functions ── */
+
+socket.on('mission_state', d => {
+  setMissionBadge(d.state);
+  if (d.log_entry) addLogEntry(d.log_entry);
+  // Round 12
+  addStateHistory(d.state);
+  // Round 13
+  updateButtonStates(d.state);
+  // Round 19: Notification sound on COMPLETE
+  const s = (d.state || '').toUpperCase();
+  if (s.indexOf('COMPLETE') !== -1) playChime();
+});
+
+function setMissionBadge(state) {
+  const s = (state || 'UNKNOWN').toUpperCase();
+  let cls = 'badge-gray';
+  if (/EXPLOR|SCAN|ACTIVE/.test(s)) cls = 'badge-green';
+  else if (/COVER|CLEAN/.test(s)) cls = 'badge-blue';
+  else if (/PAUSE/.test(s)) cls = 'badge-orange';
+  else if (/ERROR|FAIL|ABORT/.test(s)) cls = 'badge-red';
+  else if (/IDLE|WAIT|HOME|UNKNOWN/.test(s)) cls = 'badge-gray';
+  document.getElementById('sMission').innerHTML = '<span class="badge ' + cls + '">' + s + '</span>';
+}
+
+/* ── Commands (Round 7: confirmation dialogs) ── */
+const DESTRUCTIVE_CMDS = new Set(['reset']);
+window.sendCommand = function(cmd) {
+  if (DESTRUCTIVE_CMDS.has(cmd)) {
+    if (!confirm(t('confirm_action') + ' ' + cmd.replace('_', ' ') + '?')) return;
+  }
+  socket.emit('command', {command: cmd});
+  toast(t('command_sent') + ': ' + cmd);
+};
+
+/* ── Emergency Stop (Round 2) ─────────────────── */
+window.emergencyStop = function() {
+  socket.emit('command', {command: 'stop_clean'});
+  socket.emit('command', {command: 'stop_scan'});
+  socket.emit('velocity', {linear: 0, angular: 0});
+  toast('⚠️ ' + t('emergency_activated'));
+};
+
+/* ── Manual Drive ──────────────────────────────── */
+const speedSlider = document.getElementById('speedSlider');
+const speedVal = document.getElementById('speedVal');
+speedSlider.addEventListener('input', () => { speedVal.textContent = speedSlider.value; });
+
+function sendVelocity(linear, angular) {
+  const speed = parseFloat(speedSlider.value);
+  socket.emit('velocity', {linear: linear * speed, angular: angular * speed * 4});
+}
+function sendStop() {
+  socket.emit('velocity', {linear: 0, angular: 0});
+}
+
+document.querySelectorAll('#dpad .btn').forEach(btn => {
+  const lin = parseFloat(btn.dataset.lin);
+  const ang = parseFloat(btn.dataset.ang);
+  const isStop = lin === 0 && ang === 0;
+
+  btn.addEventListener('mousedown', e => {
+    e.preventDefault();
+    if (isStop) { sendStop(); return; }
+    sendVelocity(lin, ang);
+  });
+  btn.addEventListener('mouseup', e => { e.preventDefault(); if (!isStop) sendStop(); });
+  btn.addEventListener('mouseleave', e => { e.preventDefault(); if (!isStop) sendStop(); });
+  btn.addEventListener('touchstart', e => {
+    e.preventDefault();
+    if (isStop) { sendStop(); return; }
+    sendVelocity(lin, ang);
+  });
+  btn.addEventListener('touchend', e => { e.preventDefault(); if (!isStop) sendStop(); });
+});
+
+/* ── Keyboard shortcuts (Round 1) ─────────────── */
+const keyMap = {
+  'w': {lin:1, ang:0}, 'arrowup': {lin:1, ang:0},
+  's': {lin:-1, ang:0}, 'arrowdown': {lin:-1, ang:0},
+  'a': {lin:0, ang:1}, 'arrowleft': {lin:0, ang:1},
+  'd': {lin:0, ang:-1}, 'arrowright': {lin:0, ang:-1},
+  ' ': {lin:0, ang:0}
+};
+const keysDown = new Set();
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  const k = e.key.toLowerCase();
+  // Round 16: Escape exits fullscreen
+  if (k === 'escape') {
+    const mw = document.querySelector('.map-wrap');
+    if (mw.classList.contains('fullscreen')) { mw.classList.remove('fullscreen'); return; }
+  }
+  if (!(k in keyMap)) return;
+  e.preventDefault();
+  if (keysDown.has(k)) return;
+  keysDown.add(k);
+  const m = keyMap[k];
+  if (m.lin === 0 && m.ang === 0) sendStop();
+  else sendVelocity(m.lin, m.ang);
+});
+document.addEventListener('keyup', e => {
+  const k = e.key.toLowerCase();
+  if (!(k in keyMap)) return;
+  keysDown.delete(k);
+  const m = keyMap[k];
+  if (!(m.lin === 0 && m.ang === 0)) sendStop();
+});
+
+/* ── Room Manager ──────────────────────────────── */
+function fetchRooms() {
+  fetch('/api/rooms').then(r => r.json()).then(renderRooms).catch(() => {});
+}
+
+function renderRooms(rooms) {
+  const el = document.getElementById('roomList');
+  if (!rooms || !rooms.length) { el.innerHTML = '<div style="color:var(--text-dim);font-size:.82rem;padding:.3rem">' + t('no_saved_rooms') + '</div>'; return; }
+  el.innerHTML = rooms.map(r => {
+    const date = r.saved_at ? new Date(r.saved_at).toLocaleDateString() : '';
+    return '<div class="room-item">' +
+      '<span class="room-name">' + esc(r.name) + '</span>' +
+      '<span class="room-date">' + date + '</span>' +
+      '<div class="room-actions">' +
+        '<button class="btn btn-yellow btn-sm" onclick="renameRoom(\'' + escAttr(r.filename) + '\',\'' + escAttr(r.name) + '\')">✏️</button>' +
+        '<button class="btn btn-blue btn-sm" onclick="previewRoom(\'' + escAttr(r.filename) + '\',\'' + escAttr(r.name) + '\')">' + t('preview') + '</button>' +
+        '<button class="btn btn-green btn-sm" onclick="cleanRoom(\'' + escAttr(r.filename) + '\')">' + t('clean') + '</button>' +
+        '<button class="btn btn-red btn-sm" onclick="deleteRoom(\'' + escAttr(r.filename) + '\')">' + t('delete') + '</button>' +
+      '</div></div>';
+  }).join('');
+}
+
+/* ── Round 11: Room rename ─────────────────────── */
+window.renameRoom = function(filename, currentName) {
+  const newName = prompt(t('rename_prompt') + ' "' + currentName + '":', currentName);
+  if (!newName || newName.trim() === '' || newName.trim() === currentName) return;
+  fetch('/api/rooms/' + filename + '/rename', {
+    method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name: newName.trim()})
+  }).then(r => r.json()).then(d => {
+    if (d.ok) { toast(t('room_renamed')); fetchRooms(); }
+    else toast(d.error || t('rename_failed'));
+  }).catch(() => toast(t('rename_failed')));
+};
+
+window.saveRoom = function() {
+  const name = document.getElementById('roomName').value.trim();
+  if (!name) { toast(t('enter_room_name')); return; }
+  fetch('/api/rooms/save', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})})
+    .then(r => r.json()).then(d => {
+      if (d.ok) { toast(t('room_saved') + ': ' + name); document.getElementById('roomName').value = ''; fetchRooms(); }
+      else toast(d.error || t('save_failed'));
+    }).catch(() => toast(t('save_failed')));
+};
+
+window.previewRoom = function(filename, name) {
+  fetch('/api/rooms/' + filename + '/preview').then(r => r.json()).then(d => {
+    if (d.error) { toast(d.error); return; }
+    document.getElementById('modalTitle').textContent = d.name || name;
+    document.getElementById('modalImg').src = 'data:image/png;base64,' + d.image_b64;
+    document.getElementById('modalMeta').textContent =
+      t('size') + ': ' + d.width + '×' + d.height + '  ·  ' + t('resolution') + ': ' + d.resolution + ' m/px  ·  ' + (d.saved_at || '');
+    document.getElementById('modalOverlay').classList.add('active');
+  }).catch(() => toast(t('preview_failed')));
+};
+
+let _cleanBusy = false;
+window.cleanRoom = function(filename) {
+  if (_cleanBusy) return;
+  _cleanBusy = true;
+  toast(t('clean_saved_room'));
+  fetch('/api/rooms/' + filename + '/load_and_clean', {method:'POST'})
+    .then(r => r.json()).then(d => {
+      if (d.ok) toast(d.message || t('clean_room'));
+      else toast(d.error || t('failed'));
+    }).catch(() => toast(t('failed')))
+    .finally(() => { _cleanBusy = false; });
+};
+
+window.deleteRoom = function(filename) {
+  if (!confirm(t('delete_confirm'))) return;
+  fetch('/api/rooms/' + filename, {method:'DELETE'}).then(r => r.json()).then(d => {
+    if (d.ok) { toast(t('room_deleted')); fetchRooms(); }
+    else toast(d.error || t('failed'));
+  }).catch(() => toast(t('failed')));
+};
+
+window.closeModal = function(e) {
+  if (e && e.target !== document.getElementById('modalOverlay')) return;
+  document.getElementById('modalOverlay').classList.remove('active');
+};
+
+/* ── Auto-refresh room list (Round 9) ─────────── */
+setInterval(fetchRooms, 30000);
+
+/* ── Round 15: Theme toggle ────────────────────── */
+const themeToggle = document.getElementById('themeToggle');
+const savedTheme = localStorage.getItem('cb_theme');
+if (savedTheme === 'light') { document.documentElement.classList.add('light'); themeToggle.textContent = '☀️'; }
+themeToggle.addEventListener('click', () => {
+  const isLight = document.documentElement.classList.toggle('light');
+  themeToggle.textContent = isLight ? '☀️' : '🌙';
+  localStorage.setItem('cb_theme', isLight ? 'light' : 'dark');
+});
+
+/* ── Round 16: Fullscreen map ──────────────────── */
+const fullscreenBtn = document.getElementById('fullscreenBtn');
+fullscreenBtn.addEventListener('click', () => {
+  const mw = document.querySelector('.map-wrap');
+  mw.classList.toggle('fullscreen');
+});
+
+/* ── Round 17: Export map as PNG ────────────────── */
+document.getElementById('exportMapBtn').addEventListener('click', () => {
+  canvas.toBlob(blob => {
+    if (!blob) { toast(t('no_map_export')); return; }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'cleanbot-map-' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.png';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast(t('map_exported'));
+  }, 'image/png');
+});
+
+/* ── Round 18: Connection quality / latency ────── */
+const latencyDot = document.getElementById('latencyDot');
+const latencyLabelEl = document.getElementById('latencyLabel');
+setInterval(() => {
+  socket.emit('latency_ping', {ts: Date.now()});
+}, 5000);
+socket.on('latency_pong', d => {
+  const ms = Date.now() - d.ts;
+  latencyLabelEl.textContent = ms + ' ms';
+  latencyDot.classList.remove('good', 'warn', 'bad');
+  if (ms < 100) latencyDot.classList.add('good');
+  else if (ms < 500) latencyDot.classList.add('warn');
+  else latencyDot.classList.add('bad');
+});
+
+/* ── Round 19: Notification sound ──────────────── */
+let soundMuted = localStorage.getItem('cb_muted') === '1';
+const muteToggle = document.getElementById('muteToggle');
+muteToggle.textContent = soundMuted ? '🔕' : '🔔';
+muteToggle.addEventListener('click', () => {
+  soundMuted = !soundMuted;
+  muteToggle.textContent = soundMuted ? '🔕' : '🔔';
+  localStorage.setItem('cb_muted', soundMuted ? '1' : '0');
+});
+
+let _audioCtx = null;
+function playChime() {
+  if (soundMuted) return;
+  try {
+    if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    [440, 554.37].forEach((freq, i) => {
+      const osc = _audioCtx.createOscillator();
+      const gain = _audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.3, _audioCtx.currentTime + i * 0.2);
+      gain.gain.exponentialRampToValueAtTime(0.001, _audioCtx.currentTime + i * 0.2 + 0.4);
+      osc.connect(gain);
+      gain.connect(_audioCtx.destination);
+      osc.start(_audioCtx.currentTime + i * 0.2);
+      osc.stop(_audioCtx.currentTime + i * 0.2 + 0.5);
+    });
+  } catch (e) { /* Audio not supported */ }
+}
+
+/* ── Log ───────────────────────────────────────── */
+const logBox = document.getElementById('logBox');
+
+function addLogEntry(entry) {
+  const div = document.createElement('div');
+  div.className = 'log-entry';
+  div.innerHTML = '<span class="log-time">' + esc(entry.time) + '</span><span class="log-event">' + esc(entry.event) + '</span>';
+  logBox.appendChild(div);
+  while (logBox.children.length > 200) logBox.removeChild(logBox.firstChild);
+  logBox.scrollTop = logBox.scrollHeight;
+}
+
+function fetchLog() {
+  fetch('/api/log').then(r => r.json()).then(entries => {
+    logBox.innerHTML = '';
+    entries.forEach(addLogEntry);
+  }).catch(() => {});
+}
+
+/* ── Toast ─────────────────────────────────────── */
+function toast(msg) {
+  const c = document.getElementById('toasts');
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = msg;
+  c.appendChild(t);
+  requestAnimationFrame(() => t.classList.add('show'));
+  setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 350); }, 2500);
+}
+
+/* ── Helpers ───────────────────────────────────── */
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML.replace(/'/g, '&#39;'); }
+// Escape for JS string inside HTML onclick attribute: JS-escape first, then HTML-escape
+function escAttr(s) { return esc(String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'")); }
+
+/* ── Init: set smart button states ─────────────── */
+updateButtonStates('UNKNOWN');
+
+/* ── Round 31: Stats fetching ──────────────────── */
+function fetchStats() {
+  fetch('/api/stats').then(r => r.json()).then(d => {
+    if (d.error) return;
+    const fmt = s => { const m = Math.floor(s/60); const sec = Math.floor(s%60); return m + 'm ' + sec + 's'; };
+    document.getElementById('statScanTime').textContent = fmt(d.total_scan_time);
+    document.getElementById('statCleanTime').textContent = fmt(d.total_clean_time);
+    document.getElementById('statRoomsScanned').textContent = d.rooms_scanned;
+    document.getElementById('statRoomsCleaned').textContent = d.rooms_cleaned;
+    document.getElementById('statDistance').textContent = d.total_distance + ' m';
+  }).catch(() => {});
+}
+setInterval(fetchStats, 5000);
+
+/* ── Round 32: Heatmap toggle ──────────────────── */
+let showHeatmap = false;
+let heatmapImg = new Image();
+document.getElementById('heatmapToggle').addEventListener('change', e => {
+  showHeatmap = e.target.checked;
+  if (lastMapData && mapImg.complete) drawMap(lastMapData);
+});
+
+/* ── Round 33: Schedule management ─────────────── */
+function fetchSchedules() {
+  fetch('/api/schedules').then(r => r.json()).then(renderSchedules).catch(() => {});
+}
+function renderSchedules(scheds) {
+  const el = document.getElementById('schedList');
+  if (!scheds || !scheds.length) { el.innerHTML = '<div style="color:var(--text-dim);font-size:.8rem;padding:.3rem">' + t('no_schedules') + '</div>'; return; }
+  el.innerHTML = scheds.map(s => {
+    const days = (s.days || []).join(', ');
+    return '<div class="sched-item">' +
+      '<span class="sched-time">' + esc(s.time) + '</span>' +
+      '<span class="sched-days-label">' + esc(days) + '</span>' +
+      '<button class="btn btn-red btn-sm" onclick="deleteSchedule(\'' + esc(s.id) + '\')">✕</button>' +
+    '</div>';
+  }).join('');
+}
+window.addSchedule = function() {
+  const timeEl = document.getElementById('schedTime');
+  const time = timeEl.value;
+  if (!time) { toast(t('select_time')); return; }
+  const days = [];
+  document.querySelectorAll('#schedDays input[type=checkbox]:checked').forEach(cb => days.push(cb.value));
+  if (!days.length) { toast(t('select_days')); return; }
+  fetch('/api/schedules', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({time, days})
+  }).then(r => r.json()).then(d => {
+    if (d.ok) { toast(t('schedule_added')); fetchSchedules(); timeEl.value = ''; document.querySelectorAll('#schedDays input[type=checkbox]').forEach(cb => cb.checked = false); }
+    else toast(d.error || t('failed'));
+  }).catch(() => toast(t('failed')));
+};
+window.deleteSchedule = function(id) {
+  fetch('/api/schedules/' + id, {method:'DELETE'}).then(r => r.json()).then(d => {
+    if (d.ok) { toast(t('schedule_deleted')); fetchSchedules(); }
+  }).catch(() => toast(t('failed')));
+};
+
+/* ── Round 34: Battery indicator update ────────── */
+function updateBattery(level) {
+  const fill = document.getElementById('batteryFill');
+  const label = document.getElementById('batteryLabel');
+  const pct = Math.max(0, Math.min(100, Math.round(level)));
+  fill.style.width = pct + '%';
+  fill.className = 'battery-fill ' + (pct > 50 ? 'high' : pct > 20 ? 'medium' : 'low');
+  label.textContent = pct + '%';
+}
+
+/* ── Round 35: Path trail (incremental) ────────── */
+let showTrail = true;
+const pathTrail = [];
+document.getElementById('trailToggle').addEventListener('change', e => {
+  showTrail = e.target.checked;
+  if (lastMapData && mapImg.complete) drawMap(lastMapData);
+});
+// Load initial trail on connect
+function fetchTrail() {
+  fetch('/api/trail').then(r => r.json()).then(pts => {
+    pathTrail.length = 0;
+    pts.forEach(p => pathTrail.push(p));
+  }).catch(() => {});
+}
+
+/* ── No-Go Zones ──────────────────────────────── */
+let noGoZones = [];
+let nogoDrawing = false;
+let nogoStart = null;
+let nogoCurrent = null;
+
+const nogoDrawBtn = document.getElementById('nogoDrawBtn');
+const nogoClearBtn = document.getElementById('nogoClearBtn');
+const nogoCountEl = document.getElementById('nogoCount');
+const nogoListEl = document.getElementById('nogoZoneList');
+
+nogoDrawBtn.addEventListener('click', () => {
+  nogoDrawing = !nogoDrawing;
+  nogoDrawBtn.classList.toggle('active', nogoDrawing);
+  canvas.classList.toggle('nogo-active', nogoDrawing);
+  nogoStart = null;
+  nogoCurrent = null;
+});
+
+canvas.addEventListener('mousedown', e => {
+  if (!nogoDrawing || !lastMapData) return;
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  nogoStart = {cx: (e.clientX - rect.left) * scaleX, cy: (e.clientY - rect.top) * scaleY};
+  nogoCurrent = {...nogoStart};
+});
+
+canvas.addEventListener('mousemove', e => {
+  if (!nogoStart) return;
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  nogoCurrent = {cx: (e.clientX - rect.left) * scaleX, cy: (e.clientY - rect.top) * scaleY};
+  if (lastMapData && mapImg.complete) drawMap(lastMapData);
+});
+
+canvas.addEventListener('mouseup', e => {
+  if (!nogoStart || !nogoCurrent || !lastMapData) return;
+  const data = lastMapData;
+  if (!data.width || !data.height) return;
+  const sx = canvas.width / data.width;
+  const sy = canvas.height / data.height;
+  // Convert canvas coords to world coords
+  function canvasToWorld(cx, cy) {
+    const gx = cx / sx;
+    const gy = (data.height - 1) - (cy / sy);
+    return {x: data.origin_x + gx * data.resolution, y: data.origin_y + gy * data.resolution};
+  }
+  const p1 = canvasToWorld(nogoStart.cx, nogoStart.cy);
+  const p2 = canvasToWorld(nogoCurrent.cx, nogoCurrent.cy);
+  // Minimum 5cm zone
+  if (Math.abs(p1.x - p2.x) < 0.05 && Math.abs(p1.y - p2.y) < 0.05) {
+    nogoStart = null; nogoCurrent = null; return;
+  }
+  fetch('/api/no_go_zones', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y})
+  }).then(r => r.json()).then(d => {
+    if (d.ok && d.zone) { noGoZones.push(d.zone); renderNoGoZones(); toast(t('nogo_zone_added')); }
+    else toast(d.error || t('failed'));
+  }).catch(() => toast(t('failed')));
+  nogoStart = null; nogoCurrent = null;
+});
+
+// Touch support for mobile drawing
+canvas.addEventListener('touchstart', e => {
+  if (!nogoDrawing || !lastMapData) return;
+  e.preventDefault();
+  const touch = e.touches[0];
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  nogoStart = {cx: (touch.clientX - rect.left) * scaleX, cy: (touch.clientY - rect.top) * scaleY};
+  nogoCurrent = {...nogoStart};
+}, {passive: false});
+
+canvas.addEventListener('touchmove', e => {
+  if (!nogoStart) return;
+  e.preventDefault();
+  const touch = e.touches[0];
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  nogoCurrent = {cx: (touch.clientX - rect.left) * scaleX, cy: (touch.clientY - rect.top) * scaleY};
+  if (lastMapData && mapImg.complete) drawMap(lastMapData);
+}, {passive: false});
+
+canvas.addEventListener('touchend', e => {
+  if (!nogoStart || !nogoCurrent || !lastMapData) return;
+  // Reuse the mouseup logic: fire a synthetic mouseup
+  canvas.dispatchEvent(new MouseEvent('mouseup', {clientX: 0, clientY: 0}));
+});
+
+nogoClearBtn.addEventListener('click', () => {
+  if (!noGoZones.length) return;
+  fetch('/api/no_go_zones/clear', {method: 'POST'}).then(r => r.json()).then(d => {
+    if (d.ok) { noGoZones = []; renderNoGoZones(); toast(t('nogo_zones_cleared')); }
+  }).catch(() => toast(t('failed')));
+});
+
+function renderNoGoZones() {
+  nogoCountEl.textContent = noGoZones.length ? '(' + noGoZones.length + ')' : '';
+  if (!noGoZones.length) { nogoListEl.innerHTML = ''; return; }
+  nogoListEl.innerHTML = noGoZones.map((z, i) => {
+    const label = z.name || (t('zone') + ' ' + (i + 1));
+    return '<div class="nogo-zone-item"><span class="nogo-label">🚫 ' + esc(label) + '</span>' +
+      '<button class="nogo-del" onclick="deleteNoGoZone(\'' + escAttr(z.id) + '\')" title="' + t('delete') + '">✕</button></div>';
+  }).join('');
+}
+
+window.deleteNoGoZone = function(id) {
+  fetch('/api/no_go_zones/' + id, {method: 'DELETE'}).then(r => r.json()).then(d => {
+    if (d.ok) { noGoZones = noGoZones.filter(z => z.id !== id); renderNoGoZones(); toast(t('nogo_zone_deleted')); }
+  }).catch(() => toast(t('failed')));
+};
+
+function fetchNoGoZones() {
+  fetch('/api/no_go_zones').then(r => r.json()).then(zones => {
+    noGoZones = zones || [];
+    renderNoGoZones();
+  }).catch(() => {});
+}
+
+/* ── Round 36: Internationalization (i18n) ─────── */
+const LANG = {
+  en: {
+    emergency_stop:'EMERGENCY STOP',status:'Status',mission_control:'Mission Control',
+    scan_room:'Scan Room',stop_scan:'Stop Scan',clean_room:'Clean Room',stop_clean:'Stop Clean',
+    go_home:'Go Home',reset:'Reset',pause:'Pause',resume:'Resume',
+    manual_drive:'Manual Drive',speed:'Speed',keyboard_hint:'Keyboard: W/A/S/D or arrows, Space=stop',
+    room_manager:'Room Manager',save_room:'Save Room',mission_log:'Mission Log',
+    statistics:'Statistics',total_scan_time:'Total Scan Time',total_clean_time:'Total Clean Time',
+    rooms_scanned:'Rooms Scanned',rooms_cleaned:'Rooms Cleaned',distance_traveled:'Distance Traveled',
+    schedule:'Schedule',add:'Add',diagnostics:'Diagnostics',
+    settings:'⚙️ Settings',map_update_rate:'Map Update Rate',default_drive_speed:'Default Drive Speed (m/s)',
+    notification_sound:'Notification Sound',theme:'Theme',language:'Language',save_settings:'Save Settings',
+    free:'Free',obstacle:'Obstacle',unknown:'Unknown',robot:'Robot',no_go:'No-Go',
+    heatmap_overlay:'Heatmap Overlay',path_trail:'Path Trail',
+    valid_readings:'Valid Readings',linear_vel:'Linear Vel',angular_vel:'Angular Vel',
+    cumulative_dist:'Cumulative Dist',socket_status:'Socket Status',latency:'Latency',
+    no_schedules:'No scheduled cleanings',select_time:'Select a time',select_days:'Select at least one day',
+    schedule_added:'Schedule added',schedule_deleted:'Schedule deleted',
+    mon:'Mo',tue:'Tu',wed:'We',thu:'Th',fri:'Fr',sat:'Sa',sun:'Su',
+    live_map:'Live Map',waiting_for_map:'Waiting for map data…',navigate_here:'Navigate Here',
+    export_map:'Export Map',zoom:'Zoom',resolution:'Resolution',size:'Size',updates:'Updates',
+    mission:'Mission',exploration:'Exploration',coverage:'Coverage',position:'Position',
+    velocity:'Velocity',scan_time:'Scan Time',state_history:'State History',
+    lidar_hz:'LiDAR Hz',tf_chain:'TF Chain',no_saved_rooms:'No saved rooms',
+    preview:'Preview',clean:'Clean',delete:'Delete',connected:'Connected',disconnected:'Disconnected',
+    delete_confirm:'Delete this room?',room_name_placeholder:'Room name…',
+    clean_saved_room:'Loading room for cleaning…',
+    room_saved:'Room saved',room_deleted:'Room deleted',room_renamed:'Room renamed',
+    rename_prompt:'Enter new name for',rename_failed:'Rename failed',save_failed:'Save failed',
+    preview_failed:'Preview failed',enter_room_name:'Enter a room name',
+    command_sent:'Command sent',confirm_action:'Are you sure you want to',
+    emergency_activated:'Emergency stop activated!',navigating_to:'Navigating to',
+    nav_failed:'Navigation failed',map_exported:'Map exported',no_map_export:'No map to export',
+    failed:'Failed',
+    draw_no_go_zone:'Draw No-Go Zone',clear_all:'Clear All',zone:'Zone',
+    nogo_zone_added:'No-go zone added',nogo_zone_deleted:'No-go zone deleted',
+    nogo_zones_cleared:'All no-go zones cleared',
+  },
+  he: {
+    emergency_stop:'עצירת חירום',status:'סטטוס',mission_control:'בקרת משימה',
+    scan_room:'סרוק חדר',stop_scan:'עצור סריקה',clean_room:'נקה חדר',stop_clean:'עצור ניקוי',
+    go_home:'חזור הביתה',reset:'אתחול',pause:'השהה',resume:'המשך',
+    manual_drive:'נהיגה ידנית',speed:'מהירות',keyboard_hint:'מקלדת: W/A/S/D או חצים, רווח=עצור',
+    room_manager:'ניהול חדרים',save_room:'שמור חדר',mission_log:'יומן משימה',
+    statistics:'סטטיסטיקות',total_scan_time:'זמן סריקה כולל',total_clean_time:'זמן ניקוי כולל',
+    rooms_scanned:'חדרים שנסרקו',rooms_cleaned:'חדרים שנוקו',distance_traveled:'מרחק שנסע',
+    schedule:'תזמון',add:'הוסף',diagnostics:'אבחון',
+    settings:'⚙️ הגדרות',map_update_rate:'קצב עדכון מפה',default_drive_speed:'מהירות נהיגה (מ/ש)',
+    notification_sound:'צליל התראה',theme:'ערכת נושא',language:'שפה',save_settings:'שמור הגדרות',
+    free:'פנוי',obstacle:'מכשול',unknown:'לא ידוע',robot:'רובוט',no_go:'אסור',
+    heatmap_overlay:'שכבת חום',path_trail:'מסלול',
+    valid_readings:'קריאות תקינות',linear_vel:'מהירות קווית',angular_vel:'מהירות זוויתית',
+    cumulative_dist:'מרחק מצטבר',socket_status:'סטטוס חיבור',latency:'השהיה',
+    no_schedules:'אין ניקויים מתוזמנים',select_time:'בחר שעה',select_days:'בחר לפחות יום אחד',
+    schedule_added:'תזמון נוסף',schedule_deleted:'תזמון הוסר',
+    mon:'ב׳',tue:'ג׳',wed:'ד׳',thu:'ה׳',fri:'ו׳',sat:'ש׳',sun:'א׳',
+    live_map:'מפה חיה',waiting_for_map:'ממתין לנתוני מפה…',navigate_here:'נווט לכאן',
+    export_map:'ייצוא מפה',zoom:'זום',resolution:'רזולוציה',size:'גודל',updates:'עדכונים',
+    mission:'משימה',exploration:'חקירה',coverage:'כיסוי',position:'מיקום',
+    velocity:'מהירות',scan_time:'זמן סריקה',state_history:'היסטוריית מצבים',
+    lidar_hz:'תדירות לידר',tf_chain:'שרשרת TF',no_saved_rooms:'אין חדרים שמורים',
+    preview:'תצוגה מקדימה',clean:'נקה',delete:'מחק',connected:'מחובר',disconnected:'מנותק',
+    delete_confirm:'למחוק את החדר?',room_name_placeholder:'שם החדר…',
+    clean_saved_room:'טוען חדר לניקוי…',
+    room_saved:'החדר נשמר',room_deleted:'החדר נמחק',room_renamed:'החדר שונה',
+    rename_prompt:'הזן שם חדש עבור',rename_failed:'שינוי השם נכשל',save_failed:'השמירה נכשלה',
+    preview_failed:'התצוגה המקדימה נכשלה',enter_room_name:'הזן שם חדר',
+    command_sent:'הפקודה נשלחה',confirm_action:'האם אתה בטוח שברצונך',
+    emergency_activated:'עצירת חירום הופעלה!',navigating_to:'מנווט אל',
+    nav_failed:'הניווט נכשל',map_exported:'המפה יוצאה',no_map_export:'אין מפה לייצוא',
+    failed:'נכשל',
+    draw_no_go_zone:'סמן אזור אסור',clear_all:'נקה הכל',zone:'אזור',
+    nogo_zone_added:'אזור אסור נוסף',nogo_zone_deleted:'אזור אסור הוסר',
+    nogo_zones_cleared:'כל האזורים האסורים נוקו',
+  }
+};
+let currentLang = localStorage.getItem('cb_lang') || 'en';
+function t(key) { return (LANG[currentLang] || LANG.en)[key] || (LANG.en[key] || key); }
+function applyLanguage() {
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    el.textContent = t(key);
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+    el.placeholder = t(el.getAttribute('data-i18n-placeholder'));
+  });
+  document.documentElement.lang = currentLang;
+  document.getElementById('langToggle').textContent = currentLang.toUpperCase();
+}
+document.getElementById('langToggle').addEventListener('click', () => {
+  currentLang = currentLang === 'en' ? 'he' : 'en';
+  localStorage.setItem('cb_lang', currentLang);
+  applyLanguage();
+});
+applyLanguage();
+
+/* ── Round 38: Session persistence ─────────────── */
+function saveSession() {
+  try {
+    const entries = [];
+    document.querySelectorAll('#logBox .log-entry').forEach(el => {
+      entries.push(el.innerHTML);
+    });
+    sessionStorage.setItem('cb_log', JSON.stringify(entries.slice(-100)));
+    sessionStorage.setItem('cb_trail', JSON.stringify(pathTrail.slice(-200)));
+  } catch(e) {}
+}
+function restoreSession() {
+  try {
+    const log = JSON.parse(sessionStorage.getItem('cb_log') || '[]');
+    log.forEach(html => {
+      const div = document.createElement('div');
+      div.className = 'log-entry';
+      div.innerHTML = html;
+      logBox.appendChild(div);
+    });
+    if (logBox.children.length > 0) logBox.scrollTop = logBox.scrollHeight;
+    const trail = JSON.parse(sessionStorage.getItem('cb_trail') || '[]');
+    trail.forEach(p => pathTrail.push(p));
+  } catch(e) {}
+}
+restoreSession();
+setInterval(saveSession, 10000);
+
+/* ── Round 39: Settings panel ──────────────────── */
+const settingsBtn = document.getElementById('settingsBtn');
+const settingsOverlay = document.getElementById('settingsOverlay');
+settingsBtn.addEventListener('click', () => {
+  // Load current values
+  document.getElementById('setMapRate').value = parseFloat(localStorage.getItem('cb_mapRate') || '0.5');
+  document.getElementById('setMapRateVal').textContent = document.getElementById('setMapRate').value + 's';
+  document.getElementById('setDriveSpeed').value = parseFloat(localStorage.getItem('cb_driveSpeed') || speedSlider.value);
+  document.getElementById('setNotifSound').checked = !soundMuted;
+  document.getElementById('setTheme').value = document.documentElement.classList.contains('light') ? 'light' : 'dark';
+  document.getElementById('setLang').value = currentLang;
+  settingsOverlay.classList.add('active');
+});
+document.getElementById('setMapRate').addEventListener('input', function() {
+  document.getElementById('setMapRateVal').textContent = this.value + 's';
+});
+window.closeSettings = function(e) {
+  if (e && e.target !== settingsOverlay) return;
+  settingsOverlay.classList.remove('active');
+};
+window.saveSettings = function() {
+  let mapRate = parseFloat(document.getElementById('setMapRate').value);
+  if (!isFinite(mapRate) || mapRate <= 0) mapRate = 0.5;
+  let driveSpeed = parseFloat(document.getElementById('setDriveSpeed').value);
+  if (!isFinite(driveSpeed) || driveSpeed <= 0) driveSpeed = 0.15;
+  const notifOn = document.getElementById('setNotifSound').checked;
+  const theme = document.getElementById('setTheme').value;
+  const lang = document.getElementById('setLang').value;
+  // Apply map rate
+  socket.emit('set_map_rate', {rate: mapRate});
+  localStorage.setItem('cb_mapRate', mapRate);
+  // Apply drive speed
+  speedSlider.value = driveSpeed;
+  speedVal.textContent = driveSpeed;
+  localStorage.setItem('cb_driveSpeed', driveSpeed);
+  // Apply notification
+  soundMuted = !notifOn;
+  muteToggle.textContent = soundMuted ? '🔕' : '🔔';
+  localStorage.setItem('cb_muted', soundMuted ? '1' : '0');
+  // Apply theme
+  const isLight = theme === 'light';
+  document.documentElement.classList.toggle('light', isLight);
+  themeToggle.textContent = isLight ? '☀️' : '🌙';
+  localStorage.setItem('cb_theme', theme);
+  // Apply language
+  if (lang !== currentLang) { currentLang = lang; localStorage.setItem('cb_lang', lang); applyLanguage(); }
+  settingsOverlay.classList.remove('active');
+  toast(t('save_settings'));
+};
+// Restore saved drive speed
+const savedSpeed = localStorage.getItem('cb_driveSpeed');
+if (savedSpeed) { speedSlider.value = savedSpeed; speedVal.textContent = savedSpeed; }
+
+/* ── Round 40: Diagnostics panel ───────────────── */
+const diagToggle = document.getElementById('diagToggle');
+const diagContent = document.getElementById('diagContent');
+diagToggle.addEventListener('click', () => {
+  const open = diagContent.classList.toggle('open');
+  diagToggle.setAttribute('aria-expanded', open);
+  diagToggle.innerHTML = '🔧 <span data-i18n="diagnostics">' + t('diagnostics') + '</span> ' + (open ? '▾' : '▸');
+});
+diagToggle.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); diagToggle.click(); } });
+
+/* ── Status handler ── */
+socket.on('status', d => {
+  setMissionBadge(d.mission_state);
+  document.getElementById('sExplore').textContent = d.exploration_state;
+  document.getElementById('sCoverage').textContent = d.coverage_state;
+  document.getElementById('sPos').textContent = d.robot_x + ', ' + d.robot_y;
+  document.getElementById('sVel').textContent = d.linear_vel + ' m/s · ' + d.angular_vel + ' rad/s';
+  document.getElementById('mapCount').textContent = d.map_updates;
+
+  currentLinVel = d.linear_vel;
+  currentAngVel = d.angular_vel;
+  const isMoving = d.linear_vel !== 0 || d.angular_vel !== 0;
+  document.getElementById('estopBtn').classList.toggle('pulsing', isMoving);
+
+  // Coverage progress
+  const coverageWrap = document.getElementById('coverageProgressWrap');
+  const coverageFill = document.getElementById('coverageFill');
+  const cState = (d.coverage_state || '').toUpperCase();
+  const pctMatch = cState.match(/(\d+)%/);
+  if (pctMatch) {
+    coverageWrap.style.display = '';
+    coverageFill.classList.remove('animated');
+    coverageFill.style.width = pctMatch[1] + '%';
+  } else if (/COVER|ACTIVE|CLEAN/.test(cState) && cState !== 'UNKNOWN' && cState !== 'IDLE') {
+    coverageWrap.style.display = '';
+    coverageFill.classList.add('animated');
+  } else {
+    coverageWrap.style.display = 'none';
+    coverageFill.classList.remove('animated');
+    coverageFill.style.width = '0%';
+  }
+
+  // Scan timer
+  const mState = (d.mission_state || '').toUpperCase();
+  if (/EXPLOR/.test(mState) && !/EXPLOR/.test(prevMissionState.toUpperCase())) startScanTimer();
+  else if (!/EXPLOR/.test(mState) && /EXPLOR/.test(prevMissionState.toUpperCase())) stopScanTimer();
+
+  addStateHistory(d.mission_state || 'UNKNOWN');
+  updateButtonStates(d.mission_state);
+  prevMissionState = d.mission_state || 'UNKNOWN';
+
+  // Round 34: Battery
+  if (d.battery !== undefined) updateBattery(d.battery);
+
+  // Round 35: Incremental trail
+  if (d.new_trail && d.new_trail.length > 0) {
+    d.new_trail.forEach(p => pathTrail.push(p));
+    if (pathTrail.length > 500) pathTrail.splice(0, pathTrail.length - 500);
+  }
+
+  // Round 40: Diagnostics
+  document.getElementById('diagScanHz').textContent = d.scan_hz + ' Hz';
+  document.getElementById('diagScanHz').className = 'diag-val ' + (d.scan_hz > 3 ? 'diag-ok' : d.scan_hz > 0 ? 'diag-warn' : 'diag-err');
+  document.getElementById('diagValidReadings').textContent = d.scan_valid_count;
+  document.getElementById('diagLinVel').textContent = d.linear_vel + ' m/s';
+  document.getElementById('diagAngVel').textContent = d.angular_vel + ' rad/s';
+  document.getElementById('diagDistance').textContent = d.total_distance + ' m';
+  document.getElementById('diagTF').textContent = d.tf_healthy ? 'OK' : 'BROKEN';
+  document.getElementById('diagTF').className = 'diag-val ' + (d.tf_healthy ? 'diag-ok' : 'diag-err');
+  document.getElementById('diagSocket').textContent = socket.connected ? t('connected') : t('disconnected');
+  document.getElementById('diagSocket').className = 'diag-val ' + (socket.connected ? 'diag-ok' : 'diag-err');
+  document.getElementById('diagLatency').textContent = latencyLabelEl.textContent;
+
+  if (lastMapData && mapImg.complete) drawMap(lastMapData);
+});
+
+})();
+</script>
+</body>
+</html>
