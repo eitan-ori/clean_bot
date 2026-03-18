@@ -244,14 +244,13 @@ def generate_launch_description():
             # Belt-and-suspenders: remap at RMW level too, in case the parameter is ignored
             remappings=[('/scan', '/scan_raw')],
         ),
-        # ==================== SLAM Toolbox ====================
-        Node(
-            package='slam_toolbox',
-            executable='async_slam_toolbox_node',
-            name='slam_toolbox',
-            output='screen',
+        # ==================== Cartographer SLAM ====================
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(hardware_pkg, 'launch', 'cartographer.launch.py')
+            ),
             condition=IfCondition(use_slam),
-            parameters=[slam_config, {'use_sim_time': use_sim_time}]
+            launch_arguments={'use_sim_time': use_sim_time}.items()
         ),
 
         # ==================== Nav2 Navigation Stack ====================
