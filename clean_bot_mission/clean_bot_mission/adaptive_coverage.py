@@ -843,8 +843,8 @@ class AdaptiveCoveragePlanner(Node):
                 obstacle_mask[r1:r2, c1:c2] = True
             self.get_logger().info(f'Applied {len(self._no_go_zones)} no-go zone(s) to obstacle mask')
         
-        # Calculate inflation in cells
-        inflation_cells = int(self.robot_radius / self.map_info.resolution) + 3
+        # Calculate inflation in cells (Using +0 carefully to get closer to the walls)
+        inflation_cells = int(self.robot_radius / self.map_info.resolution)
         
         # Create circular kernel
         kernel_size = 2 * inflation_cells + 1
