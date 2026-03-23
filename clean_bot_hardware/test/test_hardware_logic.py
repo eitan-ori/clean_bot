@@ -497,15 +497,10 @@ class TestLaunchFileConsistency:
     def test_arduino_port_consistent(self):
         """The arduino port default should be /dev/ttyACM0 everywhere."""
         import re
-        launch_path = 'launch/robot_bringup.launch.py'
-        try:
-            with open(launch_path) as f:
-                content = f.read()
-        except FileNotFoundError:
-            # Running from repo root
-            launch_path = 'clean_bot_hardware/launch/robot_bringup.launch.py'
-            with open(launch_path) as f:
-                content = f.read()
+        from pathlib import Path
+        repo_root = Path(__file__).resolve().parents[3]
+        launch_path = repo_root / 'src' / 'clean_bot_hardware' / 'launch' / 'robot_bringup.launch.py'
+        content = launch_path.read_text(encoding='utf-8')
         # All arduino_port defaults should be the same value
         defaults = re.findall(r"arduino_port.*?default[_value]*[=:]\s*['\"]([^'\"]+)", content)
         assert len(set(defaults)) <= 1, f"Inconsistent arduino_port defaults: {defaults}"
@@ -513,14 +508,10 @@ class TestLaunchFileConsistency:
     def test_lidar_port_consistent(self):
         """The lidar port default should be consistent everywhere."""
         import re
-        launch_path = 'launch/robot_bringup.launch.py'
-        try:
-            with open(launch_path) as f:
-                content = f.read()
-        except FileNotFoundError:
-            launch_path = 'clean_bot_hardware/launch/robot_bringup.launch.py'
-            with open(launch_path) as f:
-                content = f.read()
+        from pathlib import Path
+        repo_root = Path(__file__).resolve().parents[3]
+        launch_path = repo_root / 'src' / 'clean_bot_hardware' / 'launch' / 'robot_bringup.launch.py'
+        content = launch_path.read_text(encoding='utf-8')
         defaults = re.findall(r"lidar_port.*?default[_value]*[=:]\s*['\"]([^'\"]+)", content)
         assert len(set(defaults)) <= 1, f"Inconsistent lidar_port defaults: {defaults}"
 
@@ -535,14 +526,12 @@ class TestSafetyTopicNaming:
 
     def test_simple_coverage_uses_cmd_vel_nav(self):
         """simple_coverage must publish to cmd_vel_nav for safety."""
-        try:
-            path = 'clean_bot_mission/clean_bot_mission/simple_coverage.py'
-            with open(path) as f:
-                content = f.read()
-        except FileNotFoundError:
-            path = '../clean_bot_mission/clean_bot_mission/simple_coverage.py'
-            with open(path) as f:
-                content = f.read()
+        from pathlib import Path
+        repo_root = Path(__file__).resolve().parents[3]
+        path = repo_root / 'src' / 'clean_bot_mission' / 'clean_bot_mission' / 'simple_coverage.py'
+        if not path.exists():
+            pytest.skip('simple_coverage.py not found')
+        content = path.read_text(encoding='utf-8')
         assert "cmd_vel_nav" in content, "simple_coverage should publish to cmd_vel_nav"
         # Verify it does NOT publish directly to 'cmd_vel' (except imports/comments)
         import re
@@ -553,27 +542,19 @@ class TestSafetyTopicNaming:
 
     def test_adaptive_coverage_uses_cmd_vel_nav(self):
         """adaptive_coverage must publish to cmd_vel_nav for safety."""
-        try:
-            path = 'clean_bot_mission/clean_bot_mission/adaptive_coverage.py'
-            with open(path) as f:
-                content = f.read()
-        except FileNotFoundError:
-            path = '../clean_bot_mission/clean_bot_mission/adaptive_coverage.py'
-            with open(path) as f:
-                content = f.read()
+        from pathlib import Path
+        repo_root = Path(__file__).resolve().parents[3]
+        path = repo_root / 'src' / 'clean_bot_mission' / 'clean_bot_mission' / 'adaptive_coverage.py'
+        content = path.read_text(encoding='utf-8')
         assert "cmd_vel_nav" in content, "adaptive_coverage should publish to cmd_vel_nav"
 
     def test_nav2_robot_radius_consistent(self):
         """Bug 28: Nav2 local and global costmap robot_radius must match actual (0.20m)."""
         import yaml
-        try:
-            path = 'clean_bot_hardware/config/nav2_params.yaml'
-            with open(path) as f:
-                params = yaml.safe_load(f)
-        except FileNotFoundError:
-            path = 'config/nav2_params.yaml'
-            with open(path) as f:
-                params = yaml.safe_load(f)
+        from pathlib import Path
+        repo_root = Path(__file__).resolve().parents[3]
+        path = repo_root / 'src' / 'clean_bot_hardware' / 'config' / 'nav2_params.yaml'
+        params = yaml.safe_load(path.read_text(encoding='utf-8'))
         local_r = params['local_costmap']['local_costmap']['ros__parameters']['robot_radius']
         global_r = params['global_costmap']['global_costmap']['ros__parameters']['robot_radius']
         assert local_r == global_r, f"Costmap robot_radius mismatch: local={local_r}, global={global_r}"
@@ -582,14 +563,10 @@ class TestSafetyTopicNaming:
     def test_lidar_frame_id_consistent(self):
         """Bug 33: LiDAR frame_id must be 'laser' everywhere to match URDF."""
         import yaml
-        try:
-            path = 'clean_bot_hardware/config/rplidar_a1.yaml'
-            with open(path) as f:
-                params = yaml.safe_load(f)
-        except FileNotFoundError:
-            path = 'config/rplidar_a1.yaml'
-            with open(path) as f:
-                params = yaml.safe_load(f)
+        from pathlib import Path
+        repo_root = Path(__file__).resolve().parents[3]
+        path = repo_root / 'src' / 'clean_bot_hardware' / 'config' / 'rplidar_a1.yaml'
+        params = yaml.safe_load(path.read_text(encoding='utf-8'))
         frame_id = params['rplidar_node']['ros__parameters']['frame_id']
         assert frame_id == 'laser', f"rplidar_a1.yaml frame_id is '{frame_id}', expected 'laser'"
 

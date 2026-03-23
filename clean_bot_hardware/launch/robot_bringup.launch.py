@@ -32,7 +32,7 @@
 import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, GroupAction
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import LaunchConfiguration, Command, PathJoinSubstitution
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
@@ -61,6 +61,7 @@ def generate_launch_description():
     use_nav2 = LaunchConfiguration('use_nav2', default='true')
     use_slam = LaunchConfiguration('use_slam', default='true')
     use_emergency_stop = LaunchConfiguration('use_emergency_stop', default='true')
+    use_rf2o = LaunchConfiguration('use_rf2o', default='false')
     velocity_factor = LaunchConfiguration('velocity_factor', default='1.0')
     
     # ==================== Robot Description ====================
@@ -89,6 +90,8 @@ def generate_launch_description():
                               description='Launch SLAM Toolbox for mapping'),
         DeclareLaunchArgument('use_emergency_stop', default_value='true',
                               description='Launch emergency stop safety node'),
+        DeclareLaunchArgument('use_rf2o', default_value='false',
+                      description='Launch rf2o_laser_odometry (external odom). Default is false; Cartographer provides odom->base_link TF.'),
         DeclareLaunchArgument('velocity_factor', default_value='1.0',
                               description='Velocity multiplier (2.0 = twice as fast)'),
 
@@ -106,7 +109,7 @@ def generate_launch_description():
 
         # ==================== Arduino Driver ====================
         # Handles: Motors and Ultrasonic sensor
-        # NOTE: No encoders - odometry comes from RF2O laser odometry
+        # NOTE: No wheel encoders - odometry is provided by SLAM (Cartographer)
         Node(
             package='clean_bot_hardware',
             executable='arduino_driver',
@@ -123,7 +126,7 @@ def generate_launch_description():
         ),
 
         # ==================== RPLidar A1 ====================
-        # Note: If LIDAR fails, rf2o won't work but Arduino provides wheel odom TF
+        # Note: If LiDAR fails, SLAM will not be able to provide odom/pose updates.
         # Common issues: wrong port, no power, permissions (sudo chmod 666 /dev/ttyUSB0)
         Node(
             package='sllidar_ros2',
@@ -138,7 +141,7 @@ def generate_launch_description():
                 'inverted': True,  # LiDAR mounted 180 degrees rotated
                 'angle_compensate': True,
                 'scan_mode': '',  # Auto-detect scan mode
-                'scan_frequency': 10.0,  # 10Hz = ~800 points/scan, fast rf2o processing
+                'scan_frequency': 7.0,  # Reduce CPU load (SLAM + costmaps) on Pi-class CPUs
                 'force_scan': True,  # Force scan bypasses motor speed check (fixes laser timeout)
             }],
             # Publish raw scans at full rate; throttle node limits rate for consumers
@@ -146,14 +149,41 @@ def generate_launch_description():
             respawn=False,
         ),
         # ==================== Scan Throttle ====================
-        # Pi 4 can't process 10Hz scans across all consumers (rf2o, SLAM, 2 costmaps).
-        # Throttle to 5Hz so every scan gets a matching TF from rf2o.
+        # Pi 4 can't process 10Hz scans across all consumers (SLAM + 2 costmaps).
+        # Throttle to 5Hz for consumers while SLAM still uses /scan_raw.
         Node(
             package='clean_bot_hardware',
             executable='scan_throttle',
             name='scan_throttle',
             output='screen',
             parameters=[{'rate': 5.0}],
+        ),
+
+        # ==================== Laser Odometry (rf2o) ====================
+        # Optional external odometry.
+        # If disabled (default), Cartographer publishes TF(odom→base_link).
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(hardware_pkg, 'launch', 'odom.launch.py')
+            ),
+            condition=IfCondition(use_rf2o),
+        ),
+
+        # ==================== /odom Publisher from TF ====================
+        # Nav2 and monitors expect a nav_msgs/Odometry on /odom.
+        # When rf2o is disabled, publish /odom from TF(odom→base_link) instead.
+        Node(
+            package='clean_bot_hardware',
+            executable='tf_odom_publisher',
+            name='tf_odom_publisher',
+            output='screen',
+            condition=UnlessCondition(use_rf2o),
+            parameters=[{
+                'odom_frame': 'odom',
+                'base_frame': 'base_link',
+                'odom_topic': '/odom',
+                'publish_rate': 20.0,
+            }],
         ),
 
         # ==================== IMU Publisher ====================
@@ -179,6 +209,9 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'ultrasonic_frame': 'ultrasonic_link',
+                'publish_frame': 'base_link',
+                'sensor_offset_x': 0.20,
+                'sensor_offset_y': 0.0,
                 'min_obstacle_distance': 0.05,   # 5cm
                 'max_obstacle_distance': 0.50,   # 50cm
                 'obstacle_height': 0.03,         # 3cm sensor height
@@ -223,26 +256,6 @@ def generate_launch_description():
                 ('imu/mag', 'imu/mag'),
                 ('imu/data', 'imu/data'),
             ]
-        ),
-        # ==================== RF2O Laser Odometry ====================
-        # CRITICAL: This is the ONLY source of odometry (no wheel encoders!)
-        # Provides odom->base_link TF based on laser scan matching
-        Node(
-            package='rf2o_laser_odometry',
-            executable='rf2o_laser_odometry_node',
-            name='rf2o_laser_odometry',
-            output='screen',
-            parameters=[{
-                'laser_scan_topic': '/scan_raw',  # Raw LiDAR (NOT /scan — avoids deadlock with scan_throttle)
-                'odom_topic': '/odom',
-                'publish_tf': True,
-                'base_frame_id': 'base_link',
-                'odom_frame_id': 'odom',
-                'init_pose_from_topic': '',
-                'freq': 10.0,                            # Process every incoming scan
-            }],
-            # Belt-and-suspenders: remap at RMW level too, in case the parameter is ignored
-            remappings=[('/scan', '/scan_raw')],
         ),
         # ==================== Cartographer SLAM ====================
         IncludeLaunchDescription(

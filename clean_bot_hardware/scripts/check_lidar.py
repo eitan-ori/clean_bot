@@ -25,8 +25,32 @@
 import serial
 import glob
 import time
+import sys
+from pathlib import Path
 
 import subprocess
+
+
+def _default_ports() -> list[str]:
+    ports: list[str] = []
+
+    # Prefer udev-managed stable symlinks (created by fix_serial_ports.sh)
+    for p in ('/dev/lidar', '/dev/rplidar'):
+        if Path(p).exists():
+            ports.append(p)
+
+    # Fall back to enumerating kernel devices
+    ports.extend(glob.glob('/dev/ttyUSB*'))
+    ports.extend(glob.glob('/dev/ttyACM*'))
+
+    # Deduplicate while preserving order
+    seen = set()
+    out = []
+    for p in ports:
+        if p not in seen:
+            out.append(p)
+            seen.add(p)
+    return out
 
 def check_port(port, baudrate):
     try:
@@ -81,7 +105,11 @@ def main():
     except Exception:
         pass
 
-    ports = glob.glob('/dev/ttyUSB*') + glob.glob('/dev/ttyACM*')
+    # Optional: provide a specific port as argv[1]
+    if len(sys.argv) > 1:
+        ports = [sys.argv[1]]
+    else:
+        ports = _default_ports()
     
     if not ports:
         print("No serial ports found! Check USB connection.")

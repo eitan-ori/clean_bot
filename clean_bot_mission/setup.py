@@ -36,6 +36,9 @@ setup(
         'console_scripts': [
             # Main mission controller (recommended)
             'full_mission = clean_bot_mission.full_mission:main',
+
+            # Reliable mission command publisher (waits for subscribers)
+            'mission_cmd = clean_bot_mission.mission_cmd:main',
             
             # Individual components (can run separately)
             'frontier_explorer = clean_bot_mission.frontier_explorer:main',

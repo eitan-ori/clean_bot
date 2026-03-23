@@ -75,6 +75,9 @@ class EmergencyStopController(Node):
         # ===================== State =====================
         self.current_distance = 100
         self.last_range_time = None
+        self._received_any_range = False
+        self._warned_sensor_timeout = False
+        self._warned_never_published = False
         self.obstacle_state = False  # False = clear, True = blocked
         self._start_time = self.get_clock().now()
         self._sensor_grace_sec = 5.0  # Allow sensor this long to start publishing
@@ -93,6 +96,9 @@ class EmergencyStopController(Node):
         
         self.current_distance = msg.range
         self.last_range_time = self.get_clock().now()
+        self._received_any_range = True
+        # Sensor is alive again; allow timeout warning to trigger again if it reoccurs.
+        self._warned_sensor_timeout = False
 
     def cmd_vel_callback(self, msg: Twist):
         """
@@ -111,17 +117,24 @@ class EmergencyStopController(Node):
             elapsed = (self.get_clock().now() - self.last_range_time).nanoseconds / 1e9
             if elapsed > self.timeout:
                 # Sensor timeout - be cautious, reduce forward speed
-                self.get_logger().warn_once('⚠️ Ultrasonic sensor timeout - reducing speed')
+                if not self._warned_sensor_timeout:
+                    self.get_logger().warn('⚠️ Ultrasonic sensor timeout - reducing speed')
+                    self._warned_sensor_timeout = True
                 output.linear.x = msg.linear.x * 0.5 if msg.linear.x > 0 else msg.linear.x
                 self.cmd_vel_pub.publish(output)
                 return
+            else:
+                # Fresh again
+                self._warned_sensor_timeout = False
         else:
             # No sensor data ever received — after grace period, reduce speed
             uptime = (self.get_clock().now() - self._start_time).nanoseconds / 1e9
-            if uptime > self._sensor_grace_sec:
-                self.get_logger().warn_once(
-                    '⚠️ Ultrasonic sensor never published — reducing forward speed. '
-                    'Check sensor wiring and /ultrasonic_range topic.')
+            if uptime > self._sensor_grace_sec and not self._received_any_range:
+                if not self._warned_never_published:
+                    self.get_logger().warn(
+                        '⚠️ Ultrasonic sensor never published — reducing forward speed. '
+                        'Check sensor wiring and /ultrasonic_range topic.')
+                    self._warned_never_published = True
                 output.linear.x = msg.linear.x * 0.5 if msg.linear.x > 0 else msg.linear.x
                 self.cmd_vel_pub.publish(output)
                 return

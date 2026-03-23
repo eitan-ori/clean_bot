@@ -9,8 +9,8 @@ def generate_launch_description():
     pkg_dir = get_package_share_directory('clean_bot_hardware')
     
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
-    resolution = LaunchConfiguration('resolution', default='0.05')
-    publish_period_sec = LaunchConfiguration('publish_period_sec', default='1.0')
+    resolution = LaunchConfiguration('resolution', default='0.02')
+    publish_period_sec = LaunchConfiguration('publish_period_sec', default='2.0')
 
     cartographer_config_dir = os.path.join(pkg_dir, 'config')
     cartographer_config_basename = 'cartographer.lua'

@@ -32,6 +32,7 @@
 import math
 import serial
 import threading
+import time
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
@@ -83,6 +84,19 @@ class ArduinoDriver(Node):
         self._serial_lock = threading.Lock()
         self._connect_serial()
 
+        # ===================== Command handling =====================
+        # We may receive both cmd_vel_safe (preferred) and cmd_vel_nav (fallback).
+        # To avoid hammering the serial line (and to avoid concurrent access races),
+        # we only *store* commands in callbacks and send them at a fixed rate
+        # from the timer loop.
+        self._last_cmd_safe = None  # (linear_mps, angular_rps)
+        self._last_cmd_nav = None   # (linear_mps, angular_rps)
+        self._last_cmd_safe_wall = 0.0
+        self._last_cmd_nav_wall = 0.0
+        self._prefer_safe_for_sec = 0.30
+        self._last_sent_pwm = (0, 0)
+        self._last_send_wall = 0.0
+
         # ===================== Publishers =====================
         self.range_pub = self.create_publisher(Range, 'ultrasonic_range', 10)
         
@@ -92,11 +106,11 @@ class ArduinoDriver(Node):
         # ===================== Subscribers =====================
         # Subscribe to cmd_vel_safe (emergency_stop output) — final vetted commands
         self.cmd_vel_sub = self.create_subscription(
-            Twist, 'cmd_vel_safe', self.cmd_vel_callback, 10)
+            Twist, 'cmd_vel_safe', self.cmd_vel_safe_callback, 10)
         # Fallback: also subscribe to cmd_vel_nav directly in case emergency_stop
         # is not running. This ensures the robot can still move.
         self.cmd_vel_nav_sub = self.create_subscription(
-            Twist, 'cmd_vel_nav', self.cmd_vel_callback, 10)
+            Twist, 'cmd_vel_nav', self.cmd_vel_nav_callback, 10)
         
         # Subscribe to mission commands for cleaning control (legacy)
         self.mission_cmd_sub = self.create_subscription(
@@ -112,6 +126,10 @@ class ArduinoDriver(Node):
         self._motors_stopped = True  # Track whether motors are already at zero
         self.CMD_VEL_TIMEOUT_SEC = 0.5  # Stop motors if no cmd_vel for this long
         self._msg_count = 0  # Count received velocity messages
+
+        # Throttle high-rate logs (Nav2 can publish cmd_vel at high frequency)
+        self._last_cmd_log_wall = 0.0
+        self._last_no_serial_log_wall = 0.0
         
         # ===================== Timer =====================
         timer_period = 1.0 / publish_rate
@@ -124,11 +142,19 @@ class ArduinoDriver(Node):
     def _connect_serial(self):
         """Try to open the serial port. Sets self.serial on success, None on failure."""
         try:
+            # Keep timeouts short to avoid blocking the ROS executor.
             self.serial = serial.Serial(
                 self.serial_port,
                 self.baud_rate,
-                timeout=0.1
+                timeout=0.05,
+                write_timeout=0.05,
             )
+            try:
+                with self._serial_lock:
+                    self.serial.reset_input_buffer()
+                    self.serial.reset_output_buffer()
+            except Exception:
+                pass
             self.get_logger().info(f'✅ Connected to Arduino on {self.serial_port}')
         except serial.SerialException as e:
             self.serial = None
@@ -158,7 +184,7 @@ class ArduinoDriver(Node):
                 self.serial.write(f"{command}\n".encode('utf-8'))
             self.get_logger().info(f'📤 Sent: {command}')
             return True
-        except serial.SerialException as e:
+        except (serial.SerialException, OSError) as e:
             self.get_logger().warning(f'Serial write error: {e}')
             self.serial = None
             return False
@@ -187,8 +213,14 @@ class ArduinoDriver(Node):
             self.get_logger().info('🧹 Sending CLEAN_STOP to Arduino')
             self.send_command('CLEAN_STOP')
 
-    def cmd_vel_callback(self, msg: Twist):
-        """Convert Twist message to motor PWM commands and send to Arduino."""
+    def cmd_vel_safe_callback(self, msg: Twist):
+        self._store_cmd(msg, source='safe')
+
+    def cmd_vel_nav_callback(self, msg: Twist):
+        self._store_cmd(msg, source='nav')
+
+    def _store_cmd(self, msg: Twist, source: str):
+        """Store latest cmd_vel from a given source; sending is done in update_loop()."""
         try:
             self._msg_count += 1
             linear = msg.linear.x * self.velocity_factor
@@ -197,56 +229,15 @@ class ArduinoDriver(Node):
             if not (math.isfinite(linear) and math.isfinite(angular)):
                 return
 
-            # CRITICAL FIX: Negate angular to match robot's physical wiring
-            angular = -angular
-
-            # PWM limits (tuned for this robot)
-            MIN_PWM_FORWARD = 90
-            MIN_PWM_ROTATE = 90
-            MAX_PWM = 180
-
-            # Standard differential drive mixing:
-            v_left = float(linear) - float(angular) * (self.wheel_separation / 2.0)
-            v_right = float(linear) + float(angular) * (self.wheel_separation / 2.0)
-
-            # Convert wheel speeds to PWM
-            left_pwm = self._wheel_speed_to_pwm(v_left, linear, angular, MIN_PWM_FORWARD, MIN_PWM_ROTATE, MAX_PWM)
-            right_pwm = self._wheel_speed_to_pwm(v_right, linear, angular, MIN_PWM_FORWARD, MIN_PWM_ROTATE, MAX_PWM)
-
-            # Apply inversion per wheel (matches wiring)
-            if self.invert_left_motor:
-                left_pwm = -left_pwm
-            if self.invert_right_motor:
-                right_pwm = -right_pwm
-            
-            # Publish debug info
-            debug_msg = Twist()
-            debug_msg.linear.x = float(left_pwm)
-            debug_msg.linear.y = float(right_pwm)
-            debug_msg.angular.z = angular
-            self.debug_cmd_pub.publish(debug_msg)
-            
-            # Log significant commands
-            if left_pwm != 0 or right_pwm != 0:
-                self.get_logger().info(f'CMD: lin={linear:.2f} ang={angular:.2f} -> PWM L={left_pwm} R={right_pwm}')
-            
-            # Send to Arduino (or log in dry-run mode)
-            command = f"{left_pwm},{right_pwm}"
-            if self.serial is not None:
-                try:
-                    with self._serial_lock:
-                        self.serial.write(f"{command}\n".encode('utf-8'))
-                except serial.SerialException as e:
-                    self.get_logger().warning(f'Serial write error: {e}')
-                    self.serial = None
+            now_wall = time.monotonic()
+            if source == 'safe':
+                self._last_cmd_safe = (float(linear), float(angular))
+                self._last_cmd_safe_wall = now_wall
             else:
-                if left_pwm != 0 or right_pwm != 0:
-                    self.get_logger().info(f'🔌 [NO SERIAL] PWM L={left_pwm} R={right_pwm} (not sent)')
-            
-            self.last_cmd_time = self.get_clock().now()
-            self._motors_stopped = (left_pwm == 0 and right_pwm == 0)
+                self._last_cmd_nav = (float(linear), float(angular))
+                self._last_cmd_nav_wall = now_wall
         except Exception as e:
-            self.get_logger().error(f'cmd_vel_callback error: {e}')
+            self.get_logger().error(f'_store_cmd error: {e}')
 
     def _wheel_speed_to_pwm(
         self,
@@ -262,23 +253,96 @@ class ArduinoDriver(Node):
         Uses a minimum PWM threshold so the motors actually move.
         """
         # Deadband — only zero out if BOTH linear and angular commands are near zero
-        if abs(wheel_speed_mps) < 0.005 and abs(linear_mps) < 0.01 and abs(angular_rps) < 0.01:
+        if abs(wheel_speed_mps) <= 0.005 and abs(linear_mps) < 0.01 and abs(angular_rps) < 0.01:
             return 0
 
-        pwm = int((abs(wheel_speed_mps) / float(self.max_linear_speed)) * max_pwm)
-        pwm = min(max_pwm, max(0, pwm))
-
-        # Choose minimum based on whether we are mostly translating or mostly rotating.
-        # If there is meaningful linear command, keep the stronger minimum.
-        min_pwm = min_pwm_forward if abs(linear_mps) > 0.03 else min_pwm_rotate
-        pwm = max(min_pwm, pwm)
-
+        if abs(wheel_speed_mps) < 0.001:
+            return 0
+            
+        base_pwm = 95 # Minimum to overcome static friction
+        
+        # Scale the remaining speed against the physical max expected speed (0.15 to 0.2 m/s)
+        # We use a theoretical max speed of 0.2 m/s for full 180 PWM
+        theoretical_max = 0.20
+        speed_ratio = min(1.0, abs(wheel_speed_mps) / theoretical_max)
+        
+        pwm = base_pwm + int(speed_ratio * (max_pwm - base_pwm))
+        pwm = min(max_pwm, pwm)
+        
         return pwm if wheel_speed_mps > 0 else -pwm
 
     def update_loop(self):
         """Main update loop - read from Arduino and publish ultrasonic data."""
         try:
             now = self.get_clock().now()
+
+            # ===================== Motor command send (rate-limited) =====================
+            now_wall = time.monotonic()
+            cmd = None
+            if self._last_cmd_safe is not None and (now_wall - self._last_cmd_safe_wall) <= self._prefer_safe_for_sec:
+                cmd = self._last_cmd_safe
+            elif self._last_cmd_nav is not None and (now_wall - self._last_cmd_nav_wall) <= self._prefer_safe_for_sec:
+                cmd = self._last_cmd_nav
+
+            if cmd is not None:
+                linear, angular = cmd
+
+                # Match robot's physical yaw direction
+                angular = -angular
+
+                # Standard differential drive mixing
+                v_left = float(linear) - float(angular) * (self.wheel_separation / 2.0)
+                v_right = float(linear) + float(angular) * (self.wheel_separation / 2.0)
+
+                # Convert wheel speeds to PWM
+                MIN_PWM_FORWARD = 90
+                MIN_PWM_ROTATE = 90
+                MAX_PWM = 180
+                left_pwm = self._wheel_speed_to_pwm(v_left, linear, angular, MIN_PWM_FORWARD, MIN_PWM_ROTATE, MAX_PWM)
+                right_pwm = self._wheel_speed_to_pwm(v_right, linear, angular, MIN_PWM_FORWARD, MIN_PWM_ROTATE, MAX_PWM)
+
+                # Apply inversion per wheel (matches wiring)
+                if self.invert_left_motor:
+                    left_pwm = -left_pwm
+                if self.invert_right_motor:
+                    right_pwm = -right_pwm
+
+                # Publish debug info
+                debug_msg = Twist()
+                debug_msg.linear.x = float(left_pwm)
+                debug_msg.linear.y = float(right_pwm)
+                debug_msg.angular.z = float(angular)
+                self.debug_cmd_pub.publish(debug_msg)
+
+                # Log significant commands
+                if (left_pwm != 0 or right_pwm != 0) and (now_wall - self._last_cmd_log_wall >= 0.5):
+                    self.get_logger().info(
+                        f'CMD: lin={linear:.2f} ang={angular:.2f} -> PWM L={left_pwm} R={right_pwm}')
+                    self._last_cmd_log_wall = now_wall
+
+                # Send only if changed (or periodically to keep link alive)
+                need_send = (left_pwm, right_pwm) != self._last_sent_pwm
+                if (now_wall - self._last_send_wall) > 0.5:
+                    need_send = True
+
+                if need_send:
+                    command = f"{left_pwm},{right_pwm}"
+                    if self.serial is not None:
+                        try:
+                            with self._serial_lock:
+                                self.serial.write(f"{command}\n".encode('utf-8'))
+                            self._last_sent_pwm = (left_pwm, right_pwm)
+                            self._last_send_wall = now_wall
+                        except (serial.SerialException, OSError) as e:
+                            self.get_logger().warning(f'Serial write error: {e}')
+                            self.serial = None
+                    else:
+                        if (left_pwm != 0 or right_pwm != 0) and (now_wall - self._last_no_serial_log_wall >= 2.0):
+                            self.get_logger().info(f'🔌 [NO SERIAL] PWM L={left_pwm} R={right_pwm} (not sent)')
+                            self._last_no_serial_log_wall = now_wall
+
+                self.last_cmd_time = now
+                self._motors_stopped = (left_pwm == 0 and right_pwm == 0)
             
             # Watchdog: stop motors if no cmd_vel received recently
             if not self._motors_stopped:
@@ -289,7 +353,7 @@ class ArduinoDriver(Node):
                         try:
                             with self._serial_lock:
                                 self.serial.write(b"0,0\n")
-                        except serial.SerialException:
+                        except (serial.SerialException, OSError):
                             self.serial = None
                     self._motors_stopped = True
             
@@ -298,19 +362,22 @@ class ArduinoDriver(Node):
                 return
             if not self.serial.is_open:
                 return
-            if self.serial.in_waiting > 0:
-                try:
-                    line = self.serial.readline().decode('utf-8').strip()
+            with self._serial_lock:
+                if self.serial.in_waiting > 0:
                     try:
-                        distance_cm = float(line)
-                        if 0 <= distance_cm <= 500:
-                            self._publish_range(distance_cm, now)
-                    except ValueError:
+                        line = self.serial.readline().decode('utf-8').strip()
+                        try:
+                            distance_cm = float(line)
+                            if 0 <= distance_cm <= 500:
+                                self._publish_range(distance_cm, now)
+                        except ValueError:
+                            pass
+                    except (ValueError, UnicodeDecodeError):
                         pass
-                except (ValueError, UnicodeDecodeError):
-                    pass
         except (serial.SerialException, OSError) as e:
             self.get_logger().warning(f'Serial error in update_loop: {e}')
+            # Treat as disconnect so retry timer will reconnect.
+            self.serial = None
         except Exception as e:
             self.get_logger().error(f'update_loop error: {e}')
 

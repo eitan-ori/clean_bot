@@ -68,22 +68,40 @@
 
     <link name="chassis">
         <visual>
-            <origin xyz="0.15 0 0.075"/>
+            <origin xyz="0.15 0 0.075" rpy="0 0 0"/>
             <geometry>
-                <box size="0.3 0.3 0.15"/>
+                <cylinder radius="0.18" length="0.15"/>
             </geometry>
             <material name="white"/>
         </visual>
         <collision>
-            <origin xyz="0.15 0 0.075"/>
+            <origin xyz="0.15 0 0.075" rpy="0 0 0"/>
             <geometry>
-                <box size="0.3 0.3 0.15"/>
+                <cylinder radius="0.18" length="0.15"/>
             </geometry>
         </collision>
-        <xacro:inertial_box mass="0.5" x="0.3" y="0.3" z="0.15">
+        <xacro:inertial_cylinder mass="0.5" length="0.15" radius="0.18">
             <origin xyz="0.15 0 0.075" rpy="0 0 0"/>
-        </xacro:inertial_box>
+        </xacro:inertial_cylinder>
     </link>
+    
+    <!-- FRONT INDICATOR -->
+    <joint name="front_indicator_joint" type="fixed">
+        <parent link="chassis"/>
+        <child link="front_indicator"/>
+        <origin xyz="0.31 0 0.16" rpy="0 0 0"/>
+    </joint>
+    <link name="front_indicator">
+        <visual>
+            <geometry>
+                <box size="0.04 0.1 0.04"/>
+            </geometry>
+            <material name="orange"/>
+        </visual>
+    </link>
+    <gazebo reference="front_indicator">
+        <material>Gazebo/Orange</material>
+    </gazebo>
     
     <gazebo reference="chassis">
         <material>Gazebo/White</material>

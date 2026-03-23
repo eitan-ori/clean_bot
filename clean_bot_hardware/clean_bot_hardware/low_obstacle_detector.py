@@ -52,6 +52,13 @@ class LowObstacleDetector(Node):
 
         # ===================== Parameters =====================
         self.declare_parameter('ultrasonic_frame', 'ultrasonic_link')
+        # Publish frame for Nav2 costmaps. Using base_link avoids hard dependency
+        # on ultrasonic_link TF (which can be missing/duplicated on real robots).
+        self.declare_parameter('publish_frame', 'base_link')
+        # Fixed offset from publish_frame to the ultrasonic sensor (meters).
+        # Only used when publish_frame != ultrasonic_frame.
+        self.declare_parameter('sensor_offset_x', 0.20)
+        self.declare_parameter('sensor_offset_y', 0.0)
         self.declare_parameter('min_obstacle_distance', 0.05)   # 5cm - ignore closer (noise)
         self.declare_parameter('max_obstacle_distance', 0.50)   # 50cm - detection range
         self.declare_parameter('obstacle_height', 0.03)         # 3cm - sensor height
@@ -59,7 +66,10 @@ class LowObstacleDetector(Node):
         self.declare_parameter('points_per_detection', 5)       # Points to generate per reading
         self.declare_parameter('obstacle_persistence', 2.0)     # Seconds to keep obstacle
         
-        self.frame_id = self.get_parameter('ultrasonic_frame').value
+        self.ultrasonic_frame_id = self.get_parameter('ultrasonic_frame').value
+        self.publish_frame_id = self.get_parameter('publish_frame').value
+        self.sensor_offset_x = float(self.get_parameter('sensor_offset_x').value)
+        self.sensor_offset_y = float(self.get_parameter('sensor_offset_y').value)
         self.min_dist = self.get_parameter('min_obstacle_distance').value
         self.max_dist = self.get_parameter('max_obstacle_distance').value
         self.obstacle_height = self.get_parameter('obstacle_height').value
@@ -92,6 +102,7 @@ class LowObstacleDetector(Node):
         self.get_logger().info('🔍 Low Obstacle Detector started')
         self.get_logger().info(f'   Detection range: {self.min_dist*100:.0f}cm - {self.max_dist*100:.0f}cm')
         self.get_logger().info(f'   Sensor height: {self.obstacle_height*100:.0f}cm')
+        self.get_logger().info(f'   Frames: ultrasonic={self.ultrasonic_frame_id} publish={self.publish_frame_id}')
 
     def range_callback(self, msg: Range):
         """Process ultrasonic range reading."""
@@ -137,7 +148,7 @@ class LowObstacleDetector(Node):
         """
         points = []
         
-        # Generate points in a cone pattern
+        # Generate points in a cone pattern (in the sensor forward direction)
         for i in range(self.num_points):
             # Spread points across the cone angle
             angle = -self.cone_angle + (2 * self.cone_angle * i / (self.num_points - 1)) if self.num_points > 1 else 0
@@ -146,7 +157,13 @@ class LowObstacleDetector(Node):
             x = distance * math.cos(angle)
             y = distance * math.sin(angle)
             z = 0.0  # At sensor height (will be transformed by TF)
-            
+
+            # Optionally shift into publish_frame using a fixed offset.
+            # This avoids TF lookups for every message.
+            if self.publish_frame_id != self.ultrasonic_frame_id:
+                x += self.sensor_offset_x
+                y += self.sensor_offset_y
+
             points.append((x, y, z))
         
         # Create PointCloud2 message
@@ -154,7 +171,7 @@ class LowObstacleDetector(Node):
         # Use Time(0) to tell the costmap to use latest available transform
         # This avoids timing issues where message timestamp is ahead of TF buffer
         header.stamp = Time(seconds=0).to_msg()
-        header.frame_id = self.frame_id
+        header.frame_id = self.publish_frame_id
         
         # Define fields
         fields = [
@@ -186,15 +203,16 @@ class LowObstacleDetector(Node):
         """Publish visualization marker for RViz."""
         # Create point in sensor frame
         point_in_sensor = PointStamped()
-        point_in_sensor.header.frame_id = self.frame_id
+        point_in_sensor.header.frame_id = self.publish_frame_id
         point_in_sensor.header.stamp = self.get_clock().now().to_msg()
-        point_in_sensor.point.x = distance
-        point_in_sensor.point.y = 0.0
+        # Marker uses a representative point straight ahead.
+        point_in_sensor.point.x = distance + (self.sensor_offset_x if self.publish_frame_id != self.ultrasonic_frame_id else 0.0)
+        point_in_sensor.point.y = (self.sensor_offset_y if self.publish_frame_id != self.ultrasonic_frame_id else 0.0)
         point_in_sensor.point.z = 0.0
 
         try:
             # Transform to map frame so marker stays in one place
-            transform = self.tf_buffer.lookup_transform('map', self.frame_id, rclpy.time.Time())
+            transform = self.tf_buffer.lookup_transform('map', self.publish_frame_id, rclpy.time.Time())
             point_in_map = tf2_geometry_msgs.do_transform_point(point_in_sensor, transform)
             
             marker = Marker()

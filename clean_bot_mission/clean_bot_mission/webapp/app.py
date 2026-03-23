@@ -85,13 +85,12 @@ class WebBridgeNode(Node):
         # ── Publishers ──
         self.cmd_pub = self.create_publisher(String, "mission_command", 10)
         self.vel_pub = self.create_publisher(Twist, "cmd_vel_nav", 10)
-        # Publisher for injecting saved room maps
-        map_pub_qos = QoSProfile(
-            depth=1,
-            durability=DurabilityPolicy.TRANSIENT_LOCAL,
-            reliability=ReliabilityPolicy.RELIABLE,
-        )
-        self.map_pub = self.create_publisher(OccupancyGrid, "map", map_pub_qos)
+        # NOTE: Do not create a persistent /map publisher here.
+        # In the normal "live SLAM" mission, /map must have a single source
+        # (Cartographer). Publishing a saved-room OccupancyGrid to /map while
+        # SLAM is running causes multiple /map publishers and intermittent
+        # worldToMap/out-of-bounds failures in Nav2.
+        self._saved_room_map_pub = None
 
         # ── QoS for map ──
         map_qos = QoSProfile(
@@ -584,6 +583,25 @@ class WebBridgeNode(Node):
 
     def load_and_clean_room(self, filename):
         """Load a saved room map (walls only), publish it, and start cleaning."""
+        # Safety: Only allow injecting a saved-room map when no external node is
+        # already publishing /map (e.g., Cartographer). Otherwise Nav2 may
+        # receive alternating OccupancyGrid origins/sizes and fail worldToMap.
+        try:
+            pub_infos = self.get_publishers_info_by_topic("map")
+            external_publishers = sorted(
+                {info.node_name for info in pub_infos if info.node_name != self.get_name()}
+            )
+        except Exception:
+            external_publishers = []
+
+        if external_publishers:
+            pubs = ", ".join(external_publishers)
+            return (
+                False,
+                f"Cannot load a saved room while live /map publishers are active ({pubs}). "
+                "Stop SLAM/Cartographer (or run a saved-room-only launch) and retry.",
+            )
+
         path = WebBridgeNode._safe_room_path(filename)
         if path is None or not path.exists():
             return False, "Room not found"
@@ -614,9 +632,19 @@ class WebBridgeNode(Node):
             msg.info.origin.position.y = 0.0
         msg.info.origin.orientation.w = 1.0
         msg.data = [int(v) for v in d["data"]]
-        # Publish to ROS so SLAM/Nav2/coverage planner pick it up.
+
+        # Lazily create the /map publisher only for saved-room injection mode.
+        if self._saved_room_map_pub is None:
+            map_pub_qos = QoSProfile(
+                depth=1,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                reliability=ReliabilityPolicy.RELIABLE,
+            )
+            self._saved_room_map_pub = self.create_publisher(OccupancyGrid, "map", map_pub_qos)
+
+        # Publish to ROS so Nav2/coverage planner can use the saved map.
         # Our own _on_map callback will update internal state (map_msg, counter, heatmap).
-        self.map_pub.publish(msg)
+        self._saved_room_map_pub.publish(msg)
         room_name = d.get('name', filename)
         self.get_logger().info(f"Published saved room map '{room_name}' ({w}x{h})")
 

@@ -3,6 +3,9 @@ build/
 install/
 log/
 
+# Vendor repos (keep out of main repo unless intentionally vendored/submodule)
+jsk_visualization/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -35,6 +38,10 @@ Thumbs.db
 # Generated files
 *.log
 *.pyc
+
+# Local helper scripts (may contain credentials / machine-specific paths)
+update_pi.py
+update_pi*.py
 
 # Runtime data (created by webapp)
 **/schedules.json

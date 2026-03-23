@@ -56,6 +56,12 @@ install(PROGRAMS
   RENAME scan_throttle
 )
 
+install(PROGRAMS
+  clean_bot_hardware/tf_odom_publisher.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME tf_odom_publisher
+)
+
 # Install launch files
 install(DIRECTORY launch/
   DESTINATION share/${PROJECT_NAME}/launch

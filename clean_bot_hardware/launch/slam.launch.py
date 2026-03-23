@@ -16,12 +16,13 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
 
     # 1. Launch Sensors (Lidar + IMU)
-    # Disable IMU odom because we use rf2o
+    # Keep IMU odom broadcaster enabled by default.
+    # (If you use rf2o, disable publish_odom at launch time.)
     sensors_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(hardware_pkg, 'launch', 'sensors.launch.py')
         ),
-        launch_arguments={'publish_odom': 'false'}.items()
+        launch_arguments={'publish_odom': 'true'}.items()
     )
 
     # 2.1 Joint State Publisher (Fixes RViz wheel errors)

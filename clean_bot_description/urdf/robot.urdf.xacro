@@ -16,4 +16,8 @@
     <xacro:include filename="imu.xacro" />
     <xacro:include filename="ultrasonic.xacro" />
 
+    <!-- Instantiate sensors that are defined as macros -->
+    <!-- Front-facing ultrasonic (HC-SR04). Pose is relative to chassis. -->
+    <xacro:ultrasonic_sensor parent_link="chassis" xyz="0.30 0 0.03" rpy="0 0 0" />
+
 </robot>

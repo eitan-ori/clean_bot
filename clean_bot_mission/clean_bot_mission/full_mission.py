@@ -87,12 +87,18 @@ class FullMissionController(Node):
         # ===================== Parameters =====================
         self.declare_parameter('coverage_width', 0.14)
         self.declare_parameter('auto_start', False)           # If True, start scan immediately
+        self.declare_parameter('auto_start_delay_sec', 3.0)   # Delay before auto-starting exploration
+        # If True (default), this process also runs the exploration + coverage nodes.
+        # If False, launch frontier_explorer/adaptive_coverage as separate processes.
+        self.declare_parameter('run_subnodes', True)
         self.declare_parameter('return_home_after', True)
         self.declare_parameter('home_x', 0.0)
         self.declare_parameter('home_y', 0.0)
 
         self.coverage_width = self.get_parameter('coverage_width').value
         self.auto_start = self.get_parameter('auto_start').value
+        self.auto_start_delay_sec = float(self.get_parameter('auto_start_delay_sec').value)
+        self.run_subnodes = bool(self.get_parameter('run_subnodes').value)
         self.return_home = self.get_parameter('return_home_after').value
         self.home_x = self.get_parameter('home_x').value
         self.home_y = self.get_parameter('home_y').value
@@ -107,7 +113,9 @@ class FullMissionController(Node):
 
         # ===================== Publishers =====================
         self.state_pub = self.create_publisher(String, 'mission_state', 10)
-        self.cmd_vel_pub = self.create_publisher(Twist, 'cmd_vel', 10)
+        # Publish stop commands onto the same velocity channel Nav2/Arduino use.
+        # This ensures stop_scan/pause/reset reliably stop the robot.
+        self.cmd_vel_pub = self.create_publisher(Twist, 'cmd_vel_nav', 10)
         
         # Control publishers for sub-nodes
         self.exploration_control_pub = self.create_publisher(String, 'exploration_control', 10)
@@ -144,7 +152,10 @@ class FullMissionController(Node):
         # Auto-start if configured
         if self.auto_start:
             self._auto_start_timer = self.create_timer(
-                3.0, self._auto_start_once, callback_group=ReentrantCallbackGroup())
+                max(0.0, self.auto_start_delay_sec),
+                self._auto_start_once,
+                callback_group=ReentrantCallbackGroup(),
+            )
 
     def _auto_start_once(self):
         """Auto-start exploration once, then cancel the timer."""
@@ -471,7 +482,9 @@ class FullMissionController(Node):
 
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose.header.frame_id = 'map'
-        goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
+        # Use stamp=0 (latest) to avoid TF extrapolation failures if the system clock
+        # steps forward (e.g., NTP sync after boot).
+        goal_msg.pose.header.stamp = rclpy.time.Time().to_msg()
         goal_msg.pose.pose.position.x = float(self.home_x)
         goal_msg.pose.pose.position.y = float(self.home_y)
         goal_msg.pose.pose.orientation.w = 1.0
@@ -540,16 +553,22 @@ class FullMissionController(Node):
 def main(args=None):
     rclpy.init(args=args)
     
-    # Create nodes
+    # Create the mission controller node first so launch parameters apply.
     mission_controller = FullMissionController()
-    explorer = FrontierExplorer()
-    coverage_planner = AdaptiveCoveragePlanner()
-    
-    # Use multi-threaded executor to run all nodes
+
+    explorer = None
+    coverage_planner = None
     executor = MultiThreadedExecutor(num_threads=4)
     executor.add_node(mission_controller)
-    executor.add_node(explorer)
-    executor.add_node(coverage_planner)
+
+    if mission_controller.run_subnodes:
+        explorer = FrontierExplorer()
+        coverage_planner = AdaptiveCoveragePlanner()
+        executor.add_node(explorer)
+        executor.add_node(coverage_planner)
+        mission_controller.get_logger().info('🧩 Running subnodes in-process: frontier_explorer + adaptive_coverage')
+    else:
+        mission_controller.get_logger().info('🧩 Subnodes disabled (run_subnodes:=false). Expect separate nodes from launch.')
     
     try:
         executor.spin()
@@ -560,8 +579,10 @@ def main(args=None):
     finally:
         executor.shutdown()
         mission_controller.destroy_node()
-        explorer.destroy_node()
-        coverage_planner.destroy_node()
+        if explorer is not None:
+            explorer.destroy_node()
+        if coverage_planner is not None:
+            coverage_planner.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
 

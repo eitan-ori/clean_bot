@@ -79,6 +79,7 @@ class FrontierExplorer(Node):
         self.declare_parameter('min_goal_distance', 0.3)     # Reduced — don't skip nearby frontiers
         self.declare_parameter('navigation_timeout', 60.0)   # Single goal timeout
         self.declare_parameter('auto_start', False)          # Wait for explicit start command
+        self.declare_parameter('goal_map_margin_cells', 4)   # Keep goals away from map edges
         
         self.min_frontier_size = self.get_parameter('min_frontier_size').value
         self.robot_radius = self.get_parameter('robot_radius').value
@@ -87,6 +88,7 @@ class FrontierExplorer(Node):
         self.min_goal_distance = self.get_parameter('min_goal_distance').value
         self.navigation_timeout = self.get_parameter('navigation_timeout').value
         self.auto_start = self.get_parameter('auto_start').value
+        self.goal_map_margin_cells = int(self.get_parameter('goal_map_margin_cells').value)
 
         # ===================== Action Client =====================
         self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
@@ -157,6 +159,29 @@ class FrontierExplorer(Node):
         # TF for robot position (map -> base_link)
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
+
+    def _world_to_grid(self, x: float, y: float):
+        if self.map_info is None:
+            return None
+        res = float(self.map_info.resolution)
+        if res <= 0:
+            return None
+        col = int((x - float(self.map_info.origin.position.x)) / res)
+        row = int((y - float(self.map_info.origin.position.y)) / res)
+        return col, row
+
+    def _grid_in_bounds(self, col: int, row: int) -> bool:
+        if self.map_info is None:
+            return False
+        return 0 <= row < int(self.map_info.height) and 0 <= col < int(self.map_info.width)
+
+    def _grid_in_margin(self, col: int, row: int, margin_cells: int) -> bool:
+        if self.map_info is None:
+            return False
+        w = int(self.map_info.width)
+        h = int(self.map_info.height)
+        m = max(0, int(margin_cells))
+        return (m <= col < (w - m)) and (m <= row < (h - m))
 
     def control_callback(self, msg: String):
         """Handle external control commands."""
@@ -502,11 +527,49 @@ class FrontierExplorer(Node):
             return
 
         # Find a safe goal point near the frontier (not exactly on it)
-        goal_x, goal_y = self.find_safe_goal_near_frontier(frontier)
+        goal_xy = self.find_safe_goal_near_frontier(frontier)
+        if goal_xy is None:
+            key = (round(frontier['x'], 1), round(frontier['y'], 1))
+            self.failed_goals.add(key)
+            self.get_logger().warn('   ⚠️ No safe free-space goal found near frontier; skipping')
+            return
+
+        goal_x, goal_y = goal_xy
+
+        # Extra guard: keep goals away from the map edge to avoid Nav2
+        # worldToMap failures when planners sample around the goal.
+        ij = self._world_to_grid(goal_x, goal_y)
+        if ij is None:
+            key = (round(goal_x, 1), round(goal_y, 1))
+            self.failed_goals.add(key)
+            self.get_logger().warn('   ⚠️ Goal grid conversion failed; skipping')
+            return
+
+        col, row = ij
+        if (not self._grid_in_bounds(col, row)) or (not self._grid_in_margin(col, row, self.goal_map_margin_cells)):
+            key = (round(goal_x, 1), round(goal_y, 1))
+            self.failed_goals.add(key)
+            self.get_logger().warn(
+                f'   ⚠️ Goal too close to map edge (cell={col},{row}, margin={self.goal_map_margin_cells}); skipping')
+            return
+
+        if self.map_array is not None:
+            try:
+                v = int(self.map_array[row, col])
+            except Exception:
+                v = -999
+            if not (0 <= v < FREE_THRESHOLD):
+                key = (round(goal_x, 1), round(goal_y, 1))
+                self.failed_goals.add(key)
+                self.get_logger().warn('   ⚠️ Goal not in free space; skipping')
+                return
         
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose.header.frame_id = 'map'
-        goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
+        # Use stamp=0 (latest) to avoid TF extrapolation failures if the system clock
+        # steps forward (e.g., NTP sync after boot). Nav2 will transform using the
+        # most recent available TF.
+        goal_msg.pose.header.stamp = Time().to_msg()
         goal_msg.pose.pose.position.x = goal_x
         goal_msg.pose.pose.position.y = goal_y
         goal_msg.pose.pose.orientation.w = 1.0
@@ -547,7 +610,7 @@ class FrontierExplorer(Node):
             key = (round(self.current_goal['x'], 1), round(self.current_goal['y'], 1))
             self.failed_goals.add(key)
 
-    def find_safe_goal_near_frontier(self, frontier: dict) -> tuple:
+    def find_safe_goal_near_frontier(self, frontier: dict):
         """
         Find a safe (free) cell near the frontier centroid.
         Checks centroid first, then expands outward checking only the
@@ -591,7 +654,7 @@ class FrontierExplorer(Node):
                 return (x, y)
 
         # Fallback: return original point
-        return (target_x, target_y)
+        return None
 
     def goal_response_callback(self, future):
         """Handle goal acceptance/rejection."""

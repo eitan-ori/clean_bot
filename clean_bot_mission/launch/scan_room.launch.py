@@ -28,6 +28,7 @@ from launch.actions import (
     SetEnvironmentVariable,
     LogInfo,
 )
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
@@ -40,6 +41,8 @@ def generate_launch_description():
     arduino_port = LaunchConfiguration('arduino_port', default='/dev/ttyACM0')
     lidar_port = LaunchConfiguration('lidar_port', default='/dev/lidar')
     velocity_factor = LaunchConfiguration('velocity_factor', default='1.0')
+    start_explorer = LaunchConfiguration('start_explorer', default='true')
+    explorer_delay_sec = LaunchConfiguration('explorer_delay_sec', default='8.0')
 
     return LaunchDescription([
         # ── Arguments ──
@@ -49,6 +52,10 @@ def generate_launch_description():
                               description='LiDAR serial port (use /dev/lidar if udev rule set)'),
         DeclareLaunchArgument('velocity_factor', default_value='1.0',
                               description='Velocity multiplier (2.0 = twice as fast)'),
+        DeclareLaunchArgument('start_explorer', default_value='true',
+                      description='Start frontier_explorer (disable to reduce CPU/mem while debugging Cartographer)'),
+        DeclareLaunchArgument('explorer_delay_sec', default_value='8.0',
+                      description='Delay before starting frontier_explorer (seconds) to let SLAM/Nav2 initialize'),
 
         # Reduce console noise from Nav2 and other infrastructure
         SetEnvironmentVariable('RCUTILS_CONSOLE_OUTPUT_FORMAT',
@@ -77,6 +84,25 @@ def generate_launch_description():
             }.items()
         ),
 
+        # ── 1b. Frontier Explorer (consumes exploration_control; sends Nav2 goals) ──
+        # Delayed start to reduce startup CPU/memory spikes that can destabilize SLAM on small computers.
+        TimerAction(
+            period=explorer_delay_sec,
+            actions=[
+                Node(
+                    package='clean_bot_mission',
+                    executable='frontier_explorer',
+                    name='frontier_explorer',
+                    output='log',
+                    arguments=['--ros-args', '--log-level', 'info'],
+                    parameters=[{
+                        'auto_start': False,
+                    }],
+                    condition=IfCondition(start_explorer),
+                )
+            ]
+        ),
+
         # ── 2. Full Mission Controller (auto_start=true) ──
         Node(
             package='clean_bot_mission',
@@ -87,6 +113,9 @@ def generate_launch_description():
             parameters=[{
                 'coverage_width': 0.14,
                 'auto_start': True,
+                # Ensure the explorer has started before mission publishes the one-shot "start" control.
+                'auto_start_delay_sec': 10.0,
+                'run_subnodes': False,
                 'return_home_after': True,
             }],
         ),

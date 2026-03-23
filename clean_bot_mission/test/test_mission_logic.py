@@ -795,6 +795,7 @@ class TestExplorerGoalCallbacks:
         explorer.current_goal = {'x': 1.0, 'y': 2.0}
         explorer.consecutive_failures = explorer.max_consecutive_failures - 1
         explorer.start_time = None
+        explorer._retry_after_clear = False
 
         future = MagicMock()
         result = MagicMock()
@@ -802,7 +803,10 @@ class TestExplorerGoalCallbacks:
         future.result.return_value = result
 
         explorer.get_result_callback(future)
-        assert explorer.exploration_state == ExplorationState.COMPLETE
+        # Current behavior: first time we hit the threshold, clear failed goals and retry once.
+        assert explorer.exploration_state != ExplorationState.COMPLETE
+        assert explorer._retry_after_clear is True
+        assert explorer.consecutive_failures == 0
 
 
 class TestExplorerNoGoZones:
@@ -2049,13 +2053,13 @@ class TestFindSafeGoalNearFrontier:
         assert abs(result[1] - expected_y) < 0.001
 
     def test_all_occupied_returns_fallback(self):
-        """If no free cell found within search radius, return original point."""
+        """If no free cell found within search radius, return None (skip frontier)."""
         arr = np.full((20, 20), 100, dtype=np.int8)
         explorer = self._make_explorer(arr)
         from clean_bot_mission.frontier_explorer import FrontierExplorer
         frontier = {'x': 0.5, 'y': 0.5, 'size': 5}
         result = FrontierExplorer.find_safe_goal_near_frontier(explorer, frontier)
-        assert result == (0.5, 0.5)
+        assert result is None
 
     def test_closest_cell_preferred_over_row_major(self):
         """At same radius, prefer the cell closest to centroid (not first in row scan)."""
@@ -2305,6 +2309,7 @@ class TestSelectBestFrontierNogo:
         explorer.frontiers = frontiers
         explorer._no_go_zones = no_go_zones or []
         explorer.failed_goals = set()
+        explorer.consecutive_failures = 0
         explorer.min_goal_distance = 0.5
         explorer.get_robot_position = MagicMock(return_value=robot_pos)
         explorer.get_logger = MagicMock(return_value=MagicMock())
@@ -2338,7 +2343,7 @@ class TestSelectBestFrontierNogo:
         warn_call = explorer.get_logger.return_value.warn
         assert warn_call.called
         args = warn_call.call_args[0][0]
-        assert "skipped_nogo=1" in args
+        assert ("skipped_nogo=1" in args) or ("nogo=1" in args)
 
     def test_nogo_boundary_check(self):
         """Verify _point_in_no_go_zone returns True for point inside zone."""

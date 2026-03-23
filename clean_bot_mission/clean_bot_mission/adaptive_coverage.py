@@ -65,6 +65,7 @@
 """
 
 import json
+import heapq
 import math
 import numpy as np
 import rclpy
@@ -105,7 +106,7 @@ class AdaptiveCoveragePlanner(Node):
         # ===================== Parameters =====================
         self.declare_parameter('coverage_width', 0.14)           # 14cm cleaning width (main suction)
         self.declare_parameter('overlap_ratio', 0.1)            # 10% overlap for safety
-        self.declare_parameter('robot_radius', 0.20)             # 20cm Main body radius
+        self.declare_parameter('robot_radius', 0.23)             # 20cm Main body radius
         # NOTE: Robot has a side brush (4cm radius) at front-left that extends reach.
         # This allows cleaning edges even with 20cm radius body.
         
@@ -115,12 +116,29 @@ class AdaptiveCoveragePlanner(Node):
         self.declare_parameter('max_retries', 1)                 # Number of times to retry missed areas
         
         # Direct movement parameters (turn-then-drive)
-        self.declare_parameter('use_direct_drive', True)         # Use direct cmd_vel instead of Nav2
+        self.declare_parameter('use_direct_drive', False)         # Use direct cmd_vel instead of Nav2
         self.declare_parameter('linear_speed', 0.18)             # Forward speed (m/s) - increased for more power
         self.declare_parameter('angular_speed', 0.25)            # Turn speed (rad/s) - increased for more power
         self.declare_parameter('angle_tolerance', 0.18)          # Radians (~20°) - don't need precision
         self.declare_parameter('position_tolerance', 0.08)       # Meters (8cm)
         self.declare_parameter('max_segment_length', 0.08)       # Max distance between waypoints (meters)
+
+        # Optional finishing pass along walls (clockwise), so the left brush cleans edges.
+        self.declare_parameter('do_wall_hug_finish', True)
+        self.declare_parameter('wall_hug_spacing', 0.30)         # meters between perimeter waypoints
+        # Desired clearance from ROBOT EDGE to wall (meters). 0.01 = 1cm.
+        # The planner will keep the robot CENTER approximately at (wall_hug_body_radius + wall_hug_clearance)
+        # from occupied cells in the map.
+        self.declare_parameter('wall_hug_body_radius', 0.18)      # meters (center -> robot edge)
+        self.declare_parameter('wall_hug_clearance', 0.01)        # meters (edge -> wall)
+
+        # When ordering cells/waypoints, straight segments between consecutive waypoints can cut
+        # through unknown/occupied space in L-shaped rooms. This option inserts a short grid
+        # path (A*) between waypoints when the straight segment is not free, so the published
+        # coverage path (and direct-drive mode) stays inside the room.
+        self.declare_parameter('connect_waypoints_through_free_space', True)
+        self.declare_parameter('connect_waypoints_roi_margin', 0.8)   # meters search margin around start/goal
+        self.declare_parameter('connect_waypoints_max_expansions', 20000)
 
         # Frames (waypoints are generated in map frame)
         self.declare_parameter('global_frame', 'map')
@@ -128,7 +146,7 @@ class AdaptiveCoveragePlanner(Node):
         
         self.coverage_width = self.get_parameter('coverage_width').value
         self.overlap_ratio = self.get_parameter('overlap_ratio').value
-        self.robot_radius = self.get_parameter('robot_radius').value
+        self.robot_radius = 0.22
         self.timeout = self.get_parameter('timeout_per_waypoint').value
         self.auto_start = self.get_parameter('start_on_exploration_complete').value
         self.min_region_area = self.get_parameter('min_region_area').value
@@ -143,6 +161,15 @@ class AdaptiveCoveragePlanner(Node):
         self.max_segment_length = self.get_parameter('max_segment_length').value
         self.global_frame = self.get_parameter('global_frame').value
         self.base_frame = self.get_parameter('base_frame').value
+
+        self.do_wall_hug_finish = bool(self.get_parameter('do_wall_hug_finish').value)
+        self.wall_hug_spacing = float(self.get_parameter('wall_hug_spacing').value)
+        self.wall_hug_body_radius = float(self.get_parameter('wall_hug_body_radius').value)
+        self.wall_hug_clearance = float(self.get_parameter('wall_hug_clearance').value)
+        self.connect_waypoints_through_free_space = bool(
+            self.get_parameter('connect_waypoints_through_free_space').value)
+        self.connect_waypoints_roi_margin = float(self.get_parameter('connect_waypoints_roi_margin').value)
+        self.connect_waypoints_max_expansions = int(self.get_parameter('connect_waypoints_max_expansions').value)
         
         # Effective step between lines
         self.step_size = self.coverage_width * (1 - self.overlap_ratio)
@@ -189,9 +216,8 @@ class AdaptiveCoveragePlanner(Node):
         # Direct movement publisher (bypasses Nav2)
         self.cmd_vel_pub = self.create_publisher(Twist, 'cmd_vel_nav', 10)
         
-        # Odometry subscriber for position feedback
-        self.odom_sub = self.create_subscription(
-            Odometry, 'odom', self.odom_callback, 10)
+        # Control timer to replace odom_callback since SLAM may not publish /odom
+        self.control_timer = self.create_timer(0.05, self.control_loop) # 20 Hz
 
         # ===================== State =====================
         self.coverage_state = CoverageState.IDLE
@@ -380,7 +406,7 @@ class AdaptiveCoveragePlanner(Node):
         self.cmd_vel_pub.publish(stop_cmd)
 
     def odom_callback(self, msg: Odometry):
-        """Update robot pose from odometry and drive to next waypoint."""
+        """Legacy odom callback, now mostly unused but kept for compatibility."""
         self.robot_x = msg.pose.pose.position.x
         self.robot_y = msg.pose.pose.position.y
         
@@ -392,23 +418,26 @@ class AdaptiveCoveragePlanner(Node):
         
         self.odom_received = True
 
-        # Simple control: if running coverage, drive to the current waypoint
+    def control_loop(self):
+        """Timer-based control loop for direct drive."""
         if self.coverage_state != CoverageState.RUNNING:
             return
-        if not self.waypoints or self.current_waypoint_idx >= len(self.waypoints):
+        if not self.waypoints:
             return
 
-        # Rate limit
-        now = self.get_clock().now().nanoseconds / 1e9
-        if now - self.last_cmd_time < 1.0 / self.control_rate:
-            return
-        self.last_cmd_time = now
-
-        # Get current target from the ordered waypoint list
-        target_x, target_y, _ = self.waypoints[self.current_waypoint_idx]
-        
-        # Drive toward it
-        self.drive_to_waypoint(target_x, target_y, now)
+        # Mode selection:
+        # - Direct drive: actively publishes cmd_vel toward the current waypoint.
+        # - Nav2: periodically ensures a goal is in flight (NavigateToPose).
+        if self.use_direct_drive:
+            if self.current_waypoint_idx >= len(self.waypoints):
+                return
+            now = self.get_clock().now().nanoseconds / 1e9
+            target_x, target_y, _ = self.waypoints[self.current_waypoint_idx]
+            self.drive_to_waypoint(target_x, target_y, now)
+        else:
+            # Avoid spamming the action server; only send when idle.
+            if not self.is_navigating:
+                self.send_next_goal()
 
     def _get_robot_pose_map(self):
         """Return (x, y, yaw) in map frame when TF is available.
@@ -681,9 +710,37 @@ class AdaptiveCoveragePlanner(Node):
             self.get_logger().error('❌ Could not generate coverage path!')
             self.get_logger().error('   Check that the map has sufficient free space.')
             return
-        
-        # Step 2.5: Densify waypoints - add intermediate points on each segment
-        self.waypoints = self.densify_waypoints(self.waypoints, max_segment_length=self.max_segment_length)
+
+        # Rotate COVERAGE waypoints so the nearest one is first.
+        # Do this BEFORE appending the wall-hug finish, so the mission ends with it.
+        nearest = self.find_nearest_waypoint_index()
+        if nearest > 0:
+            self.waypoints = self.waypoints[nearest:] + self.waypoints[:nearest]
+
+        # Optional finishing loop: clockwise perimeter along inflated free-space boundary.
+        if self.do_wall_hug_finish:
+            perimeter = self.generate_clockwise_perimeter_waypoints(spacing_m=self.wall_hug_spacing)
+            if perimeter:
+                last_x, last_y, _ = self.waypoints[-1]
+                perimeter = self._rotate_waypoints_to_nearest_xy(perimeter, (last_x, last_y))
+                self.waypoints.extend(perimeter)
+                self.get_logger().info(f'🧱 Added wall-hug finish: +{len(perimeter)} waypoints (clockwise)')
+            else:
+                self.get_logger().warn('🧱 Wall-hug finish enabled but no perimeter could be generated')
+
+        # Connect jumps through free space to avoid straight-line segments crossing outside the room.
+        if self.connect_waypoints_through_free_space:
+            before = len(self.waypoints)
+            self.waypoints = self.connect_waypoints(self.waypoints)
+            after = len(self.waypoints)
+            if after != before:
+                self.get_logger().info(f'🔗 Connected waypoints through free space: {before} → {after}')
+
+        # Step 2.5: Densify waypoints (only for direct-drive).
+        # In Nav2 mode, too many micro-goals causes stop&go and less smooth motion.
+        if self.use_direct_drive:
+            self.waypoints = self.densify_waypoints(
+                self.waypoints, max_segment_length=self.max_segment_length)
         
         # Step 2.6: Orient waypoints - each waypoint yaw points toward the NEXT waypoint
         self.waypoints = self.orient_waypoints(self.waypoints)
@@ -696,11 +753,7 @@ class AdaptiveCoveragePlanner(Node):
         self.mission_started = True
         self.coverage_state = CoverageState.RUNNING
         self.start_time = self.get_clock().now()
-        
-        # Rotate waypoints so the nearest one is first — ensures full coverage
-        nearest = self.find_nearest_waypoint_index()
-        if nearest > 0:
-            self.waypoints = self.waypoints[nearest:] + self.waypoints[:nearest]
+
         self.current_waypoint_idx = 0
         self._initial_waypoint_count = len(self.waypoints)
         self._waypoint_start_time = self.get_clock().now().nanoseconds / 1e9
@@ -710,11 +763,33 @@ class AdaptiveCoveragePlanner(Node):
         self.get_logger().info(f'🚀 COVERAGE STARTED')
         self.get_logger().info(f'   Waypoints: {len(self.waypoints)} (ordered list)')
         self.get_logger().info(f'   Starting from: #{self.current_waypoint_idx + 1}')
-        self.get_logger().info(f'   Control: odom_callback → drive_to_waypoint')
+        if self.use_direct_drive:
+            self.get_logger().info(f'   Control: timer → drive_to_waypoint (cmd_vel_nav)')
+        else:
+            self.get_logger().info(f'   Control: Nav2 NavigateToPose action')
         self.get_logger().info('=' * 50)
-        # Note: No need to call send_next_goal() - odom_callback handles everything
+        if not self.use_direct_drive:
+            # Kick off the first goal. Subsequent goals are sent from result callbacks.
+            self.send_next_goal()
+        # Direct-drive mode is handled continuously by the control_loop timer.
+
+
+    def is_point_free(self, x: float, y: float) -> bool:
+        if self.inflated_map is None or self.map_info is None:
+            return True
+        res = self.map_info.resolution
+        ox = self.map_info.origin.position.x
+        oy = self.map_info.origin.position.y
+        col = int((x - ox) / res)
+        row = int((y - oy) / res)
+        h, w = self.inflated_map.shape
+        if 0 <= col < w and 0 <= row < h:
+            val = self.inflated_map[row, col]
+            return 0 <= val < 50
+        return False
 
     def densify_waypoints(self, waypoints: list, max_segment_length: float = 0.15) -> list:
+
         """
         Add intermediate waypoints along each segment so no segment is longer than max_segment_length.
         This helps the robot stay on track by providing more frequent correction points.
@@ -736,8 +811,9 @@ class AdaptiveCoveragePlanner(Node):
             x1, y1, yaw1 = waypoints[i]
             x2, y2, yaw2 = waypoints[i + 1]
             
-            # Always add the start point of this segment
-            densified.append((x1, y1, yaw1))
+            # Always add the start point of this segment (if free)
+            if self.is_point_free(x1, y1):
+                densified.append((x1, y1, yaw1))
             
             # Calculate segment length
             dx = x2 - x1
@@ -751,12 +827,15 @@ class AdaptiveCoveragePlanner(Node):
                     t = j / num_subdivisions
                     interp_x = x1 + t * dx
                     interp_y = y1 + t * dy
-                    # Interpolate yaw as well (simple linear for now)
-                    interp_yaw = yaw1  # Use start yaw, will be recomputed by orient_waypoints
-                    densified.append((interp_x, interp_y, interp_yaw))
+                    interp_yaw = yaw1
+                    if self.is_point_free(interp_x, interp_y):
+                        densified.append((interp_x, interp_y, interp_yaw))
+                    else:
+                        self.get_logger().debug(f"Skipping interpolated waypoint at {interp_x:.2f}, {interp_y:.2f} due to obstacle")
         
         # Add the final waypoint
-        densified.append(waypoints[-1])
+        if self.is_point_free(waypoints[-1][0], waypoints[-1][1]):
+            densified.append(waypoints[-1])
         
         self.get_logger().info(f'📏 Densified path: {original_count} → {len(densified)} waypoints (max segment: {max_segment_length}m)')
         return densified
@@ -817,8 +896,8 @@ class AdaptiveCoveragePlanner(Node):
         """Inflate obstacles by robot radius for safe navigation."""
         if self.map_info is None:
             return
-        # Create obstacle mask
-        obstacle_mask = self.map_array >= OCCUPIED_THRESHOLD
+        # Create obstacle mask (treat both occupied and unknown space as obstacles to avoid driving off the map)
+        obstacle_mask = (self.map_array >= OCCUPIED_THRESHOLD)
         
         # Apply no-go zones as obstacles before inflation
         if self._no_go_zones and self.map_info:
@@ -1149,6 +1228,361 @@ class AdaptiveCoveragePlanner(Node):
             
         return waypoints
 
+    def _world_to_grid(self, x: float, y: float):
+        if self.map_info is None:
+            return None
+        res = float(self.map_info.resolution)
+        if res <= 0:
+            return None
+        ox = float(self.map_info.origin.position.x)
+        oy = float(self.map_info.origin.position.y)
+        col = int((x - ox) / res)
+        row = int((y - oy) / res)
+        h, w = self.map_array.shape
+        if 0 <= row < h and 0 <= col < w:
+            return (row, col)
+        return None
+
+    def _grid_to_world(self, row: int, col: int):
+        res = float(self.map_info.resolution)
+        ox = float(self.map_info.origin.position.x)
+        oy = float(self.map_info.origin.position.y)
+        x = ox + (col + 0.5) * res
+        y = oy + (row + 0.5) * res
+        return (x, y)
+
+    def _segment_is_free_on_map(self, x1: float, y1: float, x2: float, y2: float) -> bool:
+        """Return True if the straight segment stays in free space on inflated_map."""
+        if self.inflated_map is None or self.map_info is None:
+            return True
+
+        res = float(self.map_info.resolution)
+        if res <= 0:
+            return True
+
+        # Sample along the segment at ~half-cell resolution.
+        step = max(res * 0.5, 0.01)
+        dist = math.hypot(x2 - x1, y2 - y1)
+        if dist <= step:
+            return self.is_point_free(x2, y2)
+
+        n = int(math.ceil(dist / step))
+        for i in range(1, n + 1):
+            t = i / n
+            xi = x1 + t * (x2 - x1)
+            yi = y1 + t * (y2 - y1)
+            if not self.is_point_free(xi, yi):
+                return False
+        return True
+
+    def _astar_path(self, start_rc, goal_rc, free_mask, roi_bounds, max_expansions: int):
+        """A* on a boolean free_mask within roi_bounds=(r0,r1,c0,c1). Returns list of (r,c)."""
+        (sr, sc) = start_rc
+        (gr, gc) = goal_rc
+        r0, r1, c0, c1 = roi_bounds
+
+        def in_roi(r: int, c: int) -> bool:
+            return r0 <= r < r1 and c0 <= c < c1
+
+        if not in_roi(sr, sc) or not in_roi(gr, gc):
+            return None
+        if not free_mask[sr, sc] or not free_mask[gr, gc]:
+            return None
+
+        # 8-connected grid.
+        moves = [
+            (-1, 0, 1.0), (1, 0, 1.0), (0, -1, 1.0), (0, 1, 1.0),
+            (-1, -1, math.sqrt(2)), (-1, 1, math.sqrt(2)), (1, -1, math.sqrt(2)), (1, 1, math.sqrt(2)),
+        ]
+
+        def h(r: int, c: int) -> float:
+            return math.hypot(gr - r, gc - c)
+
+        open_heap = []
+        heapq.heappush(open_heap, (h(sr, sc), 0.0, (sr, sc)))
+        came_from = {}
+        g_score = {(sr, sc): 0.0}
+        expansions = 0
+
+        while open_heap and expansions < max_expansions:
+            _f, g, (r, c) = heapq.heappop(open_heap)
+            expansions += 1
+            if (r, c) == (gr, gc):
+                # Reconstruct
+                path = [(r, c)]
+                while (r, c) in came_from:
+                    (r, c) = came_from[(r, c)]
+                    path.append((r, c))
+                path.reverse()
+                return path
+
+            # Skip stale entries
+            if g > g_score.get((r, c), float('inf')) + 1e-9:
+                continue
+
+            for dr, dc, cost in moves:
+                nr, nc = r + dr, c + dc
+                if not in_roi(nr, nc):
+                    continue
+                if not free_mask[nr, nc]:
+                    continue
+                ng = g + cost
+                if ng < g_score.get((nr, nc), float('inf')):
+                    g_score[(nr, nc)] = ng
+                    came_from[(nr, nc)] = (r, c)
+                    heapq.heappush(open_heap, (ng + h(nr, nc), ng, (nr, nc)))
+
+        return None
+
+    def connect_waypoints(self, waypoints: list) -> list:
+        """Insert intermediate points between waypoints when straight segment is not free."""
+        if not waypoints or len(waypoints) < 2:
+            return waypoints
+        if self.inflated_map is None or self.map_info is None or self.map_array is None:
+            return waypoints
+
+        free_mask = (self.inflated_map >= 0) & (self.inflated_map < FREE_THRESHOLD)
+        if not np.any(free_mask):
+            return waypoints
+
+        res = float(self.map_info.resolution)
+        if res <= 0:
+            return waypoints
+
+        margin_m = self.connect_waypoints_roi_margin
+        if not math.isfinite(margin_m) or margin_m < 0.2:
+            margin_m = 0.8
+        margin_cells = int(math.ceil(margin_m / res))
+        max_exp = int(self.connect_waypoints_max_expansions)
+        if max_exp <= 1000:
+            max_exp = 20000
+
+        connected = [waypoints[0]]
+        for i in range(len(waypoints) - 1):
+            x1, y1, _ = connected[-1]
+            x2, y2, _ = waypoints[i + 1]
+
+            # If line-of-sight is free, keep it.
+            if self._segment_is_free_on_map(x1, y1, x2, y2):
+                connected.append(waypoints[i + 1])
+                continue
+
+            s_rc = self._world_to_grid(x1, y1)
+            g_rc = self._world_to_grid(x2, y2)
+            if s_rc is None or g_rc is None:
+                connected.append(waypoints[i + 1])
+                continue
+
+            sr, sc = s_rc
+            gr, gc = g_rc
+            r0 = max(0, min(sr, gr) - margin_cells)
+            r1 = min(free_mask.shape[0], max(sr, gr) + margin_cells + 1)
+            c0 = max(0, min(sc, gc) - margin_cells)
+            c1 = min(free_mask.shape[1], max(sc, gc) + margin_cells + 1)
+
+            path_rc = self._astar_path(s_rc, g_rc, free_mask, (r0, r1, c0, c1), max_exp)
+            if not path_rc or len(path_rc) < 2:
+                connected.append(waypoints[i + 1])
+                continue
+
+            # Convert grid path to sparse world waypoints.
+            # Keep every Nth cell to avoid exploding waypoint counts.
+            keep_every = max(1, int(math.ceil(0.10 / res)))  # ~10cm
+            for k in range(1, len(path_rc) - 1):
+                if k % keep_every != 0:
+                    continue
+                wx, wy = self._grid_to_world(path_rc[k][0], path_rc[k][1])
+                if self.is_point_free(wx, wy):
+                    connected.append((wx, wy, 0.0))
+
+            connected.append(waypoints[i + 1])
+
+        return connected
+
+    def _rotate_waypoints_to_nearest_xy(self, waypoints: list, target_xy: tuple) -> list:
+        if not waypoints:
+            return waypoints
+        tx, ty = target_xy
+        best_i = 0
+        best_d2 = float('inf')
+        for i, (x, y, _yaw) in enumerate(waypoints):
+            d2 = (x - tx) ** 2 + (y - ty) ** 2
+            if d2 < best_d2:
+                best_d2 = d2
+                best_i = i
+        if best_i == 0:
+            return waypoints
+        return waypoints[best_i:] + waypoints[:best_i]
+
+    def generate_clockwise_perimeter_waypoints(self, spacing_m: float = 0.30) -> list:
+        """Clockwise waypoint loop around the main free-space boundary.
+
+        Uses the inflated map so the loop stays safely inside navigable space.
+        Clockwise traversal keeps the wall on the robot's LEFT side.
+        """
+        if self.map_array is None or self.map_info is None:
+            return []
+
+        res = float(self.map_info.resolution)
+        if res <= 0:
+            return []
+
+        spacing_m = float(spacing_m)
+        if not math.isfinite(spacing_m) or spacing_m <= 0.05:
+            spacing_m = 0.30
+
+        # Build an inflation specifically for the wall-hug finish, so the requested
+        # edge-to-wall clearance can be honored independently from the main coverage inflation.
+        body_r = self.wall_hug_body_radius
+        clearance = self.wall_hug_clearance
+        if not math.isfinite(body_r) or body_r <= 0.05:
+            body_r = 0.14
+        if not math.isfinite(clearance) or clearance < 0.0:
+            clearance = 0.01
+
+        center_clearance = body_r + clearance
+        inflation_cells = int(math.ceil(center_clearance / res))
+        inflation_cells = max(1, inflation_cells)
+
+        # Obstacles: occupied cells (same convention as inflate_obstacles).
+        obstacle_mask = (self.map_array >= OCCUPIED_THRESHOLD)
+
+        # Apply no-go zones (same logic as inflate_obstacles).
+        if self._no_go_zones and self.map_info:
+            ox = self.map_info.origin.position.x
+            oy = self.map_info.origin.position.y
+            h, w = self.map_array.shape
+            for zone in self._no_go_zones:
+                try:
+                    zx1, zy1 = float(zone["x1"]), float(zone["y1"])
+                    zx2, zy2 = float(zone["x2"]), float(zone["y2"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                c1 = math.floor((min(zx1, zx2) - ox) / res)
+                c2 = math.ceil((max(zx1, zx2) - ox) / res)
+                r1 = math.floor((min(zy1, zy2) - oy) / res)
+                r2 = math.ceil((max(zy1, zy2) - oy) / res)
+                r1, r2 = max(0, r1), min(h, r2 + 1)
+                c1, c2 = max(0, c1), min(w, c2 + 1)
+                obstacle_mask[r1:r2, c1:c2] = True
+
+        kernel_size = 2 * inflation_cells + 1
+        y, x = np.ogrid[-inflation_cells:inflation_cells + 1, -inflation_cells:inflation_cells + 1]
+        kernel = (x * x + y * y <= inflation_cells * inflation_cells).astype(np.uint8)
+        inflated_obstacles = ndimage.binary_dilation(obstacle_mask, kernel)
+
+        inflated_map = self.map_array.copy()
+        inflated_map[inflated_obstacles] = 100
+
+        free_mask = (inflated_map >= 0) & (inflated_map < FREE_THRESHOLD)
+        if not np.any(free_mask):
+            return []
+
+        # Largest connected component of free space (avoid tiny islands).
+        structure = ndimage.generate_binary_structure(2, 1)  # 4-connectivity
+        labeled, num = ndimage.label(free_mask, structure=structure)
+        if num <= 0:
+            return []
+        counts = np.bincount(labeled.ravel())
+        if counts.size <= 1:
+            return []
+        counts[0] = 0
+        main_label = int(np.argmax(counts))
+        component = (labeled == main_label)
+        if not np.any(component):
+            return []
+
+        eroded = ndimage.binary_erosion(component, structure=structure, border_value=0)
+        boundary = component & (~eroded)
+        if not np.any(boundary):
+            return []
+
+        start_rc = np.argwhere(boundary)
+        start_rc = start_rc[np.lexsort((start_rc[:, 1], start_rc[:, 0]))][0]
+        start_r, start_c = int(start_rc[0]), int(start_rc[1])
+
+        # Moore-neighbor tracing on the component mask.
+        neighbors = [
+            (-1, -1), (-1, 0), (-1, 1),
+            (0, 1),
+            (1, 1), (1, 0), (1, -1),
+            (0, -1),
+        ]
+
+        def in_bounds(r: int, c: int) -> bool:
+            return 0 <= r < component.shape[0] and 0 <= c < component.shape[1]
+
+        curr = (start_r, start_c)
+        back = (start_r, start_c - 1)
+        trace = [curr]
+        initial = (curr, back)
+
+        max_steps = int(boundary.sum()) * 20
+        for _ in range(max_steps):
+            cr, cc = curr
+            br, bc = back
+            dr, dc = br - cr, bc - cc
+            try:
+                b_idx = neighbors.index((dr, dc))
+            except ValueError:
+                b_idx = 7
+
+            start_idx = (b_idx + 1) % 8
+            found = False
+            for k in range(8):
+                idx = (start_idx + k) % 8
+                nr, nc = cr + neighbors[idx][0], cc + neighbors[idx][1]
+                if in_bounds(nr, nc) and component[nr, nc]:
+                    back = (cr + neighbors[(idx - 1) % 8][0], cc + neighbors[(idx - 1) % 8][1])
+                    curr = (nr, nc)
+                    trace.append(curr)
+                    found = True
+                    break
+            if not found:
+                break
+
+            if curr == initial[0] and back == initial[1]:
+                break
+
+        if len(trace) < 10:
+            return []
+
+        ox = float(self.map_info.origin.position.x)
+        oy = float(self.map_info.origin.position.y)
+        xy = []
+        for r, c in trace:
+            x = ox + (c + 0.5) * res
+            y = oy + (r + 0.5) * res
+            xy.append((x, y))
+
+        # Down-sample by arc length.
+        sampled = []
+        acc = 0.0
+        prev_x, prev_y = xy[0]
+        sampled.append((prev_x, prev_y))
+        for x, y in xy[1:]:
+            acc += math.hypot(x - prev_x, y - prev_y)
+            prev_x, prev_y = x, y
+            if acc >= spacing_m:
+                sampled.append((x, y))
+                acc = 0.0
+
+        if len(sampled) < 8:
+            return []
+
+        # Ensure clockwise order (negative signed area).
+        area2 = 0.0
+        for i in range(len(sampled)):
+            x1, y1 = sampled[i]
+            x2, y2 = sampled[(i + 1) % len(sampled)]
+            area2 += (x1 * y2 - x2 * y1)
+        if area2 > 0:
+            sampled.reverse()
+
+        # Close the loop.
+        sampled.append(sampled[0])
+        return [(x, y, 0.0) for (x, y) in sampled]
+
 
     def find_free_segments_in_column(self, col: int) -> list:
         """
@@ -1307,13 +1741,31 @@ class AdaptiveCoveragePlanner(Node):
 
     def send_next_goal(self):
         """
-        SIMPLIFIED: This function is now mostly a no-op.
-        The odom_callback directly reads from self.waypoints[current_waypoint_idx]
-        and calls drive_to_waypoint(). No need for separate target variables.
+        Advance the mission by sending the next goal.
+
+        - In direct-drive mode, the control loop drives toward the current index,
+          so this function only checks for mission completion.
+        - In Nav2 mode, this function sends a NavigateToPose goal for the current
+          waypoint index (if not already navigating).
         """
-        # Just check if mission should finish
+        if not self.waypoints:
+            return
         if self.current_waypoint_idx >= len(self.waypoints):
             self.finish_mission()
+            return
+
+        if self.use_direct_drive:
+            return
+
+        if self.is_navigating:
+            return
+
+        x, y, yaw = self.waypoints[self.current_waypoint_idx]
+        self.is_navigating = True
+        self.get_logger().info(
+            f'🎯 Nav2 goal {self.current_waypoint_idx + 1}/{len(self.waypoints)}: '
+            f'x={x:.2f} y={y:.2f}')
+        self.send_goal_nav2(x, y, yaw)
 
     def _retry_send_goal_once(self):
         """Retry sending goal after waiting for odom."""
@@ -1355,7 +1807,9 @@ class AdaptiveCoveragePlanner(Node):
         
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose.header.frame_id = 'map'
-        goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
+        # Use stamp=0 (latest) to avoid TF extrapolation failures if the system clock
+        # steps forward (e.g., NTP sync after boot).
+        goal_msg.pose.header.stamp = Time().to_msg()
         goal_msg.pose.pose.position.x = x
         goal_msg.pose.pose.position.y = y
         # Convert yaw to quaternion (w, x, y, z)
@@ -1503,6 +1957,10 @@ class AdaptiveCoveragePlanner(Node):
             # Optimize the visit order (nearest-neighbor on individual waypoints)
             if len(self.waypoints) > 2:
                 self.waypoints = self._nearest_neighbor_order(self.waypoints)
+
+            # Connect jumps through free space to avoid straight-line segments crossing outside the room.
+            if self.connect_waypoints_through_free_space:
+                self.waypoints = self.connect_waypoints(self.waypoints)
             
             # Densify and orient (same as initial path generation)
             self.waypoints = self.densify_waypoints(self.waypoints, max_segment_length=self.max_segment_length)
