@@ -15,14 +15,17 @@ def generate_launch_description():
     # Arguments
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
 
-    # 1. Launch Sensors (Lidar + IMU)
-    # Keep IMU odom broadcaster enabled by default.
-    # (If you use rf2o, disable publish_odom at launch time.)
+    # 1. Launch Sensors (Lidar + optional IMU)
+    # IMPORTANT: On robots without a real IMU, keep use_imu:=false.
+    # If Cartographer provides odom->base_link, do NOT also run imu_odom_broadcaster.
     sensors_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(hardware_pkg, 'launch', 'sensors.launch.py')
         ),
-        launch_arguments={'publish_odom': 'true'}.items()
+        launch_arguments={
+            'use_imu': 'false',
+            'publish_odom': 'false',
+        }.items()
     )
 
     # 2.1 Joint State Publisher (Fixes RViz wheel errors)

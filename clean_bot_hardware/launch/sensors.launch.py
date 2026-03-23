@@ -11,7 +11,7 @@ import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration, Command
+from launch.substitutions import LaunchConfiguration, Command, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from ament_index_python.packages import get_package_share_directory
@@ -29,11 +29,15 @@ def generate_launch_description():
     i2c_bus = LaunchConfiguration('i2c_bus', default='1')
     imu_frame_id = LaunchConfiguration('imu_frame_id', default='imu_link')
     imu_rate = LaunchConfiguration('imu_rate', default='50.0')
+
+    # Whether to start IMU-related nodes at all.
+    # Many robots do not have an IMU; keep this false unless you physically wired one.
+    use_imu = LaunchConfiguration('use_imu', default='false')
     
     # Madgwick filter arguments
     use_madgwick = LaunchConfiguration('use_madgwick', default='true')
     use_mag = LaunchConfiguration('use_mag', default='true')
-    publish_odom = LaunchConfiguration('publish_odom', default='true')
+    publish_odom = LaunchConfiguration('publish_odom', default='false')
     
     # ==================== Robot Description ====================
     pkg_description = get_package_share_directory('clean_bot_description')
@@ -59,6 +63,10 @@ def generate_launch_description():
         
         # IMU
         DeclareLaunchArgument(
+            'use_imu',
+            default_value='false',
+            description='Whether to launch IMU nodes (requires real IMU hardware)'),
+        DeclareLaunchArgument(
             'i2c_bus',
             default_value='1',
             description='I2C bus number for IMU'),
@@ -82,7 +90,7 @@ def generate_launch_description():
             description='Whether to use magnetometer for yaw correction'),
         DeclareLaunchArgument(
             'publish_odom',
-            default_value='true',
+            default_value='false',
             description='Whether to publish odom TF from IMU'),
         
         # ==================== Robot State Publisher ====================
@@ -116,6 +124,7 @@ def generate_launch_description():
             package='clean_bot_hardware',
             executable='imu_publisher',
             name='imu_publisher_node',
+            condition=IfCondition(use_imu),
             parameters=[{
                 'i2c_bus': i2c_bus,
                 'frame_id': imu_frame_id,
@@ -129,7 +138,9 @@ def generate_launch_description():
             package='imu_filter_madgwick',
             executable='imu_filter_madgwick_node',
             name='imu_filter',
-            condition=IfCondition(use_madgwick),
+            condition=IfCondition(PythonExpression([
+                '"', use_imu, '" == "true" and "', use_madgwick, '" == "true"'
+            ])),
             parameters=[{
                 'use_mag': use_mag,
                 'publish_tf': False,  # Disable TF, we use our own broadcaster
@@ -148,7 +159,9 @@ def generate_launch_description():
             package='clean_bot_hardware',
             executable='imu_odom_broadcaster',
             name='imu_odom_broadcaster',
-            condition=IfCondition(publish_odom),
+            condition=IfCondition(PythonExpression([
+                '"', use_imu, '" == "true" and "', publish_odom, '" == "true"'
+            ])),
             parameters=[{
                 'imu_topic': '/imu/data',
                 'parent_frame': 'odom',
