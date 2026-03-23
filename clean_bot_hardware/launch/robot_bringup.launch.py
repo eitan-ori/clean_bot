@@ -62,6 +62,7 @@ def generate_launch_description():
     use_slam = LaunchConfiguration('use_slam', default='true')
     use_emergency_stop = LaunchConfiguration('use_emergency_stop', default='true')
     use_rf2o = LaunchConfiguration('use_rf2o', default='false')
+    use_imu = LaunchConfiguration('use_imu', default='false')
     velocity_factor = LaunchConfiguration('velocity_factor', default='1.0')
     
     # ==================== Robot Description ====================
@@ -92,6 +93,10 @@ def generate_launch_description():
                               description='Launch emergency stop safety node'),
         DeclareLaunchArgument('use_rf2o', default_value='false',
                       description='Launch rf2o_laser_odometry (external odom). Default is false; Cartographer provides odom->base_link TF.'),
+        DeclareLaunchArgument(
+            'use_imu',
+            default_value='false',
+            description='Whether to launch IMU nodes (requires real IMU hardware)'),
         DeclareLaunchArgument('velocity_factor', default_value='1.0',
                               description='Velocity multiplier (2.0 = twice as fast)'),
 
@@ -192,6 +197,7 @@ def generate_launch_description():
             executable='imu_publisher',
             name='imu_publisher',
             output='screen',
+            condition=IfCondition(use_imu),
             parameters=[{
                 'i2c_bus': i2c_bus,
                 'frame_id': 'imu_link',
@@ -245,6 +251,7 @@ def generate_launch_description():
             executable='imu_filter_madgwick_node',
             name='imu_filter',
             output='screen',
+            condition=IfCondition(use_imu),
             parameters=[{
                 'use_mag': False,  # Disable magnetometer (not calibrated)
                 'publish_tf': False,
