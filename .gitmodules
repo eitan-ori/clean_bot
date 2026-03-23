@@ -1,0 +1,7 @@
+[submodule "jsk_visualization"]
+	path = jsk_visualization
+	url = https://github.com/jsk-ros-pkg/jsk_visualization.git
+
+[submodule "rf2o_laser_odometry"]
+	path = rf2o_laser_odometry
+	url = https://github.com/MAPIRlab/rf2o_laser_odometry.git
