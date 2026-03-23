@@ -4,6 +4,7 @@ install/
 log/
 
 # Vendor repos (keep out of main repo unless intentionally vendored/submodule)
+jsk_visualization
 jsk_visualization/
 
 # Python
