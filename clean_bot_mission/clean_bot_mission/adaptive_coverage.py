@@ -139,6 +139,8 @@ class AdaptiveCoveragePlanner(Node):
         self.declare_parameter('connect_waypoints_through_free_space', True)
         self.declare_parameter('connect_waypoints_roi_margin', 0.8)   # meters search margin around start/goal
         self.declare_parameter('connect_waypoints_max_expansions', 20000)
+        self.declare_parameter('auto_fallback_to_direct_drive', True)
+        self.declare_parameter('nav2_abort_fallback_threshold', 6)
 
         # Frames (waypoints are generated in map frame)
         self.declare_parameter('global_frame', 'map')
@@ -170,6 +172,10 @@ class AdaptiveCoveragePlanner(Node):
             self.get_parameter('connect_waypoints_through_free_space').value)
         self.connect_waypoints_roi_margin = float(self.get_parameter('connect_waypoints_roi_margin').value)
         self.connect_waypoints_max_expansions = int(self.get_parameter('connect_waypoints_max_expansions').value)
+        self.auto_fallback_to_direct_drive = bool(
+            self.get_parameter('auto_fallback_to_direct_drive').value)
+        self.nav2_abort_fallback_threshold = int(
+            self.get_parameter('nav2_abort_fallback_threshold').value)
         
         # Effective step between lines
         self.step_size = self.coverage_width * (1 - self.overlap_ratio)
@@ -266,10 +272,15 @@ class AdaptiveCoveragePlanner(Node):
         self.min_drive_time = 0.8  # seconds (drive straight a bit before re-aligning)
         self._last_debug_time = 0.0
         self._waypoint_start_time = 0.0  # For timeout detection
+        self._in_fallback_mode = False
+        self._fallback_reason = ''
+        self._last_fallback_error_log_time = 0.0
+        self._fallback_error_log_period = 2.0
         
         # Statistics
         self.successful_waypoints = 0
         self.failed_waypoints = 0
+        self._consecutive_nav2_failures = 0
         self._initial_waypoint_count = 0
         self.start_time = None
         self.total_distance = 0.0
@@ -425,13 +436,18 @@ class AdaptiveCoveragePlanner(Node):
         if not self.waypoints:
             return
 
+        now = self.get_clock().now().nanoseconds / 1e9
+        if self._in_fallback_mode and (now - self._last_fallback_error_log_time) >= self._fallback_error_log_period:
+            self._last_fallback_error_log_time = now
+            self.get_logger().error(
+                f'❌ FALLBACK ACTIVE: using direct-drive instead of Nav2 ({self._fallback_reason})')
+
         # Mode selection:
         # - Direct drive: actively publishes cmd_vel toward the current waypoint.
         # - Nav2: periodically ensures a goal is in flight (NavigateToPose).
         if self.use_direct_drive:
             if self.current_waypoint_idx >= len(self.waypoints):
                 return
-            now = self.get_clock().now().nanoseconds / 1e9
             target_x, target_y, _ = self.waypoints[self.current_waypoint_idx]
             self.drive_to_waypoint(target_x, target_y, now)
         else:
@@ -439,11 +455,20 @@ class AdaptiveCoveragePlanner(Node):
             if not self.is_navigating:
                 self.send_next_goal()
 
-    def _get_robot_pose_map(self):
-        """Return (x, y, yaw) in map frame when TF is available.
+    def _activate_direct_drive_fallback(self, reason: str):
+        """Switch to direct-drive fallback and emit immediate + periodic error logs."""
+        self.use_direct_drive = True
+        self.is_navigating = False
+        self._in_fallback_mode = True
+        self._fallback_reason = reason
+        self._last_fallback_error_log_time = 0.0
+        self.get_logger().error(f'❌ ACTIVATING FALLBACK: {reason}')
 
-        Falls back to the latest odom-based pose (with localization offset
-        correction if scan-to-map matching was performed).
+    def _get_robot_pose_map(self):
+        """Return (x, y, yaw) in map frame using live TF only.
+
+        If TF is unavailable, return NaNs so callers can safely hold/skip
+        movement instead of using stale or derived poses.
         """
 
         
@@ -465,14 +490,8 @@ class AdaptiveCoveragePlanner(Node):
             if not self._tf_pose_warned:
                 self._tf_pose_warned = True
                 self.get_logger().warn(
-                    f'⚠️ TF pose lookup failed ({self.global_frame} <- {self.base_frame}); '
-                    f'falling back to odom pose. Error: {e}')
-            ox, oy = self.robot_x, self.robot_y
-            oyaw = self.normalize_angle(self.robot_yaw)
-            if self._map_odom_offset is not None:
-                dx, dy, dyaw = self._map_odom_offset
-                return ox + dx, oy + dy, self.normalize_angle(oyaw + dyaw)
-            return ox, oy, oyaw
+                    f'⚠️ TF pose lookup failed ({self.global_frame} <- {self.base_frame}). Error: {e}')
+            return float('nan'), float('nan'), float('nan')
 
     def normalize_angle(self, angle):
         """Normalize angle to [-pi, pi]."""
@@ -527,6 +546,10 @@ class AdaptiveCoveragePlanner(Node):
             now (float): Current time (for rate limiting)
         """
         rx, ry, ryaw = self._get_robot_pose_map()
+        if not (math.isfinite(rx) and math.isfinite(ry) and math.isfinite(ryaw)):
+            self.stop_robot()
+            self.get_logger().warn('⚠️ Invalid map-frame pose; holding direct-drive until TF recovers')
+            return
         dx = target_x - rx
         dy = target_y - ry
         distance = math.sqrt(dx*dx + dy*dy)
@@ -881,6 +904,9 @@ class AdaptiveCoveragePlanner(Node):
         
         # Get robot's current position in map frame
         rx, ry, ryaw = self._get_robot_pose_map()
+        if not (math.isfinite(rx) and math.isfinite(ry) and math.isfinite(ryaw)):
+            self.get_logger().warn('⚠️ Invalid map-frame pose; starting from first waypoint')
+            return 0
         
         # Vectorized distance calculation
         wp_arr = np.array([(wx, wy) for wx, wy, _ in self.waypoints])
@@ -1121,7 +1147,12 @@ class AdaptiveCoveragePlanner(Node):
         
         # Start with closest cell to robot's actual position
         rx, ry, _ = self._get_robot_pose_map()
-        curr_pos = (rx, ry)
+        if not (math.isfinite(rx) and math.isfinite(ry)):
+            self.get_logger().warn('⚠️ Map-frame TF unavailable; using first cell as ordering seed')
+            first_id = next(iter(cells.keys()))
+            curr_pos = cells[first_id]['centroid']
+        else:
+            curr_pos = (rx, ry)
         
         remaining_ids = set(cells.keys())
         
@@ -1669,6 +1700,9 @@ class AdaptiveCoveragePlanner(Node):
         if len(waypoints) <= 2:
             return waypoints
         rx, ry, _ = self._get_robot_pose_map()
+        if not (math.isfinite(rx) and math.isfinite(ry)):
+            self.get_logger().warn('⚠️ Map-frame TF unavailable; skipping nearest-neighbor path reorder')
+            return waypoints
         ordered = []
         remaining = list(range(len(waypoints)))
         curr = (rx, ry)
@@ -1760,6 +1794,26 @@ class AdaptiveCoveragePlanner(Node):
         if self.is_navigating:
             return
 
+        rx, ry, _ = self._get_robot_pose_map()
+        if not (math.isfinite(rx) and math.isfinite(ry)):
+            self.get_logger().warn('⚠️ Map-frame TF unavailable; deferring next Nav2 goal')
+            self.is_navigating = False
+            return
+
+        if self.auto_fallback_to_direct_drive and self.map_info is not None:
+            res = self.map_info.resolution
+            ox = self.map_info.origin.position.x
+            oy = self.map_info.origin.position.y
+            max_x = ox + self.map_info.width * res
+            max_y = oy + self.map_info.height * res
+            margin = max(0.1, 2.0 * res)
+            inside = (ox + margin <= rx <= max_x - margin) and (oy + margin <= ry <= max_y - margin)
+            if not inside:
+                self._activate_direct_drive_fallback(
+                    f'robot pose ({rx:.2f}, {ry:.2f}) outside map bounds '
+                    f'[{ox:.2f}, {oy:.2f}]..[{max_x:.2f}, {max_y:.2f}]')
+                return
+
         x, y, yaw = self.waypoints[self.current_waypoint_idx]
         self.is_navigating = True
         self.get_logger().info(
@@ -1826,8 +1880,14 @@ class AdaptiveCoveragePlanner(Node):
         except Exception as e:
             self.get_logger().warn(f'   ⚠️ Goal send failed: {e}')
             self.failed_waypoints += 1
+            self._consecutive_nav2_failures += 1
             self.is_navigating = False
             self.current_goal_handle = None
+            if (self.auto_fallback_to_direct_drive and
+                    self._consecutive_nav2_failures >= self.nav2_abort_fallback_threshold):
+                self._activate_direct_drive_fallback(
+                    f'Nav2 send failures reached {self._consecutive_nav2_failures}')
+                return
             self.current_waypoint_idx += 1
             self.send_next_goal()
             return
@@ -1835,12 +1895,18 @@ class AdaptiveCoveragePlanner(Node):
         if not goal_handle.accepted:
             self.get_logger().warn('   ⚠️ Goal rejected - skipping')
             self.failed_waypoints += 1
+            self._consecutive_nav2_failures += 1
             # Add to missed list for later retry
             if self.current_waypoint_idx < len(self.waypoints):
                 self.missed_waypoints.append(self.waypoints[self.current_waypoint_idx])
             
             self.is_navigating = False
             self.current_goal_handle = None
+            if (self.auto_fallback_to_direct_drive and
+                    self._consecutive_nav2_failures >= self.nav2_abort_fallback_threshold):
+                self._activate_direct_drive_fallback(
+                    f'Nav2 goal rejections/failures reached {self._consecutive_nav2_failures}')
+                return
             self.current_waypoint_idx += 1
             self.send_next_goal()
             return
@@ -1875,9 +1941,11 @@ class AdaptiveCoveragePlanner(Node):
         if status == 4:  # SUCCEEDED
             self.get_logger().info('   ✅')
             self.successful_waypoints += 1
+            self._consecutive_nav2_failures = 0
         elif status == 6:  # ABORTED
             self.get_logger().warn('   ❌ (obstacle)')
             self.failed_waypoints += 1
+            self._consecutive_nav2_failures += 1
             if self.current_waypoint_idx < len(self.waypoints):
                 self.missed_waypoints.append(self.waypoints[self.current_waypoint_idx])
         elif status == 5:  # CANCELED
@@ -1887,9 +1955,16 @@ class AdaptiveCoveragePlanner(Node):
         else:
             self.get_logger().warn(f'   ❓ status={status}')
             self.failed_waypoints += 1
+            self._consecutive_nav2_failures += 1
             if self.current_waypoint_idx < len(self.waypoints):
                 self.missed_waypoints.append(self.waypoints[self.current_waypoint_idx])
-        
+
+        if (self.auto_fallback_to_direct_drive and
+                self._consecutive_nav2_failures >= self.nav2_abort_fallback_threshold):
+            self._activate_direct_drive_fallback(
+                f'Nav2 result failures reached {self._consecutive_nav2_failures}')
+            return
+
         self.current_waypoint_idx += 1
         self.send_next_goal()
 

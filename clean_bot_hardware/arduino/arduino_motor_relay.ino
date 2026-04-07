@@ -1,63 +1,57 @@
 // Clean Bot Arduino Driver
-// Controls: 2x DC Motor (L298N), 1x Relay (Pin 5), 1x Servo (Pin 3), 1x Ultrasonic (HC-SR04)
+// Controls: 2x DC Motor (Pololu G2 High Power), 1x Brush Servo (Pin 3), 1x Pump PWM (Pin 5), 1x Ultrasonic (HC-SR04)
 // Communication: Serial at 57600 baud
-// Cleaning system: Servo + Relay sequences handled internally
+// Cleaning system: brush servo + direct pump control via serial commands (MAX/OFF)
 
 #include <Servo.h>
 
 // --- 1. PIN DEFINITIONS ---
 
 // Left Motor (L)
-const int ENA = 9;   
-const int IN1 = 6;   
-const int IN2 = 7;   
+const int PWM_L = 9;   // PWM pin for Left Motor
+const int DIR_L = 6;   // Direction pin for Left Motor
 
 // Right Motor (R)
-const int ENB = 10;  
-const int IN3 = 8;   
-const int IN4 = 12;  
+const int PWM_R = 10;  // PWM pin for Right Motor
+const int DIR_R = 8;   // Direction pin for Right Motor
 
 // Ultrasonic
 const int TRIG_PIN = 11;
 const int ECHO_PIN = 13;
 
-// Relay
-const int RELAY_PIN = 5;
+// Brush servo (continuous rotation)
+const int BRUSH_SERVO_PIN = 3;
+Servo brushServo;
+const int BRUSH_STOP_US = 1500;
+const int BRUSH_RUN_US = 1800;
 
-// Servo
-const int SERVO_PIN = 3;
-Servo cleaningServo;
+// Pump PWM (cleaning)
+const int PUMP_PWM_PIN = 5;
 
 // --- GLOBALS ---
 unsigned long lastCommandTime = 0;
 unsigned long lastSensorTime = 0;
 String inputBuffer = "";
 
-// Cleaning sequence state
-bool cleaningSequenceRunning = false;
-int cleaningStep = 0;
-unsigned long cleaningStepStartTime = 0;
-bool isStartSequence = true; // true = start, false = stop
-
 // --- SETUP ---
 void setup() {
   Serial.begin(57600);
 
   // Motors
-  pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT); pinMode(ENA, OUTPUT);
-  pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT); pinMode(ENB, OUTPUT);
+  pinMode(DIR_L, OUTPUT); pinMode(PWM_L, OUTPUT);
+  pinMode(DIR_R, OUTPUT); pinMode(PWM_R, OUTPUT);
 
   // Ultrasonic
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
 
-  // Relay - start OFF (HIGH for Active Low relay)
-  pinMode(RELAY_PIN, OUTPUT);
-  digitalWrite(RELAY_PIN, HIGH); // OFF (Active Low)
-  
-  // Servo - start at minimum position
-  cleaningServo.attach(SERVO_PIN);
-  cleaningServo.write(0); // MIN position
+  // Brush servo - stop at startup
+  brushServo.attach(BRUSH_SERVO_PIN);
+  brushServo.writeMicroseconds(BRUSH_STOP_US);
+
+  // Pump PWM - force OFF on startup for safety
+  pinMode(PUMP_PWM_PIN, OUTPUT);
+  analogWrite(PUMP_PWM_PIN, 0);
   
   // Stop motors initially
   setMotor(1, 0);
@@ -87,12 +81,7 @@ void loop() {
     setMotor(2, 0);
   }
 
-  // 3. Run cleaning sequence state machine (non-blocking)
-  if (cleaningSequenceRunning) {
-    runCleaningSequence(currentMillis);
-  }
-
-  // 4. Send Ultrasonic Data at 20Hz
+  // 3. Send Ultrasonic Data at 20Hz
   if (currentMillis - lastSensorTime > 50) {
     long dist = readUltrasonic();
     Serial.println(dist);
@@ -100,86 +89,22 @@ void loop() {
   }
 }
 
-// --- CLEANING SEQUENCE STATE MACHINE ---
-void runCleaningSequence(unsigned long currentMillis) {
-  unsigned long elapsed = currentMillis - cleaningStepStartTime;
-  
-  if (isStartSequence) {
-    // START sequence: Servo MIN, then Relay ON(2s)->OFF(1s)->ON(0.5s)->OFF
-    switch (cleaningStep) {
-      case 0: // Servo MIN
-        cleaningServo.write(0);
-        cleaningStep = 1;
-        cleaningStepStartTime = currentMillis;
-        break;
-      case 1: // Relay ON for 2 seconds
-        digitalWrite(RELAY_PIN, LOW); // ON
-        if (elapsed >= 2000) {
-          cleaningStep = 2;
-          cleaningStepStartTime = currentMillis;
-        }
-        break;
-      case 2: // Relay OFF for 1 second
-        digitalWrite(RELAY_PIN, HIGH); // OFF
-        if (elapsed >= 1000) {
-          cleaningStep = 3;
-          cleaningStepStartTime = currentMillis;
-        }
-        break;
-      case 3: // Relay ON for 0.5 seconds
-        digitalWrite(RELAY_PIN, LOW); // ON
-        if (elapsed >= 500) {
-          cleaningStep = 4;
-          cleaningStepStartTime = currentMillis;
-        }
-        break;
-      case 4: // Relay OFF - done
-        digitalWrite(RELAY_PIN, HIGH); // OFF
-        cleaningSequenceRunning = false;
-        Serial.println("CLEAN_START_DONE");
-        break;
-    }
-  } else {
-    // STOP sequence: Servo MAX, then Relay ON(4s)->OFF
-    switch (cleaningStep) {
-      case 0: // Servo MAX
-        cleaningServo.write(180);
-        cleaningStep = 1;
-        cleaningStepStartTime = currentMillis;
-        break;
-      case 1: // Relay ON for 4 seconds
-        digitalWrite(RELAY_PIN, LOW); // ON
-        if (elapsed >= 4000) {
-          cleaningStep = 2;
-          cleaningStepStartTime = currentMillis;
-        }
-        break;
-      case 2: // Relay OFF - done
-        digitalWrite(RELAY_PIN, HIGH); // OFF
-        cleaningSequenceRunning = false;
-        Serial.println("CLEAN_STOP_DONE");
-        break;
-    }
-  }
-}
-
 // --- COMMAND PROCESSING ---
 void processCommand(String cmd) {
   cmd.trim();
   
-  // Cleaning commands
-  if (cmd == "CLEAN_START") {
-    cleaningSequenceRunning = true;
-    isStartSequence = true;
-    cleaningStep = 0;
-    cleaningStepStartTime = millis();
+  // Cleaning commands (direct pump PWM)
+  // Keep compatibility with existing ROS messages: CLEAN_START/CLEAN_STOP
+  if (cmd == "MAX" || cmd == "CLEAN_START") {
+    brushServo.writeMicroseconds(BRUSH_RUN_US); // brush ON
+    analogWrite(PUMP_PWM_PIN, 255); // 100% pump speed
+    Serial.println("ACK: Brush+Pump ON (100%)");
     return;
   }
-  if (cmd == "CLEAN_STOP") {
-    cleaningSequenceRunning = true;
-    isStartSequence = false;
-    cleaningStep = 0;
-    cleaningStepStartTime = millis();
+  if (cmd == "OFF" || cmd == "CLEAN_STOP") {
+    brushServo.writeMicroseconds(BRUSH_STOP_US); // brush OFF
+    analogWrite(PUMP_PWM_PIN, 0); // pump OFF
+    Serial.println("ACK: Brush+Pump OFF");
     return;
   }
   
@@ -197,20 +122,22 @@ void processCommand(String cmd) {
 
 // --- HELPER FUNCTIONS ---
 void setMotor(int motorID, int pwm) {
-  int inA, inB, enPin;
-  if (motorID == 1) { inA = IN1; inB = IN2; enPin = ENA; } 
-  else              { inA = IN3; inB = IN4; enPin = ENB; }
+  int dirPin, pwmPin;
+  if (motorID == 1) { dirPin = DIR_L; pwmPin = PWM_L; } 
+  else              { dirPin = DIR_R; pwmPin = PWM_R; }
 
   // Constrain to PWM range
   if (pwm > 255) pwm = 255;
   if (pwm < -255) pwm = -255;
 
   if (pwm > 0) {
-    digitalWrite(inA, HIGH); digitalWrite(inB, LOW); analogWrite(enPin, pwm);
+    digitalWrite(dirPin, HIGH);
+    analogWrite(pwmPin, pwm);
   } else if (pwm < 0) {
-    digitalWrite(inA, LOW); digitalWrite(inB, HIGH); analogWrite(enPin, -pwm);
+    digitalWrite(dirPin, LOW);
+    analogWrite(pwmPin, -pwm);
   } else {
-    digitalWrite(inA, LOW); digitalWrite(inB, LOW); analogWrite(enPin, 0);
+    analogWrite(pwmPin, 0);
   }
 }
 

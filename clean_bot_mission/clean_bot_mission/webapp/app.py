@@ -166,6 +166,7 @@ class WebBridgeNode(Node):
 
         # ── Round 39: Configurable map rate ──
         self._map_rate_interval = 0.5
+        self._last_map_publisher_check = 0.0
 
         # ── Round 40: Diagnostics ──
         self._scan_callback_count = 0
@@ -282,6 +283,29 @@ class WebBridgeNode(Node):
         self._scan_callback_count += 1
 
     def _on_map(self, msg):
+        now = time.monotonic()
+        if self._saved_room_map_pub is not None and now - self._last_map_publisher_check >= 2.0:
+            self._last_map_publisher_check = now
+            try:
+                pub_infos = self.get_publishers_info_by_topic("map")
+                external_publishers = sorted(
+                    {
+                        info.node_name
+                        for info in pub_infos
+                        if info.node_name != self.get_name()
+                    }
+                )
+            except Exception:
+                external_publishers = []
+
+            if external_publishers:
+                self.destroy_publisher(self._saved_room_map_pub)
+                self._saved_room_map_pub = None
+                pubs = ", ".join(external_publishers)
+                self.get_logger().info(
+                    f"Detected external /map publishers ({pubs}); released saved-room map publisher to avoid conflicts"
+                )
+
         w, h = msg.info.width, msg.info.height
         if w <= 0 or h <= 0 or len(msg.data) != w * h or msg.info.resolution <= 0:
             return
@@ -298,7 +322,6 @@ class WebBridgeNode(Node):
         if self.obstacle_heatmap.max() >= 1000.0:
             self.obstacle_heatmap *= 0.5
         # Rate-limit map emission
-        now = time.monotonic()
         if now - self._last_map_emit >= self._map_rate_interval:
             self._last_map_emit = now
             self._emit_map()

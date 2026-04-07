@@ -4,12 +4,12 @@
 # FILE DESCRIPTION:
 # This node acts as the primary hardware bridge between ROS 2 and the physical
 # robot platform (Arduino-based). It handles bidirectional serial communication
-# to control motors, relay, servo, and retrieve sensor feedback (ultrasonic).
+# to control motors, cleaning pump PWM, and retrieve sensor feedback (ultrasonic).
 #
 # MAIN FUNCTIONS:
 # 1. Subscribes to /cmd_vel_safe and converts twist commands into motor PWM values.
 # 2. Receives and publishes ultrasonic range data for obstacle avoidance.
-# 3. Handles cleaning commands (start_clean/stop_clean) - controls relay & servo.
+# 3. Handles cleaning commands (start_clean/stop_clean) - controls pump PWM.
 #
 # PARAMETERS & VALUES:
 # - serial_port: /dev/ttyUSB0 (The USB port where Arduino is connected)
@@ -22,8 +22,7 @@
 # - The robot uses a differential drive configuration.
 # - The Arduino is programmed with the matching communication protocol:
 #   Input: "pwm_left,pwm_right\n" for motors
-#   Input: "RELAY_ON\n" / "RELAY_OFF\n" for relay
-#   Input: "SERVO_MIN\n" / "SERVO_MAX\n" for servo
+#   Input: "MAX\n" / "OFF\n" for cleaning pump
 #   Output: "distance_cm\n"
 # - The user has serial port permissions (dialout group).
 ###############################################################################
@@ -77,7 +76,7 @@ class ArduinoDriver(Node):
         publish_rate = self.get_parameter('publish_rate').value
         self.velocity_factor = self.get_parameter('velocity_factor').value
         
-        self.get_logger().info(f'Arduino Driver v3.0 (No Encoders, With Relay) [velocity_factor={self.velocity_factor}]')
+        self.get_logger().info(f'Arduino Driver v3.0 (No Encoders, With Pump PWM) [velocity_factor={self.velocity_factor}]')
         
         # ===================== Serial Connection =====================
         self.serial = None
@@ -195,11 +194,11 @@ class ArduinoDriver(Node):
         self.get_logger().info(f'📬 Mission command: "{command}"')
         
         if command == 'start_clean':
-            self.get_logger().info('🧹 Sending CLEAN_START to Arduino')
-            self.send_command('CLEAN_START')
+            self.get_logger().info('🧹 Sending MAX to Arduino (pump ON)')
+            self.send_command('MAX')
         elif command == 'stop_clean':
-            self.get_logger().info('🧹 Sending CLEAN_STOP to Arduino')
-            self.send_command('CLEAN_STOP')
+            self.get_logger().info('🧹 Sending OFF to Arduino (pump OFF)')
+            self.send_command('OFF')
 
     def arduino_command_callback(self, msg: String):
         """Handle arduino commands from full_mission controller."""
@@ -207,11 +206,11 @@ class ArduinoDriver(Node):
         self.get_logger().info(f'📬 Arduino command: "{command}"')
         
         if command == 'start_clean':
-            self.get_logger().info('🧹 Sending CLEAN_START to Arduino')
-            self.send_command('CLEAN_START')
+            self.get_logger().info('🧹 Sending MAX to Arduino (pump ON)')
+            self.send_command('MAX')
         elif command == 'stop_clean':
-            self.get_logger().info('🧹 Sending CLEAN_STOP to Arduino')
-            self.send_command('CLEAN_STOP')
+            self.get_logger().info('🧹 Sending OFF to Arduino (pump OFF)')
+            self.send_command('OFF')
 
     def cmd_vel_safe_callback(self, msg: Twist):
         self._store_cmd(msg, source='safe')
@@ -400,7 +399,7 @@ class ArduinoDriver(Node):
             try:
                 with self._serial_lock:
                     self.serial.write(b"0,0\n")         # Stop motors
-                    self.serial.write(b"CLEAN_STOP\n")  # Stop cleaning
+                    self.serial.write(b"OFF\n")        # Stop cleaning pump
                 self.serial.close()
             except Exception:
                 pass

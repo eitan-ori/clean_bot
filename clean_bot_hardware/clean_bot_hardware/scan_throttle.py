@@ -45,6 +45,7 @@ class ScanThrottle(Node):
         now_wall = time.monotonic()
         if now_wall - self._last_publish_wall < self.period:
             return
+        msg.header.stamp = self.get_clock().now().to_msg()
         self.pub.publish(msg)
         self._last_publish_wall = now_wall
 
