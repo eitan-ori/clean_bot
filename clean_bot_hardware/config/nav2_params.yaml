@@ -136,9 +136,6 @@ lifecycle_manager_navigation:
       - behavior_server
       - bt_navigator
       - waypoint_follower
-      - velocity_smoother
-      - route_server
-      - docking_server
 
 controller_server:
   ros__parameters:
