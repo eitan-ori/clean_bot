@@ -277,15 +277,13 @@ def generate_launch_description():
         # (Includes: Planner, Controller, Costmap, BT Navigator, etc.)
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
-                os.path.join(
-                    get_package_share_directory('nav2_bringup'),
-                    'launch', 'navigation_launch.py'
-                )
+                os.path.join(hardware_pkg, 'launch', 'nav2_navigation.launch.py')
             ),
             condition=IfCondition(use_nav2),
             launch_arguments={
                 'use_sim_time': use_sim_time,
                 'params_file': os.path.join(hardware_pkg, 'config', 'nav2_params.yaml'),
+                'use_composition': 'False',
             }.items()
         ),
     ])
