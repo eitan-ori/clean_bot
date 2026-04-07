@@ -77,12 +77,7 @@ bt_navigator:
     enable_groot_monitoring: False
     groot_zmq_publisher_port: 1666
     groot_zmq_server_port: 1667
-    # Jazzy auto-loads Nav2 BT plugin libraries; keep this focused on navigator plugins.
-    navigators: ["navigate_to_pose", "navigate_through_poses"]
-    navigate_to_pose:
-      plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
-    navigate_through_poses:
-      plugin: "nav2_bt_navigator::NavigateThroughPosesNavigator"
+    # Use Nav2 defaults for navigator plugins to maximize distro compatibility.
 
 lifecycle_manager_navigation:
   ros__parameters:
